@@ -1,8 +1,10 @@
 package com.smarthome.backend.model;
 
-import com.google.gson.annotations.SerializedName;
-import lombok.Data;
 import java.util.List;
+
+import com.google.gson.annotations.SerializedName;
+
+import lombok.Data;
 
 /**
  * Repräsentiert einen Knoten im Workflow mit Typ, Konfiguration und Verbindungen.
@@ -14,6 +16,7 @@ public class Node {
     
     private String type; // 'action' | 'condition' | 'loop' | 'wait' | 'trigger'
     private Integer order;
+    private String name;
     private Position position; // Optional
     
     @SerializedName("triggerConfig")
@@ -27,6 +30,12 @@ public class Node {
     
     @SerializedName("waitConfig")
     private WaitConfig waitConfig; // Optional
+    
+    @SerializedName("loopConfig")
+    private LoopConfig loopConfig; // Optional
+    
+    @SerializedName("loopNodes")
+    private List<String> loopNodes; // Optional, IDs der Nodes, die in der Loop ausgeführt werden sollen
     
     @SerializedName("nextNodes")
     private List<String> nextNodes; // Optional

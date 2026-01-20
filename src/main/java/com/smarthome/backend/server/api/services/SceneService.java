@@ -1,20 +1,23 @@
 package com.smarthome.backend.server.api.services;
 
-import com.google.gson.Gson;
-import com.smarthome.backend.model.Scene;
-import com.smarthome.backend.model.SceneActivationResponse;
-import com.smarthome.backend.server.api.ApiRouter;
-import com.smarthome.backend.server.db.DatabaseManager;
-import com.smarthome.backend.server.db.JsonRepository;
-import com.smarthome.backend.server.db.Repository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.Gson;
+import com.smarthome.backend.model.Scene;
+import com.smarthome.backend.model.SceneActivationResponse;
+import com.smarthome.backend.server.actions.ActionManager;
+import com.smarthome.backend.server.api.ApiRouter;
+import com.smarthome.backend.server.db.DatabaseManager;
+import com.smarthome.backend.server.db.JsonRepository;
+import com.smarthome.backend.server.db.Repository;
+import com.smarthome.backend.server.events.EventStreamManager;
 
 /**
  * Service für Scene-API-Endpunkte.
@@ -24,9 +27,13 @@ public class SceneService {
     private static final Gson gson = new Gson();
     
     private final Repository<Scene> sceneRepository;
-    
-    public SceneService(DatabaseManager databaseManager) {
+    private final EventStreamManager eventStreamManager;
+    private final ActionManager actionManager;
+
+    public SceneService(DatabaseManager databaseManager, EventStreamManager eventStreamManager, ActionManager actionManager) {
         this.sceneRepository = new JsonRepository<>(databaseManager, Scene.class);
+        this.eventStreamManager = eventStreamManager;
+        this.actionManager = actionManager;
     }
     
     public void handleRequest(com.sun.net.httpserver.HttpExchange exchange, String method, String path) throws IOException {
@@ -72,14 +79,14 @@ public class SceneService {
     
     private void getScenes(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
         logger.info("Lade alle Szenen");
-        List<Scene> scenes = sceneRepository.findAll();
+        List<Scene> scenes = actionManager.getScenes();
         String response = gson.toJson(scenes);
         ApiRouter.sendResponse(exchange, 200, response);
     }
     
     private void getScene(com.sun.net.httpserver.HttpExchange exchange, String sceneId) throws IOException {
         logger.info("Lade Szene: {}", sceneId);
-        Optional<Scene> scene = sceneRepository.findById(sceneId);
+        Optional<Scene> scene = actionManager.getScene(sceneId);
         
         if (scene.isPresent()) {
             String response = gson.toJson(scene.get());
@@ -102,9 +109,12 @@ public class SceneService {
                 scene.setActive(false);
             }
             
-            sceneRepository.save(scene.getId(), scene);
-            String response = gson.toJson(scene);
-            ApiRouter.sendResponse(exchange, 200, response);
+            if(actionManager.addScene(scene)){
+                String response = gson.toJson(scene);
+                ApiRouter.sendResponse(exchange, 200, response);
+            } else {
+                ApiRouter.sendResponse(exchange, 400, gson.toJson(Map.of("error", "Invalid scene data: " + scene.getId())));
+            }
         } catch (Exception e) {
             logger.error("Fehler beim Erstellen der Szene", e);
             ApiRouter.sendResponse(exchange, 400, gson.toJson(Map.of("error", "Invalid scene data: " + e.getMessage())));
@@ -117,13 +127,12 @@ public class SceneService {
         
         try {
             Scene scene = gson.fromJson(requestBody, Scene.class);
-            if (!sceneId.equals(scene.getId())) {
-                scene.setId(sceneId);
+            if(actionManager.updateScene(scene)){
+                String response = gson.toJson(scene);
+                ApiRouter.sendResponse(exchange, 200, response);
+            } else {
+                ApiRouter.sendResponse(exchange, 400, gson.toJson(Map.of("error", "Invalid scene data: " + scene.getId())));
             }
-            
-            sceneRepository.save(sceneId, scene);
-            String response = gson.toJson(scene);
-            ApiRouter.sendResponse(exchange, 200, response);
         } catch (Exception e) {
             logger.error("Fehler beim Aktualisieren der Szene", e);
             ApiRouter.sendResponse(exchange, 400, gson.toJson(Map.of("error", "Invalid scene data: " + e.getMessage())));
@@ -132,7 +141,8 @@ public class SceneService {
     
     private void deleteScene(com.sun.net.httpserver.HttpExchange exchange, String sceneId) throws IOException {
         logger.info("Lösche Szene: {}", sceneId);
-        boolean deleted = sceneRepository.deleteById(sceneId);
+        
+        Boolean deleted = actionManager.deleteScene(sceneId);
         
         if (deleted) {
             ApiRouter.sendResponse(exchange, 204, "");
@@ -143,12 +153,12 @@ public class SceneService {
     
     private void activateScene(com.sun.net.httpserver.HttpExchange exchange, String sceneId) throws IOException {
         logger.info("Aktiviere Szene: {}", sceneId);
-        Optional<Scene> sceneOpt = sceneRepository.findById(sceneId);
-        
+
+        Optional<Scene> sceneOpt = actionManager.getScene(sceneId);
         if (sceneOpt.isPresent()) {
             Scene scene = sceneOpt.get();
             scene.setActive(true);
-            sceneRepository.save(sceneId, scene);
+            actionManager.saveScene(scene);
             
             SceneActivationResponse response = new SceneActivationResponse();
             response.setId(scene.getId());
@@ -163,12 +173,12 @@ public class SceneService {
     
     private void deactivateScene(com.sun.net.httpserver.HttpExchange exchange, String sceneId) throws IOException {
         logger.info("Deaktiviere Szene: {}", sceneId);
-        Optional<Scene> sceneOpt = sceneRepository.findById(sceneId);
+        Optional<Scene> sceneOpt = actionManager.getScene(sceneId);
         
         if (sceneOpt.isPresent()) {
             Scene scene = sceneOpt.get();
             scene.setActive(false);
-            sceneRepository.save(sceneId, scene);
+            actionManager.saveScene(scene);
             
             SceneActivationResponse response = new SceneActivationResponse();
             response.setId(scene.getId());

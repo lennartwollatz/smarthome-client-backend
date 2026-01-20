@@ -1,12 +1,16 @@
 package com.smarthome.backend.server.api;
 
 import com.smarthome.backend.server.db.DatabaseManager;
+import com.smarthome.backend.server.events.EventStreamManager;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+
+import com.smarthome.backend.server.actions.ActionManager;
 
 /**
  * Handles HTTP API requests for the ngrok server.
@@ -16,8 +20,8 @@ public class ApiHandler implements HttpHandler {
     
     private ApiRouter apiRouter;
     
-    public ApiHandler(DatabaseManager databaseManager) {
-        this.apiRouter = new ApiRouter(databaseManager);
+    public ApiHandler(DatabaseManager databaseManager, EventStreamManager eventStreamManager, ActionManager actionManager) {
+        this.apiRouter = new ApiRouter(databaseManager, eventStreamManager, actionManager);
     }
     
     @Override

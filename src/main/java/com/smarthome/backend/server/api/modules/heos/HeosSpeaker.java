@@ -51,9 +51,6 @@ public abstract class HeosSpeaker extends DeviceSpeaker {
         
         this.heos = heos;
         this.isConnected = true;
-        // initializeValues() wird bereits von DeviceSpeaker-Konstruktor aufgerufen,
-        // aber zu diesem Zeitpunkt ist heos noch null. Rufe es erneut auf, nachdem heos gesetzt wurde.
-        this.initializeValues();
     }
     
     public String getAddress() {
@@ -70,7 +67,7 @@ public abstract class HeosSpeaker extends DeviceSpeaker {
      * vom HeosSpeaker-Konstruktor (nachdem heos gesetzt wurde) aufgerufen.
      */
     @Override
-    protected void initializeValues() {
+    public void updateValues() {
         // Prüfe, ob heos bereits gesetzt ist
         // Wenn nicht, wird initializeValues() später erneut aufgerufen, nachdem heos gesetzt wurde
         if (this.heos == null) {
@@ -109,20 +106,6 @@ public abstract class HeosSpeaker extends DeviceSpeaker {
     @Override
     protected void executeSetVolume(int volume) {
         heos.setVolume(this, volume);
-    }
-    
-    /**
-     * Schaltet den Speaker über HEOS aus.
-     */
-    @Override
-    protected void executeSetOff() {
-    }
-    
-    /**
-     * Schaltet den Speaker über HEOS ein.
-     */
-    @Override
-    protected void executeSetOn() {
     }
     
     /**
@@ -188,6 +171,14 @@ public abstract class HeosSpeaker extends DeviceSpeaker {
     @Override
     protected void executePlayTextAsSound(String text) {
         heos.playTextAsSpeech(this, text);
+    }
+
+    /**
+     * Setzt den HeosController für den Speaker.
+     * @param heosController Der HeosController (kann null sein)
+     */
+    public void setHeosController(HeosController heosController) {
+        this.heos = heosController;
     }
     
 }

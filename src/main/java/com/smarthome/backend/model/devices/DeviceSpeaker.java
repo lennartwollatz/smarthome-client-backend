@@ -1,13 +1,10 @@
 package com.smarthome.backend.model.devices;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.smarthome.backend.model.devices.helper.DeviceListenerPair;
-import com.smarthome.backend.model.devices.helper.DeviceListenerParams;
 import com.smarthome.backend.model.devices.helper.DeviceType;
 
 /**
@@ -65,8 +62,6 @@ public abstract class DeviceSpeaker extends Device {
         ON_STOP("onStop"),
         ON_MUTE("onMute"),
         ON_PAUSE("onPause"),
-        ON_OFF("onOff"),
-        ON_ON("onOn"),
         ON_NEXT("onNext"),
         ON_PREVIOUS("onPrevious");
         
@@ -74,6 +69,10 @@ public abstract class DeviceSpeaker extends Device {
         
         TriggerFunctionName(String value) {
             this.value = value;
+        }
+
+        private static boolean hasValue(String triggerName) {
+            return Arrays.stream(TriggerFunctionName.values()).anyMatch(trigger -> trigger.getValue().equals(triggerName));
         }
         
         public String getValue() {
@@ -86,7 +85,6 @@ public abstract class DeviceSpeaker extends Device {
      */
     public static enum ActionFunctionName {
         SET_VOLUME("setVolume(int)"),
-        SET_OFF("setOff"),
         PLAY("play"),
         PAUSE("pause"),
         STOPP("stopp"),
@@ -111,8 +109,6 @@ public abstract class DeviceSpeaker extends Device {
      * Enum für die Bool-Funktionsnamen des Speakers.
      */
     public static enum BoolFunctionName {
-        IS_ON("isOn"),
-        IS_OFF("isOff"),
         IS_PLAYING("isPlaying"),
         IS_PAUSING("isPausing"),
         IS_STOPPED("isStopped"),
@@ -135,10 +131,6 @@ public abstract class DeviceSpeaker extends Device {
     protected String playState;
     protected Integer volume;
     protected Boolean muted;
-
-    
-    // Zentrale HashMap für Listener mit DeviceListenerParams
-    private final Map<String, List<DeviceListenerPair>> triggerListeners = new HashMap<>();
     
     /**
      * Standard-Konstruktor.
@@ -152,7 +144,6 @@ public abstract class DeviceSpeaker extends Device {
         initializeFunctionsBool();
         initializeFunctionsAction();
         initializeFunctionsTrigger();
-        initializeValues();
     }
     
     /**
@@ -171,18 +162,15 @@ public abstract class DeviceSpeaker extends Device {
         initializeFunctionsBool();
         initializeFunctionsAction();
         initializeFunctionsTrigger();
-        initializeValues();
     }
 
-    protected abstract void initializeValues();
+    public abstract void updateValues();
     
     /**
      * Initialisiert die Liste der booleschen Funktionen für den Speaker.
      */
-    private void initializeFunctionsBool() {
+    protected void initializeFunctionsBool() {
         List<String> functions = new ArrayList<>();
-        functions.add(BoolFunctionName.IS_ON.getValue());
-        functions.add(BoolFunctionName.IS_OFF.getValue());
         functions.add(BoolFunctionName.IS_PLAYING.getValue());
         functions.add(BoolFunctionName.IS_PAUSING.getValue());
         functions.add(BoolFunctionName.IS_STOPPED.getValue());
@@ -195,10 +183,9 @@ public abstract class DeviceSpeaker extends Device {
     /**
      * Initialisiert die Liste der Action-Funktionen für den Speaker.
      */
-    private void initializeFunctionsAction() {
+    protected void initializeFunctionsAction() {
         List<String> functions = new ArrayList<>();
         functions.add(ActionFunctionName.SET_VOLUME.getValue());
-        functions.add(ActionFunctionName.SET_OFF.getValue());
         functions.add(ActionFunctionName.PLAY.getValue());
         functions.add(ActionFunctionName.PAUSE.getValue());
         functions.add(ActionFunctionName.STOPP.getValue());
@@ -213,41 +200,20 @@ public abstract class DeviceSpeaker extends Device {
     /**
      * Initialisiert die Liste der Trigger-Funktionen für den Speaker.
      */
-    private void initializeFunctionsTrigger() {
+    protected void initializeFunctionsTrigger() {
         List<String> functions = new ArrayList<>();
         functions.add(TriggerFunctionName.ON_VOLUME_CHANGED.getValue());
         functions.add(TriggerFunctionName.ON_VOLUME_LESS.getValue());
         functions.add(TriggerFunctionName.ON_VOLUME_GREATER.getValue());
-        functions.add(TriggerFunctionName.ON_VOLUME_REACHES.getValue());
         functions.add(TriggerFunctionName.ON_PLAY.getValue());
         functions.add(TriggerFunctionName.ON_STOP.getValue());
         functions.add(TriggerFunctionName.ON_MUTE.getValue());
         functions.add(TriggerFunctionName.ON_PAUSE.getValue());
-        functions.add(TriggerFunctionName.ON_OFF.getValue());
-        functions.add(TriggerFunctionName.ON_ON.getValue());
         functions.add(TriggerFunctionName.ON_NEXT.getValue());
         functions.add(TriggerFunctionName.ON_PREVIOUS.getValue());
         setFunctionsTrigger(functions);
     }
     
-    
-    /**
-     * Prüft, ob der Speaker eingeschaltet ist.
-     * 
-     * @return true wenn der Speaker eingeschaltet ist, false sonst
-     */
-    public boolean isOn() {
-        return this.isConnected != null && this.isConnected;
-    }
-    
-    /**
-     * Prüft, ob der Speaker ausgeschaltet ist.
-     * 
-     * @return true wenn der Speaker ausgeschaltet ist, false sonst
-     */
-    public boolean isOff() {
-        return !isOn();
-    }
     
     /**
      * Prüft, ob der Speaker gerade spielt.
@@ -311,50 +277,26 @@ public abstract class DeviceSpeaker extends Device {
      * 
      * @param volume Die neue Lautstärke (typischerweise 0-100)
      */
-    public void setVolume(int volume) {
+    public void setVolume(int volume, boolean execute) {
         this.volume = volume;
         this.muted = volume == 0;
-        this.executeSetVolume(volume);
+        if( execute ){ this.executeSetVolume(volume); }
         
-        checkListener(TriggerFunctionName.ON_VOLUME_CHANGED);
-        checkListener(TriggerFunctionName.ON_VOLUME_LESS);
-        checkListener(TriggerFunctionName.ON_VOLUME_GREATER);
-        checkListener(TriggerFunctionName.ON_VOLUME_REACHES);
+        checkListener(TriggerFunctionName.ON_VOLUME_CHANGED.getValue());
+        checkListener(TriggerFunctionName.ON_VOLUME_LESS.getValue());
+        checkListener(TriggerFunctionName.ON_VOLUME_GREATER.getValue());
     }
 
     protected abstract void executeSetVolume(int volume);
     
     /**
-     * Schaltet den Speaker aus.
-     */
-    public void setOff() {
-        this.isConnected = false;
-        this.stopp();
-        this.executeSetOff();
-        checkListener(TriggerFunctionName.ON_OFF);
-    }
-
-    protected abstract void executeSetOff();
-
-    /**
-     * Schaltet den Speaker ein.
-     */
-    public void setOn() {
-        this.isConnected = true;
-        this.executeSetOn();
-        checkListener(TriggerFunctionName.ON_ON);
-    }
-
-    protected abstract void executeSetOn();
-    
-    /**
      * Startet die Wiedergabe.
      */
-    public void play() {
+    public void play(boolean execute) {
         this.playState = PlayState.PLAY.getValue();
         this.muted = false;
-        this.executePlay();
-        checkListener(TriggerFunctionName.ON_PLAY);
+        if( execute ){ this.executePlay(); }
+        checkListener(TriggerFunctionName.ON_PLAY.getValue());
     }
 
     protected abstract void executePlay();
@@ -362,10 +304,10 @@ public abstract class DeviceSpeaker extends Device {
     /**
      * Pausiert die Wiedergabe.
      */
-    public void pause() {
+    public void pause(boolean execute) {
         this.playState = PlayState.PAUSE.getValue();
-        this.executePause();
-        checkListener(TriggerFunctionName.ON_PAUSE);
+        if( execute ){ this.executePause(); }
+        checkListener(TriggerFunctionName.ON_PAUSE.getValue());
     }
 
     protected abstract void executePause();
@@ -373,10 +315,10 @@ public abstract class DeviceSpeaker extends Device {
     /**
      * Stoppt die Wiedergabe.
      */
-    public void stopp() {
+    public void stopp(boolean execute) {
         this.playState = PlayState.STOP.getValue();
-        this.executeStopp();
-        checkListener(TriggerFunctionName.ON_STOP);
+        if( execute ){ this.executeStopp(); }
+        checkListener(TriggerFunctionName.ON_STOP.getValue());
     }
 
     protected abstract void executeStopp();
@@ -384,10 +326,10 @@ public abstract class DeviceSpeaker extends Device {
     /**
      * Schaltet die Stummschaltung ein oder aus.
      */
-    public void setMute(Boolean muted) {
+    public void setMute(Boolean muted, boolean execute) {
         this.muted = muted;
-        this.executeSetMute(muted);
-        checkListener(TriggerFunctionName.ON_MUTE);
+        if( execute ){ this.executeSetMute(muted); }
+        checkListener(TriggerFunctionName.ON_MUTE.getValue());
     }
 
     protected abstract void executeSetMute(Boolean muted);
@@ -398,10 +340,9 @@ public abstract class DeviceSpeaker extends Device {
     public void playNext() {
         // Implementierung für nächsten Titel
         // Der tatsächliche Befehl würde über das entsprechende Modul gesendet werden
-        this.setOn();
-        this.play();
+        this.play(true);
         this.executePlayNext();
-        checkListener(TriggerFunctionName.ON_NEXT);
+        checkListener(TriggerFunctionName.ON_NEXT.getValue());
     }
 
     protected abstract void executePlayNext();
@@ -412,10 +353,9 @@ public abstract class DeviceSpeaker extends Device {
     public void playPrevious() {
         // Implementierung für vorherigen Titel
         // Der tatsächliche Befehl würde über das entsprechende Modul gesendet werden
-        this.setOn();
-        this.play();
+        this.play(true);
         this.executePlayPrevious();
-        checkListener(TriggerFunctionName.ON_PREVIOUS);
+        checkListener(TriggerFunctionName.ON_PREVIOUS.getValue());
     }
 
     protected abstract void executePlayPrevious();
@@ -428,7 +368,7 @@ public abstract class DeviceSpeaker extends Device {
     public void playSound(String sound) {
         // Implementierung für Sound-Wiedergabe
         // Der tatsächliche Befehl würde über das entsprechende Modul gesendet werdenthis.setOn();
-        this.play();
+        this.play(true);
         this.executePlaySound(sound);
     }
 
@@ -442,87 +382,56 @@ public abstract class DeviceSpeaker extends Device {
     public void playTextAsSound(String text) {
         // Implementierung für Text-to-Speech
         // Der tatsächliche Befehl würde über das entsprechende Modul gesendet werden
-        this.play();
+        this.play( true );
         this.executePlayTextAsSound(text);
     }
 
     protected abstract void executePlayTextAsSound(String text);
     
-    /**
-     * Zentrale Methode zum Registrieren von Listenern mit DeviceListenerParams.
-     * 
-     * @param params Die Parameter für den Listener (name, param1, param2)
-     * @param listener Die Callback-Funktion, die aufgerufen wird
-     */
-    public void addListener(DeviceListenerParams params, Runnable listener) {
-        if (params == null || params.getName() == null || listener == null) {
+
+    @Override
+    protected void checkListener(String triggerName) {
+        super.checkListener(triggerName);
+        if( triggerName == null || triggerName.isEmpty() || ! TriggerFunctionName.hasValue(triggerName) ) {
             return;
         }
-        
-        String triggerName = params.getName();
-        triggerListeners.computeIfAbsent(triggerName, k -> new CopyOnWriteArrayList<>())
-                       .add(new DeviceListenerPair(params, listener));
-    }
-    
-    private void checkListener(TriggerFunctionName triggerName) {
-        String triggerNameString = triggerName.getValue();
-        List<DeviceListenerPair> listeners = triggerListeners.get(triggerNameString);
+        List<DeviceListenerPair> listeners = triggerListeners.get(triggerName);
         if (listeners == null || listeners.isEmpty()) {
             return;
         }
-        
-        switch (triggerName) {
-            case ON_VOLUME_CHANGED:
-                listeners.forEach(pair -> { pair.run(); });
-                break;
-            case ON_VOLUME_LESS:
-                listeners.stream().filter(pair -> {
-                    Integer threshold = pair.getParams().getParam1AsInt();
-                    return threshold != null && isVolumeLess(threshold);
-                }).forEach(pair -> {
-                    pair.run();
-                });
-                break;
-            case ON_VOLUME_GREATER:
-                listeners.stream().filter(pair -> {
+
+        if(TriggerFunctionName.ON_VOLUME_CHANGED.getValue().equals(triggerName)) {
+            listeners.forEach(DeviceListenerPair::run);
+        }
+        if(TriggerFunctionName.ON_VOLUME_LESS.getValue().equals(triggerName)) {
+            listeners.stream().filter(pair -> {
+                Integer threshold = pair.getParams().getParam1AsInt();
+                return threshold != null && isVolumeLess(threshold);
+            }).forEach(DeviceListenerPair::run);
+        }
+        if(TriggerFunctionName.ON_VOLUME_GREATER.getValue().equals(triggerName)) {
+            listeners.stream().filter(pair -> {
                     Integer threshold = pair.getParams().getParam1AsInt();
                     return threshold != null && isVolumeGreater(threshold);
-                }).forEach(pair -> {
-                    pair.run();
-                });
-                break;
-            case ON_VOLUME_REACHES:
-                listeners.stream().filter(pair -> {
-                    Integer targetVolume = pair.getParams().getParam1AsInt();
-                    return targetVolume != null && isVolume(targetVolume);
-                }).forEach(pair -> {
-                    pair.run();
-                });
-                break;
-            case ON_PLAY:
-                listeners.forEach(pair -> pair.run());
-                break;
-            case ON_STOP:
-                listeners.forEach(pair -> pair.run());
-                break;
-            case ON_PAUSE:
-                listeners.forEach(pair -> pair.run());
-                break;
-            case ON_OFF:
-                listeners.forEach(pair -> pair.run());
-                break;
-            case ON_ON:
-                listeners.forEach(pair -> pair.run());
-                break;
-            case ON_MUTE:
-                listeners.forEach(pair -> pair.run());
-                break;
-            case ON_NEXT:
-                listeners.forEach(pair -> pair.run());
-                break;
-            case ON_PREVIOUS:
-                listeners.forEach(pair -> pair.run());
-                break;
+                }).forEach(DeviceListenerPair::run);
+        }
+        if(TriggerFunctionName.ON_PLAY.getValue().equals(triggerName)) {
+            listeners.forEach(DeviceListenerPair::run);
+        }
+        if(TriggerFunctionName.ON_STOP.getValue().equals(triggerName)) {
+            listeners.forEach(DeviceListenerPair::run);
+        }
+        if(TriggerFunctionName.ON_MUTE.getValue().equals(triggerName)) {
+            listeners.forEach(DeviceListenerPair::run);
+        }
+        if(TriggerFunctionName.ON_PAUSE.getValue().equals(triggerName)) {
+            listeners.forEach(DeviceListenerPair::run);
+        }
+        if(TriggerFunctionName.ON_NEXT.getValue().equals(triggerName)) {
+            listeners.forEach(DeviceListenerPair::run);
+        }
+        if(TriggerFunctionName.ON_PREVIOUS.getValue().equals(triggerName)) {
+            listeners.forEach(DeviceListenerPair::run);
         }
     }
 }

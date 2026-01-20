@@ -15,12 +15,15 @@ import org.slf4j.LoggerFactory;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.smarthome.backend.model.devices.Device;
-import com.smarthome.backend.model.devices.DeviceSpeaker;
 import com.smarthome.backend.model.devices.helper.DevicePolymorphicAdapter;
+import com.smarthome.backend.server.actions.ActionManager;
 import com.smarthome.backend.server.api.ApiRouter;
+import com.smarthome.backend.server.api.modules.heos.HeosController;
+import com.smarthome.backend.server.api.modules.hue.HueDeviceController;
 import com.smarthome.backend.server.db.DatabaseManager;
 import com.smarthome.backend.server.db.JsonRepository;
 import com.smarthome.backend.server.db.Repository;
+import com.smarthome.backend.server.events.EventStreamManager;
 
 /**
  * Service für Device-API-Endpunkte.
@@ -29,16 +32,21 @@ public class DeviceService {
     private static final Logger logger = LoggerFactory.getLogger(DeviceService.class);
     
     // Gson mit polymorphem TypeAdapter für Device-Deserialisierung
-    private static final Gson gson = new GsonBuilder()
-        .registerTypeAdapter(Device.class, new DevicePolymorphicAdapter())
-        .create();
+    private final Gson gson;
     
     private final Repository<Device> deviceRepository;
     private final DatabaseManager databaseManager;
+    private final EventStreamManager eventStreamManager;
+    private final ActionManager actionManager;
     
-    public DeviceService(DatabaseManager databaseManager) {
+    public DeviceService(DatabaseManager databaseManager, EventStreamManager eventStreamManager, ActionManager actionManager) {
         this.deviceRepository = new JsonRepository<>(databaseManager, Device.class);
         this.databaseManager = databaseManager;
+        this.eventStreamManager = eventStreamManager;
+        this.actionManager = actionManager;
+        this.gson = new GsonBuilder()
+        .registerTypeAdapter(Device.class, new DevicePolymorphicAdapter(new HeosController(), new HueDeviceController(databaseManager)))
+        .create();
     }
     
     public void handleRequest(com.sun.net.httpserver.HttpExchange exchange, String method, String path) throws IOException {
@@ -47,13 +55,6 @@ public class DeviceService {
         if (path.equals("/devices") || path.equals("/devices/")) {
             if ("GET".equals(method)) {
                 getDevices(exchange);
-            } else {
-                ApiRouter.sendResponse(exchange, 405, gson.toJson(Map.of("error", "Method not allowed")));
-            }
-        } else if (path.matches("/devices/[^/]+/value")) {
-            if ("PUT".equals(method)) {
-                String deviceId = ApiRouter.extractPathParam(path, "/devices/{deviceId}/value");
-                setDeviceValue(exchange, deviceId);
             } else {
                 ApiRouter.sendResponse(exchange, 405, gson.toJson(Map.of("error", "Method not allowed")));
             }
@@ -86,15 +87,8 @@ public class DeviceService {
                     String json = rs.getString("data");
                     try {
                         // Deserialisiere mit dem polymorphen TypeAdapter, um die richtige Klasse zu erhalten
-                        Device device = gson.fromJson(json, Device.class);
+                        Device device = this.gson.fromJson(json, Device.class);
                         devices.add(device);
-                        
-                        // Logge den tatsächlichen Typ für Debugging
-                        if (device instanceof DeviceSpeaker) {
-                            logger.debug("Gerät {} ist vom Typ DeviceSpeaker", device.getId());
-                        } else {
-                            logger.debug("Gerät {} ist vom Typ Device", device.getId());
-                        }
                     } catch (Exception e) {
                         logger.warn("Fehler beim Deserialisieren eines Geräts: {}", e.getMessage());
                     }
@@ -111,12 +105,8 @@ public class DeviceService {
         ApiRouter.sendResponse(exchange, 200, response);
     }
     
+    
     private void updateDevice(com.sun.net.httpserver.HttpExchange exchange, String deviceId) throws IOException {
-        setDeviceValue(exchange, deviceId);
-    }
-    
-    
-    private void setDeviceValue(com.sun.net.httpserver.HttpExchange exchange, String deviceId) throws IOException {
         logger.info("Setze Hauptattribute für Gerät: {}", deviceId);
         String requestBody = ApiRouter.readRequestBody(exchange);
         
@@ -197,13 +187,6 @@ public class DeviceService {
                     String json = rs.getString("data");
                     // Deserialisiere mit dem polymorphen TypeAdapter, um die richtige Klasse zu erhalten
                     Device device = gson.fromJson(json, Device.class);
-                    
-                    // Logge den tatsächlichen Typ für Debugging
-                    if (device instanceof DeviceSpeaker) {
-                        logger.debug("Gerät {} ist vom Typ DeviceSpeaker", deviceId);
-                    } else {
-                        logger.debug("Gerät {} ist vom Typ Device", deviceId);
-                    }
                     
                     return device;
                 } else {

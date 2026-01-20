@@ -7,9 +7,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.gson.Gson;
+import com.smarthome.backend.server.actions.ActionManager;
 import com.smarthome.backend.server.api.ApiRouter;
-import com.smarthome.backend.server.api.modules.heos.denon.DenonModule;
+import com.smarthome.backend.server.api.modules.heos.denon.DenonModuleManager;
 import com.smarthome.backend.server.db.DatabaseManager;
+import com.smarthome.backend.server.events.EventStreamManager;
 
 /**
  * Service für Denon-Module-API-Endpunkte.
@@ -18,10 +20,10 @@ public class DenonModuleService {
     private static final Logger logger = LoggerFactory.getLogger(DenonModuleService.class);
     private static final Gson gson = new Gson();
     
-    private final DenonModule denonModule;
+    private final DenonModuleManager denonModule;
     
-    public DenonModuleService(DatabaseManager databaseManager) {
-        this.denonModule = new DenonModule(databaseManager);
+    public DenonModuleService(DatabaseManager databaseManager, EventStreamManager eventStreamManager, ActionManager actionManager) {
+        this.denonModule = new DenonModuleManager(databaseManager, eventStreamManager, actionManager);
     }
     
     public void handleRequest(com.sun.net.httpserver.HttpExchange exchange, String method, String path) throws IOException {

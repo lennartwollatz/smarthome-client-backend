@@ -1,6 +1,9 @@
 package com.smarthome.backend.model;
 
+import java.util.List;
+
 import com.google.gson.annotations.SerializedName;
+
 import lombok.Data;
 
 /**
@@ -18,5 +21,21 @@ public class DeviceTrigger {
     private String triggerEvent; // z.B. 'on', 'off', 'motion', 'temperature_change'
     
     @SerializedName("triggerValue")
-    private Object triggerValue; // Optional, number | string
+    private List<Object> triggerValues; // Optional, number | string
+
+    public String getTriggerDeviceId(){
+        return triggerDeviceId;
+    }
+
+    public String getTriggerModuleId(){
+        return triggerModuleId;
+    }
+
+    public String getTriggerEvent(){
+        return triggerEvent;
+    }
+    
+    public List<Object> getTriggerValues(){
+        return triggerValues;
+    }
 }

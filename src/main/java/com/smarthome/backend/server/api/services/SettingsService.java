@@ -1,14 +1,5 @@
 package com.smarthome.backend.server.api.services;
 
-import com.google.gson.Gson;
-import com.smarthome.backend.model.*;
-import com.smarthome.backend.server.api.ApiRouter;
-import com.smarthome.backend.server.db.DatabaseManager;
-import com.smarthome.backend.server.db.JsonRepository;
-import com.smarthome.backend.server.db.Repository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -18,6 +9,22 @@ import java.util.Enumeration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.Gson;
+import com.smarthome.backend.model.GeneralSettings;
+import com.smarthome.backend.model.NotificationSettings;
+import com.smarthome.backend.model.PrivacySettings;
+import com.smarthome.backend.model.Settings;
+import com.smarthome.backend.model.SystemSettings;
+import com.smarthome.backend.model.UpdateTimes;
+import com.smarthome.backend.model.VersionInfo;
+import com.smarthome.backend.server.api.ApiRouter;
+import com.smarthome.backend.server.db.DatabaseManager;
+import com.smarthome.backend.server.db.JsonRepository;
+import com.smarthome.backend.server.db.Repository;
 
 /**
  * Service für Settings-API-Endpunkte.

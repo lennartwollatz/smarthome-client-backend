@@ -1,0 +1,139 @@
+package com.smarthome.backend.server.api.modules.hue;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.smarthome.backend.model.devices.DeviceLight;
+import com.smarthome.backend.server.api.modules.Module;
+
+/**
+ * Repräsentiert ein Hue Light (Lampe) als Gerät.
+ * Erweitert {@link DeviceLight} und implementiert die Hue-spezifische Kommunikation.
+ *
+ * Analog zu {@link HueLightLevelSensor}, {@link HueMotionSensor} und {@link HueTemperatureSensor}.
+ */
+public class HueLight extends DeviceLight {
+
+    private static final Logger logger = LoggerFactory.getLogger(HueLight.class);
+
+    private String bridgeId;
+    private String hueResourceId; // Die ID der Lampe in der Hue Bridge
+    private String batteryRid;
+
+    @com.google.gson.annotations.Expose(serialize = false, deserialize = false)
+    private transient HueDeviceController hueDeviceController;
+
+    /**
+     * Standardkonstruktor für Gson-Deserialisierung.
+     * Wird verwendet, wenn Geräte aus der Datenbank geladen werden.
+     */
+    public HueLight() {
+        super();
+        this.bridgeId = null;
+        this.hueResourceId = null;
+        this.batteryRid = null;
+        this.hueDeviceController = null;
+        setModuleId(Module.HUE.getModuleId());
+        setIsConnected(true);
+    }
+
+    /**
+     * Erstellt ein neues HueLight.
+     *
+     * @param name Der Name der Lampe
+     * @param id Die eindeutige ID der Lampe
+     * @param bridgeId Die ID der Hue Bridge, zu der diese Lampe gehört
+     * @param hueResourceId Die ID der Lampe in der Hue Bridge
+     * @param batteryRid Die ID der Batterie der Lampe (falls vorhanden)
+     */
+    public HueLight(String name, String id, String bridgeId, String hueResourceId, String batteryRid) {
+        super(name, id);
+        this.bridgeId = bridgeId;
+        this.hueResourceId = hueResourceId;
+        this.batteryRid = batteryRid;
+        setModuleId(Module.HUE.getModuleId());
+        setIsConnected(true);
+    }
+
+    /**
+     * Initialisiert die initialen Werte der Lampe.
+     * Aktuell werden keine Werte aktiv von der Hue API gelesen.
+     * Diese Methode kann in Zukunft erweitert werden (z. B. Abruf des aktuellen On/Off-Status).
+     */
+    @Override
+    public void updateValues() {
+        if (hueDeviceController == null) {
+            logger.debug("initializeValues() übersprungen für {} - hueDeviceController ist noch null", getId());
+            return;
+        }
+        this.hueDeviceController.fetchSingleResource(this.bridgeId, "light", this.hueResourceId).thenAccept(v -> {
+            this.on = v.get("on").getAsBoolean();
+        });
+    }
+
+    /**
+     * Schaltet die Lampe über Hue ein.
+     * Aktuell nur Logging / Platzhalter, bis die entsprechende Implementierung im HueDeviceController vorhanden ist.
+     */
+    @Override
+    protected void executeSetOn() {
+        if (hueDeviceController == null) {
+            logger.warn("HueDeviceController ist null - kann Lampe nicht einschalten für {}", getId());
+            return;
+        }
+        this.hueDeviceController.setOn(this).thenAccept(v -> { 
+            this.on = true;
+        });
+    }
+
+    /**
+     * Schaltet die Lampe über Hue aus.
+     * Aktuell nur Logging / Platzhalter, bis die entsprechende Implementierung im HueDeviceController vorhanden ist.
+     */
+    @Override
+    protected void executeSetOff() {
+        if (hueDeviceController == null) {
+            logger.warn("HueDeviceController ist null - kann Lampe nicht ausschalten für {}", getId());
+            return;
+        }
+        this.hueDeviceController.setOff(this).thenAccept(v -> { 
+            this.on = false;
+        });
+    }
+
+    public String getBridgeId() {
+        return bridgeId;
+    }
+
+    public void setBridgeId(String bridgeId) {
+        this.bridgeId = bridgeId;
+    }
+
+    public String getHueResourceId() {
+        return hueResourceId;
+    }
+
+    public void setHueResourceId(String hueResourceId) {
+        this.hueResourceId = hueResourceId;
+    }
+
+    public String getBatteryRid() {
+        return batteryRid;
+    }
+
+    public void setBatteryRid(String batteryRid) {
+        this.batteryRid = batteryRid;
+    }
+
+    /**
+     * Setzt den HueDeviceController für dieses Gerät.
+     * Wird verwendet, wenn das Gerät aus der Datenbank geladen wird und der Controller später gesetzt werden muss.
+     *
+     * @param hueDeviceController Die HueDeviceController-Instanz
+     */
+    public void setHueDeviceController(HueDeviceController hueDeviceController) {
+        this.hueDeviceController = hueDeviceController;
+    }
+}
+
+

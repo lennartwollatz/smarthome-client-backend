@@ -1,13 +1,16 @@
 package com.smarthome.backend.server.api.services.modules;
 
-import com.google.gson.Gson;
-import com.smarthome.backend.server.api.ApiRouter;
-import com.smarthome.backend.server.db.DatabaseManager;
+import java.io.IOException;
+import java.util.Map;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.Map;
+import com.google.gson.Gson;
+import com.smarthome.backend.server.actions.ActionManager;
+import com.smarthome.backend.server.api.ApiRouter;
+import com.smarthome.backend.server.db.DatabaseManager;
+import com.smarthome.backend.server.events.EventStreamManager;
 
 /**
  * Service für Matter-Module-API-Endpunkte.
@@ -15,10 +18,13 @@ import java.util.Map;
 public class MatterModuleService {
     private static final Logger logger = LoggerFactory.getLogger(MatterModuleService.class);
     private static final Gson gson = new Gson();
-    
+    private final EventStreamManager eventStreamManager;
+    private final ActionManager actionManager;
     //private final MatterModule matterModule;
     
-    public MatterModuleService(DatabaseManager databaseManager) {
+    public MatterModuleService(DatabaseManager databaseManager, EventStreamManager eventStreamManager, ActionManager actionManager) {
+        this.eventStreamManager = eventStreamManager;
+        this.actionManager = actionManager;
         //this.matterModule = new MatterModule(databaseManager);
     }
     

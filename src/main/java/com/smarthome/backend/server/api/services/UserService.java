@@ -1,19 +1,22 @@
 package com.smarthome.backend.server.api.services;
 
-import com.google.gson.Gson;
-import com.smarthome.backend.model.User;
-import com.smarthome.backend.server.api.ApiRouter;
-import com.smarthome.backend.server.db.DatabaseManager;
-import com.smarthome.backend.server.db.JsonRepository;
-import com.smarthome.backend.server.db.Repository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.Gson;
+import com.smarthome.backend.model.User;
+import com.smarthome.backend.server.actions.ActionManager;
+import com.smarthome.backend.server.api.ApiRouter;
+import com.smarthome.backend.server.db.DatabaseManager;
+import com.smarthome.backend.server.db.JsonRepository;
+import com.smarthome.backend.server.db.Repository;
+import com.smarthome.backend.server.events.EventStreamManager;
 
 /**
  * Service für User-API-Endpunkte.
@@ -24,9 +27,13 @@ public class UserService {
     private static final Gson gson = new Gson();
     
     private final Repository<User> userRepository;
+    private final EventStreamManager eventStreamManager;
+    private final ActionManager actionManager;
     
-    public UserService(DatabaseManager databaseManager) {
+    public UserService(DatabaseManager databaseManager, EventStreamManager eventStreamManager, ActionManager actionManager) {
         this.userRepository = new JsonRepository<>(databaseManager, User.class);
+        this.eventStreamManager = eventStreamManager;
+        this.actionManager = actionManager;
     }
     
     public void handleRequest(com.sun.net.httpserver.HttpExchange exchange, String method, String path) throws IOException {

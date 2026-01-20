@@ -1,21 +1,18 @@
 package com.smarthome.backend.model.devices;
 
-import com.google.gson.JsonDeserializationContext;
-import com.google.gson.JsonDeserializer;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonParseException;
-import com.google.gson.JsonPrimitive;
-import com.google.gson.JsonSerializationContext;
-import com.google.gson.JsonSerializer;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
+import com.smarthome.backend.model.devices.helper.DeviceListenerPair;
 import com.smarthome.backend.model.devices.helper.DeviceListenerParams;
 import com.smarthome.backend.model.devices.helper.DeviceType;
 import com.smarthome.backend.model.devices.helper.DeviceTypeAdapter;
+
 import lombok.Data;
-import java.lang.reflect.Type;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Repräsentiert ein Gerät im Smart Home System mit allen zugehörigen Eigenschaften
@@ -23,18 +20,10 @@ import java.util.Map;
  */
 @Data
 public class Device {
-    /**
-     * Einfache Pair-Klasse für DeviceListenerParams und Runnable.
-     */
-    protected static class ListenerPair {
-        final DeviceListenerParams params;
-        final Runnable listener;
-        
-        ListenerPair(DeviceListenerParams params, Runnable listener) {
-            this.params = params;
-            this.listener = listener;
-        }
-    }
+
+   // Zentrale HashMap für Trigger-Listener mit DeviceListenerParams
+    // transient: Wird nicht serialisiert, da Listener zur Laufzeit neu erstellt werden
+    protected transient Map<String, List<DeviceListenerPair>> triggerListeners = new HashMap<>();
 
     protected String id;
     protected String name;
@@ -53,16 +42,95 @@ public class Device {
     @SerializedName("isConnected")
     protected Boolean isConnected;
     
-    @SerializedName("isConnecting")
-    protected Boolean isConnecting; // Optional
-    
-    @SerializedName("functionsBool")
-    private List<String> functionsBool; // Optional
-    
-    @SerializedName("functionsAction")
-    private List<String> functionsAction; // Optional
-    
-    @SerializedName("functionsTrigger")
-    private List<String> functionsTrigger; // Optional
+    protected transient Boolean isConnecting; // Optional - transient: Wird nicht in der Datenbank gespeichert
+    protected transient List<String> functionsBool; // Optional - transient: Wird nicht in der Datenbank gespeichert
+    protected transient List<String> functionsAction; // Optional - transient: Wird nicht in der Datenbank gespeichert
+    protected transient List<String> functionsTrigger; // Optional - transient: Wird nicht in der Datenbank gespeichert
+
+    @SerializedName("hasBattery")
+    protected Boolean hasBattery = false;
+    @SerializedName("batteryLevel")
+    protected Integer batteryLevel = 0;
+
+    /**
+     * Initialisiert triggerListeners, falls es null ist (z.B. nach Deserialisierung).
+     */
+    private void ensureTriggerListenersInitialized() {
+        if (triggerListeners == null) {
+            triggerListeners = new HashMap<>();
+        }
+    }
+
+    /**
+     * Zentrale Methode zum Registrieren von Trigger-Listenern mit DeviceListenerParams.
+     *
+     * @param params   Die Parameter für den Listener (name, param1, param2)
+     * @param listener Die Callback-Funktion, die aufgerufen wird
+     */
+    public void addListener(DeviceListenerParams params, Runnable listener) {
+        if (params == null || params.getName() == null || listener == null) {
+            return;
+        }
+
+        ensureTriggerListenersInitialized();
+        String triggerName = params.getName();
+        triggerListeners.computeIfAbsent(triggerName, k -> new CopyOnWriteArrayList<>())
+                        .add(new DeviceListenerPair(params, listener));
+    }
+
+    /**
+     * Zentrale Methode zum Registrieren von Trigger-Listenern mit DeviceListenerParams, die einen Parameter akzeptieren.
+     *
+     * @param params   Die Parameter für den Listener (name, param1, param2)
+     * @param listener Die Callback-Funktion, die mit einem Parameter aufgerufen wird
+     */
+    public void addListener(DeviceListenerParams params, java.util.function.Consumer<Object> listener) {
+        if (params == null || params.getName() == null || listener == null) {
+            return;
+        }
+
+        ensureTriggerListenersInitialized();
+        String triggerName = params.getName();
+        triggerListeners.computeIfAbsent(triggerName, k -> new CopyOnWriteArrayList<>())
+                        .add(new DeviceListenerPair(params, listener));
+    }
+
+    /**
+     * Zentrale Methode zum Registrieren von Trigger-Listenern mit DeviceListenerParams.
+     *
+     * @param key      Die Key des Listeners
+     * @param name     Der Name des Listeners
+     */
+    public void removeListener(String key, String name) {
+        if (key == null || name == null || triggerListeners == null) {
+            return;
+        }
+        if( triggerListeners.containsKey(name) ) {
+            triggerListeners.get(name).removeIf(listener -> listener.getParams().getKey().equals(key));
+        }
+    }
+
+    /**
+     * Zentrale Methode zum Entfernen aller Trigger-Listener.
+     */
+    public void removeAllListeners() {
+        ensureTriggerListenersInitialized();
+        triggerListeners.clear();
+    }
+
+    /**
+     * Öffentliche Methode zum Prüfen von Listenern für einen bestimmten Trigger.
+     * Ruft die protected checkListener-Methode auf.
+     * 
+     * @param triggerName Der Name des Triggers, für den die Listener geprüft werden sollen
+     */
+    public void triggerCheckListener(String triggerName) {
+        checkListener(triggerName);
+    }
+
+    protected void checkListener(String triggerName) {}
+    protected void initializeFunctionsBool() {};
+    protected void initializeFunctionsAction() {};
+    protected void initializeFunctionsTrigger() {};
 }
 

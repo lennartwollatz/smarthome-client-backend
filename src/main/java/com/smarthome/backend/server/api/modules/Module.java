@@ -38,6 +38,17 @@ public enum Module {
         "Sonoff Geräte verbinden und steuern",
         "lighting",
         "&#128161;" // Glühbirne
+    ),
+
+    /**
+     * Sonoff-Modul (falls noch nicht implementiert, dennoch als Default in der Modul-Liste sichtbar).
+     */
+    HUE(
+        "hue",
+        "Hue",
+        "Hue Geräte verbinden und steuern",
+        "lighting",
+        "&#128161;" // Glühbirne
     );
     
     private final String moduleId;

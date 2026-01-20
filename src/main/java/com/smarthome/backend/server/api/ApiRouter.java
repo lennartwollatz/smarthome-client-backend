@@ -1,18 +1,28 @@
 package com.smarthome.backend.server.api;
 
-import com.google.gson.Gson;
-import com.smarthome.backend.server.api.services.*;
-import com.smarthome.backend.server.db.DatabaseManager;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.Gson;
+import com.smarthome.backend.server.actions.ActionManager;
+import com.smarthome.backend.server.api.services.ActionService;
+import com.smarthome.backend.server.api.services.DeviceService;
+import com.smarthome.backend.server.api.services.FloorPlanService;
+import com.smarthome.backend.server.api.services.ModuleService;
+import com.smarthome.backend.server.api.services.SceneService;
+import com.smarthome.backend.server.api.services.SettingsService;
+import com.smarthome.backend.server.api.services.SystemService;
+import com.smarthome.backend.server.api.services.UserService;
+import com.smarthome.backend.server.db.DatabaseManager;
+import com.smarthome.backend.server.events.EventStreamManager;
 
 /**
  * Router für API-Anfragen. Leitet Anfragen an die entsprechenden Service-Klassen weiter.
@@ -21,7 +31,6 @@ public class ApiRouter {
     private static final Logger logger = LoggerFactory.getLogger(ApiRouter.class);
     private static final Gson gson = new Gson();
     
-    private final DatabaseManager databaseManager;
     private final UserService userService;
     private final SystemService systemService;
     private final SettingsService settingsService;
@@ -31,16 +40,15 @@ public class ApiRouter {
     private final ActionService actionService;
     private final FloorPlanService floorPlanService;
     
-    public ApiRouter(DatabaseManager databaseManager) {
-        this.databaseManager = databaseManager;
-        this.userService = new UserService(databaseManager);
+    public ApiRouter(DatabaseManager databaseManager, EventStreamManager eventStreamManager, ActionManager actionManager) {
+        this.userService = new UserService(databaseManager, eventStreamManager, actionManager);
         this.systemService = new SystemService(databaseManager);
         this.settingsService = new SettingsService(databaseManager);
-        this.sceneService = new SceneService(databaseManager);
-        this.moduleService = new ModuleService(databaseManager);
-        this.deviceService = new DeviceService(databaseManager);
-        this.actionService = new ActionService(databaseManager);
-        this.floorPlanService = new FloorPlanService(databaseManager);
+        this.sceneService = new SceneService(databaseManager, eventStreamManager, actionManager);
+        this.moduleService = new ModuleService(databaseManager, eventStreamManager, actionManager);
+        this.deviceService = new DeviceService(databaseManager, eventStreamManager, actionManager);
+        this.actionService = new ActionService(actionManager);
+        this.floorPlanService = new FloorPlanService(databaseManager, actionManager);
     }
     
     /**

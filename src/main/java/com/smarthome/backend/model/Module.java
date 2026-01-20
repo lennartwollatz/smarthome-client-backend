@@ -3,6 +3,7 @@ package com.smarthome.backend.model;
 import com.google.gson.annotations.SerializedName;
 import lombok.Data;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Repräsentiert ein Modul, das Geräte und Funktionen bereitstellt.
@@ -40,4 +41,16 @@ public class Module {
     private Boolean isDisabled; // Optional
     
     private List<String> devices; // Optional
+    
+    /**
+     * Modulspezifische Daten als Key-Value-Map.
+     * Kann für verschiedene Zwecke verwendet werden, z.B.:
+     * - Hue: Liste gefundener Bridges
+     * - Denon: Konfigurationsdaten
+     * - Matter: Pairing-Informationen
+     * 
+     * Die Struktur ist flexibel und kann je nach Modul unterschiedlich sein.
+     */
+    @SerializedName("moduleData")
+    private Map<String, Object> moduleData; // Optional
 }

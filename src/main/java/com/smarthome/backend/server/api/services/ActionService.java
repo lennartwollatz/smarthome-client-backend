@@ -1,19 +1,18 @@
 package com.smarthome.backend.server.api.services;
 
-import com.google.gson.Gson;
-import com.smarthome.backend.model.Action;
-import com.smarthome.backend.server.api.ApiRouter;
-import com.smarthome.backend.server.db.DatabaseManager;
-import com.smarthome.backend.server.db.JsonRepository;
-import com.smarthome.backend.server.db.Repository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.Gson;
+import com.smarthome.backend.model.Action;
+import com.smarthome.backend.server.actions.ActionManager;
+import com.smarthome.backend.server.api.ApiRouter;
 
 /**
  * Service für Action-API-Endpunkte.
@@ -22,10 +21,10 @@ public class ActionService {
     private static final Logger logger = LoggerFactory.getLogger(ActionService.class);
     private static final Gson gson = new Gson();
     
-    private final Repository<Action> actionRepository;
+    private final ActionManager actionManager;
     
-    public ActionService(DatabaseManager databaseManager) {
-        this.actionRepository = new JsonRepository<>(databaseManager, Action.class);
+    public ActionService(ActionManager actionManager) {
+        this.actionManager = actionManager;
     }
     
     public void handleRequest(com.sun.net.httpserver.HttpExchange exchange, String method, String path) throws IOException {
@@ -57,14 +56,14 @@ public class ActionService {
     
     private void getActions(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
         logger.info("Lade alle Aktionen");
-        List<Action> actions = actionRepository.findAll();
+        List<Action> actions = actionManager.getActions();
         String response = gson.toJson(actions);
         ApiRouter.sendResponse(exchange, 200, response);
     }
     
     private void getAction(com.sun.net.httpserver.HttpExchange exchange, String actionId) throws IOException {
         logger.info("Lade Aktion: {}", actionId);
-        Optional<Action> action = actionRepository.findById(actionId);
+        Optional<Action> action = actionManager.getAction(actionId);
         
         if (action.isPresent()) {
             String response = gson.toJson(action.get());
@@ -91,9 +90,14 @@ public class ActionService {
             }
             action.setUpdatedAt(now);
             
-            actionRepository.save(action.getActionId(), action);
-            String response = gson.toJson(action);
-            ApiRouter.sendResponse(exchange, 200, response);
+            if(actionManager.addAction(action)){
+                String response = gson.toJson(action);
+                ApiRouter.sendResponse(exchange, 200, response);
+            } else {
+                ApiRouter.sendResponse(exchange, 400, gson.toJson(Map.of("error", "Action not created: " + action.getActionId())));
+            }
+
+            
         } catch (Exception e) {
             logger.error("Fehler beim Erstellen der Aktion", e);
             ApiRouter.sendResponse(exchange, 400, gson.toJson(Map.of("error", "Invalid action data: " + e.getMessage())));
@@ -113,9 +117,12 @@ public class ActionService {
             // Aktualisiere updatedAt
             action.setUpdatedAt(java.time.Instant.now().toString());
             
-            actionRepository.save(actionId, action);
-            String response = gson.toJson(action);
-            ApiRouter.sendResponse(exchange, 200, response);
+            if(actionManager.updateAction(action)){
+                String response = gson.toJson(action);
+                ApiRouter.sendResponse(exchange, 200, response);
+            } else {
+                ApiRouter.sendResponse(exchange, 400, gson.toJson(Map.of("error", "Action not created: " + action.getActionId())));
+            }
         } catch (Exception e) {
             logger.error("Fehler beim Aktualisieren der Aktion", e);
             ApiRouter.sendResponse(exchange, 400, gson.toJson(Map.of("error", "Invalid action data: " + e.getMessage())));
@@ -124,7 +131,8 @@ public class ActionService {
     
     private void deleteAction(com.sun.net.httpserver.HttpExchange exchange, String actionId) throws IOException {
         logger.info("Lösche Aktion: {}", actionId);
-        boolean deleted = actionRepository.deleteById(actionId);
+        
+        Boolean deleted = actionManager.deleteAction(actionId);
         
         if (deleted) {
             ApiRouter.sendResponse(exchange, 200, gson.toJson(true));

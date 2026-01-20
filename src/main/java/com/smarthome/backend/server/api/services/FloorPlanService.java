@@ -1,19 +1,21 @@
 package com.smarthome.backend.server.api.services;
 
-import com.google.gson.Gson;
-import com.smarthome.backend.model.FloorPlan;
-import com.smarthome.backend.model.Room;
-import com.smarthome.backend.server.api.ApiRouter;
-import com.smarthome.backend.server.db.DatabaseManager;
-import com.smarthome.backend.server.db.JsonRepository;
-import com.smarthome.backend.server.db.Repository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.Gson;
+import com.smarthome.backend.model.FloorPlan;
+import com.smarthome.backend.model.Room;
+import com.smarthome.backend.server.actions.ActionManager;
+import com.smarthome.backend.server.api.ApiRouter;
+import com.smarthome.backend.server.db.DatabaseManager;
+import com.smarthome.backend.server.db.JsonRepository;
+import com.smarthome.backend.server.db.Repository;
 
 /**
  * Service für FloorPlan-API-Endpunkte.
@@ -24,10 +26,12 @@ public class FloorPlanService {
     
     private final Repository<FloorPlan> floorPlanRepository;
     private final Repository<Room> roomRepository;
+    private final ActionManager actionManager;
     
-    public FloorPlanService(DatabaseManager databaseManager) {
+    public FloorPlanService(DatabaseManager databaseManager, ActionManager actionManager) {
         this.floorPlanRepository = new JsonRepository<>(databaseManager, FloorPlan.class);
         this.roomRepository = new JsonRepository<>(databaseManager, Room.class);
+        this.actionManager = actionManager;
     }
     
     public void handleRequest(com.sun.net.httpserver.HttpExchange exchange, String method, String path) throws IOException {
@@ -195,7 +199,7 @@ public class FloorPlanService {
                     floorPlanRepository.save("main-floorplan", floorPlan);
                 }
             }
-            
+            actionManager.removeRoomFromDevices(roomId);
             ApiRouter.sendResponse(exchange, 204, "");
         } else {
             ApiRouter.sendResponse(exchange, 404, gson.toJson(Map.of("error", "Room not found")));

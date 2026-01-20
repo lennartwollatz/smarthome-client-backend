@@ -1,18 +1,24 @@
 package com.smarthome.backend.server.api.services;
 
-import com.google.gson.Gson;
-import com.smarthome.backend.model.*;
-import com.smarthome.backend.server.api.ApiRouter;
-import com.smarthome.backend.server.db.DatabaseManager;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.util.Enumeration;
 import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.gson.Gson;
+import com.smarthome.backend.model.AutoUpdateSettings;
+import com.smarthome.backend.model.Settings;
+import com.smarthome.backend.model.SystemInfo;
+import com.smarthome.backend.model.SystemSettings;
+import com.smarthome.backend.model.UpdateComponentRequest;
+import com.smarthome.backend.model.VersionInfo;
+import com.smarthome.backend.server.api.ApiRouter;
+import com.smarthome.backend.server.db.DatabaseManager;
 
 /**
  * Service für System-API-Endpunkte.
@@ -22,6 +28,7 @@ public class SystemService {
     private static final Gson gson = new Gson();
     
     private final SettingsService settingsService;
+
     
     public SystemService(DatabaseManager databaseManager) {
         this.settingsService = new SettingsService(databaseManager);

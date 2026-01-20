@@ -5,9 +5,17 @@ package com.smarthome.backend.model.devices.helper;
  */
 public enum DeviceType {
     LIGHT("light"),
+    LIGHT_DIMMER("light-dimmer"),
+    LIGHT_DIMMER_TEMPERATURE_COLOR("light-dimmer-temperature-color"),
+    LIGHT_DIMMER_TEMPERATURE("light-dimmer-temperature"),
     SWITCH("switch"),
     SWITCH_DIMMER("switch-dimmer"),
     THERMOSTAT("thermostat"),
+    MOTION("motion"),
+    LIGHT_LEVEL("light-level"),
+    TEMPERATURE("temperature"),
+    MOTION_LIGHT_LEVEL("motion-light-level"),
+    MOTION_LIGHT_LEVEL_TEMPERATURE("motion-light-level-temperature"),
     SENSOR("sensor"),
     VACUUM("vacuum"),
     SPEAKER("speaker"),

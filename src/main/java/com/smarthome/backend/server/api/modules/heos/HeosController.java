@@ -5,12 +5,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.net.HttpURLConnection;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
+
+import com.smarthome.backend.model.devices.DeviceSpeakerReceiver;
+import com.smarthome.backend.server.api.modules.heos.denon.DenonReceiver;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
 
 /**
  * Controller für die Ausführung von Aktionen auf HeosSpeaker-Geräten.
@@ -1194,5 +1205,471 @@ public class HeosController {
             }
         }
         connections.clear();
+    }
+
+    // ------------------------------------------------------------
+    // Denon Receiver spezifische HTTP-GET Aufrufe (siehe docs/DenonReceiverAPI)
+    // ------------------------------------------------------------
+
+    public CompletableFuture<Void> setDenonVolumeStart(DenonReceiver receiver, int volumeStart) {
+        String data = "<PowerOnLevel>" + volumeStart + "</PowerOnLevel>";
+        String path = "/ajax/audio/set_config?type=7&data=" + urlEncode(data);
+        return sendDenonGet(receiver.getAddress(), path).thenApply(r -> null);
+    }
+
+    public CompletableFuture<Void> setDenonVolumeMax(DenonReceiver receiver, int volumeMax) {
+        String data = "<Limit>" + volumeMax + "</Limit>";
+        String path = "/ajax/audio/set_config?type=7&data=" + urlEncode(data);
+        return sendDenonGet(receiver.getAddress(), path).thenApply(r -> null);
+    }
+
+    public CompletableFuture<Void> setDenonZonePower(DenonReceiver receiver, String zoneName, boolean power) {
+        String zoneTag = mapZoneTag(zoneName);
+        String data = "<" + zoneTag + "><Power>" + (power ? "1" : "0") + "</Power></" + zoneTag + ">";
+        String path = "/ajax/globals/set_config?type=4&data=" + urlEncode(data);
+        return sendDenonGet(receiver.getAddress(), path).thenApply(r -> null);
+    }
+
+    public CompletableFuture<Void> setDenonSource(DenonReceiver receiver, String sourceIndex, boolean selected) {
+        if (!selected) {
+            return CompletableFuture.completedFuture(null);
+        }
+        // sourceIndex sollte dem Denon-Index entsprechen (siehe SourceList in docs)
+        String zoneIndex = mapZoneIndex(null); // Standard MainZone
+        String data = "<Source zone=\"" + zoneIndex + "\" index=\"" + sourceIndex + "\"></Source>";
+        String path = "/ajax/globals/set_config?type=7&data=" + urlEncode(data);
+        return sendDenonGet(receiver.getAddress(), path).thenApply(r -> null);
+    }
+
+    public CompletableFuture<Void> setDenonSubwooferPower(DenonReceiver receiver, boolean power) {
+        String data = "<SurroundParameter><Subwoofer>" + (power ? "1" : "0") + "</Subwoofer></SurroundParameter>";
+        String path = "/ajax/audio/set_config?type=4&data=" + urlEncode(data);
+        return sendDenonGet(receiver.getAddress(), path).thenApply(r -> null);
+    }
+
+    public CompletableFuture<Void> setDenonSubwooferLevel(DenonReceiver receiver, String subwooferName, int level) {
+        String levelTag = resolveSubwooferTag(receiver, subwooferName);
+        String data = "<" + levelTag + ">" + level + "</" + levelTag + ">";
+        String path = "/ajax/audio/set_config?type=3&data=" + urlEncode(data);
+        return sendDenonGet(receiver.getAddress(), path).thenApply(r -> null);
+    }
+
+    private String resolveSubwooferTag(DenonReceiver receiver, String subwooferName) {
+        // Default auf SubwooferLevel1
+        if (receiver == null || receiver.getSubwoofers() == null || receiver.getSubwoofers().isEmpty()) {
+            return "SubwooferLevel1";
+        }
+        // Suche Index des Subwoofers per Name (case-insensitive)
+        List<com.smarthome.backend.model.devices.DeviceSpeakerReceiver.Subwoofer> list = receiver.getSubwoofers();
+        for (int i = 0; i < list.size(); i++) {
+            com.smarthome.backend.model.devices.DeviceSpeakerReceiver.Subwoofer sw = list.get(i);
+            if (sw != null && sw.getName() != null && sw.getName().equalsIgnoreCase(subwooferName)) {
+                return i == 0 ? "SubwooferLevel1" : "SubwooferLevel2";
+            }
+        }
+        // Fallback: erster Subwoofer
+        return "SubwooferLevel1";
+    }
+
+    // ------------------------------------------------------------
+    // Denon Receiver HTTP-GET – Statusabfragen
+    // ------------------------------------------------------------
+
+    /**
+     * Liefert den aktuellen Zonen-Power-Status aller Zonen als XML
+     * (siehe DenonReceiverAPI: /ajax/globals/get_config?type=4).
+     */
+    public CompletableFuture<String> getDenonZonePowerStatus(DenonReceiver receiver) {
+        return sendDenonGet(receiver.getAddress(), "/ajax/globals/get_config?type=4");
+    }
+
+    /**
+     * Liefert die Subwoofer-Level-Konfiguration (Level1/Level2) als XML
+     * (siehe DenonReceiverAPI: /ajax/audio/get_config?type=3).
+     */
+    public CompletableFuture<String> getDenonSubwooferLevels(DenonReceiver receiver) {
+        return sendDenonGet(receiver.getAddress(), "/ajax/audio/get_config?type=3");
+    }
+
+    /**
+     * Liefert die Subwoofer-Ein/Aus-Konfiguration als XML.
+     */
+    public CompletableFuture<String> getDenonSubwooferPowerConfig(DenonReceiver receiver) {
+        return sendDenonGet(receiver.getAddress(), "/ajax/audio/get_config?type=4");
+    }
+
+    /**
+     * Liefert die Lautstärke-Konfiguration (Limit, PowerOnLevel, MuteLevel)
+     * als XML (siehe DenonReceiverAPI: /ajax/audio/get_config?type=7).
+     */
+    /**
+     * Liefert (maxVolume, startVolume) als int-Array aus der Volume-Konfig (type=7).
+     * Index 0: Limit (maxVolume), Index 1: PowerOnLevel (startVolume).
+     */
+    public CompletableFuture<int[]> getDenonVolumeConfig(DenonReceiver receiver) {
+        return sendDenonGet(receiver.getAddress(), "/ajax/audio/get_config?type=7")
+            .thenApply(xml -> {
+                try {
+                    return parseVolumeLimits(xml);
+                } catch (Exception e) {
+                    logger.error("Fehler beim Parsen der Denon-Volume-Konfiguration", e);
+                    return new int[] { 0, 0 };
+                }
+            });
+    }
+
+    /**
+     * Liefert die konfigurierten Sources für alle Zonen als XML
+     * (siehe DenonReceiverAPI: /ajax/globals/get_config?type=7).
+     */
+    public CompletableFuture<String> getDenonSources(DenonReceiver receiver) {
+        return sendDenonGet(receiver.getAddress(), "/ajax/globals/get_config?type=7");
+    }
+
+    /**
+     * Liefert die Sources als Liste mit gesetztem Selected-Flag.
+     * Selected wird aus den bereits im Receiver gehaltenen Sources übernommen.
+     */
+    public CompletableFuture<List<DeviceSpeakerReceiver.Source>> getDenonSourcesList(DenonReceiver receiver) {
+        String preselectedIndex = null;
+        if (receiver.getSources() != null) {
+            for (DeviceSpeakerReceiver.Source s : receiver.getSources()) {
+                if (Boolean.TRUE.equals(s.getSelected())) {
+                    preselectedIndex = s.getIndex();
+                    break;
+                }
+            }
+        }
+
+        final String selectedIdx = preselectedIndex;
+        return getDenonSources(receiver).thenApply(xml -> {
+            try {
+                return parseSources(xml, selectedIdx);
+            } catch (Exception e) {
+                logger.error("Fehler beim Parsen der Denon-Sources", e);
+                return Collections.<DeviceSpeakerReceiver.Source>emptyList();
+            }
+        });
+    }
+
+    /**
+     * Liefert die Subwoofer des Receivers als Liste fertig befüllter Subwoofer-Objekte
+     * (id, name, power, db) basierend auf den Denon-APIs.
+     */
+    public CompletableFuture<List<DeviceSpeakerReceiver.Subwoofer>> getDenonSubwoofers(DenonReceiver receiver) {
+        CompletableFuture<String> levelFuture = getDenonSubwooferLevels(receiver);
+        CompletableFuture<String> powerFuture = getDenonSubwooferPowerConfig(receiver);
+
+        return levelFuture.thenCombine(powerFuture, (levelXml, powerXml) -> {
+            try {
+                Map<Integer, Integer> levelMap = parseSubwooferLevels(levelXml);
+                boolean globalPower = parseSubwooferPowerFlag(powerXml);
+
+                List<DeviceSpeakerReceiver.Subwoofer> result = new ArrayList<>();
+
+                // Versuche vorhandene Subwoofer aus dem Receiver zu verwenden (id/name)
+                List<DeviceSpeakerReceiver.Subwoofer> template = receiver.getSubwoofers();
+
+                for (Map.Entry<Integer, Integer> entry : levelMap.entrySet()) {
+                    int index = entry.getKey(); // 1 oder 2
+                    Integer db = entry.getValue();
+
+                    String id = String.valueOf(index);
+                    String name = "Subwoofer " + index;
+
+                    if (template != null && template.size() >= index) {
+                        DeviceSpeakerReceiver.Subwoofer sw = template.get(index - 1);
+                        if (sw != null) {
+                            if (sw.getId() != null) {
+                                id = sw.getId();
+                            }
+                            if (sw.getName() != null) {
+                                name = sw.getName();
+                            }
+                        }
+                    }
+
+                    DeviceSpeakerReceiver.Subwoofer sub =
+                        new DeviceSpeakerReceiver.Subwoofer(id, name, globalPower, db);
+                    result.add(sub);
+                }
+
+                return result;
+            } catch (Exception e) {
+                logger.error("Fehler beim Parsen der Denon-Subwoofer", e);
+                return Collections.<DeviceSpeakerReceiver.Subwoofer>emptyList();
+            }
+        });
+    }
+
+    /**
+     * Parst die Zone-Informationen (Name, DisplayName, Power) aus den Denon-APIs
+     * und gibt sie als Liste von Zone-Objekten zurück.
+     * Nutzt getDenonZonePowerStatus (type=4) und die Umbenennungen (type=6).
+     */
+    public CompletableFuture<List<DeviceSpeakerReceiver.Zone>> getDenonZones(DenonReceiver receiver) {
+        CompletableFuture<String> powerFuture = getDenonZonePowerStatus(receiver);
+        CompletableFuture<String> renameFuture = sendDenonGet(receiver.getAddress(), "/ajax/globals/get_config?type=6");
+
+        return powerFuture.thenCombine(renameFuture, (powerXml, renameXml) -> {
+            try {
+                Map<String, Boolean> powerMap = parseZonePower(powerXml);
+                Map<String, String> renameMap = parseZoneRename(renameXml);
+                List<DeviceSpeakerReceiver.Zone> result = new ArrayList<>();
+
+                // Verfügbare Zonen dynamisch aus den Responses bestimmen
+                Set<String> zoneTags = new LinkedHashSet<>();
+                zoneTags.addAll(powerMap.keySet());
+                zoneTags.addAll(renameMap.keySet());
+
+                for (String tag : zoneTags) {
+                    Boolean power = powerMap.getOrDefault(tag, Boolean.FALSE);
+                    String displayName = renameMap.getOrDefault(tag, tag);
+                    DeviceSpeakerReceiver.Zone zone = new DeviceSpeakerReceiver.Zone(tag, displayName, power);
+                    result.add(zone);
+                }
+                return result;
+            } catch (Exception e) {
+                logger.error("Fehler beim Parsen der Denon-Zonen", e);
+                return Collections.<DeviceSpeakerReceiver.Zone>emptyList();
+            }
+        });
+    }
+
+    private Map<String, Boolean> parseZonePower(String xml) throws Exception {
+        Map<String, Boolean> result = new HashMap<>();
+        if (xml == null || xml.isEmpty()) {
+            return result;
+        }
+        Document doc = parseXml(xml);
+        // Kinder von <listGlobals> dynamisch auslesen (z.B. MainZone, Zone2, Zone3)
+        NodeList listGlobalsNodes = doc.getElementsByTagName("listGlobals");
+        if (listGlobalsNodes.getLength() > 0) {
+            Element root = (Element) listGlobalsNodes.item(0);
+            NodeList zones = root.getChildNodes();
+            for (int i = 0; i < zones.getLength(); i++) {
+                if (!(zones.item(i) instanceof Element)) {
+                    continue;
+                }
+                Element zoneEl = (Element) zones.item(i);
+                String tag = zoneEl.getTagName();
+                NodeList powerNodes = zoneEl.getElementsByTagName("Power");
+                if (powerNodes.getLength() > 0) {
+                    String value = powerNodes.item(0).getTextContent();
+                    // Laut API: 1 = an, 0 = aus, andere Werte (z.B. 3) behandeln wir als aus
+                    boolean on = "1".equals(value);
+                    result.put(tag, on);
+                }
+            }
+        }
+        return result;
+    }
+
+    private Map<String, String> parseZoneRename(String xml) throws Exception {
+        Map<String, String> result = new HashMap<>();
+        if (xml == null || xml.isEmpty()) {
+            return result;
+        }
+        Document doc = parseXml(xml);
+        // Kinder von <ZoneRename> dynamisch auslesen (z.B. MainZone, Zone2, Zone3)
+        NodeList zoneRenameNodes = doc.getElementsByTagName("ZoneRename");
+        if (zoneRenameNodes.getLength() > 0) {
+            Element root = (Element) zoneRenameNodes.item(0);
+            NodeList zones = root.getChildNodes();
+            for (int i = 0; i < zones.getLength(); i++) {
+                if (!(zones.item(i) instanceof Element)) {
+                    continue;
+                }
+                Element zoneEl = (Element) zones.item(i);
+                String tag = zoneEl.getTagName();
+                String displayName = zoneEl.getTextContent();
+                result.put(tag, displayName);
+            }
+        }
+        return result;
+    }
+
+    private Document parseXml(String xml) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(false);
+        factory.setIgnoringComments(true);
+        factory.setIgnoringElementContentWhitespace(true);
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        try (ByteArrayInputStream in = new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8))) {
+            return builder.parse(in);
+        }
+    }
+
+    private Map<Integer, Integer> parseSubwooferLevels(String xml) throws Exception {
+        Map<Integer, Integer> result = new HashMap<>();
+        if (xml == null || xml.isEmpty()) {
+            return result;
+        }
+        Document doc = parseXml(xml);
+        // SubwooferLevel1 / SubwooferLevel2
+        for (int idx = 1; idx <= 2; idx++) {
+            String tag = "SubwooferLevel" + idx;
+            NodeList nodes = doc.getElementsByTagName(tag);
+            if (nodes.getLength() > 0) {
+                String value = nodes.item(0).getTextContent();
+                if (value != null && !value.isEmpty()) {
+                    try {
+                        int db = Integer.parseInt(value.trim());
+                        result.put(idx, db);
+                    } catch (NumberFormatException e) {
+                        logger.warn("Konnte Subwoofer-Level '{}' für {} nicht parsen", value, tag);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    private boolean parseSubwooferPowerFlag(String xml) throws Exception {
+        if (xml == null || xml.isEmpty()) {
+            return false;
+        }
+        Document doc = parseXml(xml);
+        NodeList nodes = doc.getElementsByTagName("Subwoofer");
+        if (nodes.getLength() > 0) {
+            String value = nodes.item(0).getTextContent();
+            return "1".equals(value);
+        }
+        return false;
+    }
+
+    private int[] parseVolumeLimits(String xml) throws Exception {
+        int limit = 0;
+        int powerOnLevel = 0;
+        if (xml == null || xml.isEmpty()) {
+            return new int[] { limit, powerOnLevel };
+        }
+        Document doc = parseXml(xml);
+        NodeList limitNodes = doc.getElementsByTagName("Limit");
+        if (limitNodes.getLength() > 0) {
+            String value = limitNodes.item(0).getTextContent();
+            try { limit = Integer.parseInt(value.trim()); } catch (NumberFormatException ignore) { }
+        }
+        NodeList polNodes = doc.getElementsByTagName("PowerOnLevel");
+        if (polNodes.getLength() > 0) {
+            String value = polNodes.item(0).getTextContent();
+            try { powerOnLevel = Integer.parseInt(value.trim()); } catch (NumberFormatException ignore) { }
+        }
+        return new int[] { limit, powerOnLevel };
+    }
+
+    private List<DeviceSpeakerReceiver.Source> parseSources(String xml, String selectedIndex) throws Exception {
+        List<DeviceSpeakerReceiver.Source> result = new ArrayList<>();
+        if (xml == null || xml.isEmpty()) {
+            return result;
+        }
+        Document doc = parseXml(xml);
+        NodeList sourceListNodes = doc.getElementsByTagName("SourceList");
+        if (sourceListNodes.getLength() == 0) {
+            return result;
+        }
+        Element root = (Element) sourceListNodes.item(0);
+        NodeList zones = root.getElementsByTagName("Zone");
+        if (zones.getLength() == 0) {
+            return result;
+        }
+        // Nimm erste Zone (zone attribute) als Standard
+        Element zoneEl = (Element) zones.item(0);
+        NodeList sources = zoneEl.getElementsByTagName("Source");
+        for (int i = 0; i < sources.getLength(); i++) {
+            Element src = (Element) sources.item(i);
+            String idx = src.getAttribute("index");
+            NodeList nameNodes = src.getElementsByTagName("Name");
+            String display = nameNodes.getLength() > 0 ? nameNodes.item(0).getTextContent() : idx;
+            boolean sel = selectedIndex != null && selectedIndex.equals(idx);
+            DeviceSpeakerReceiver.Source source = new DeviceSpeakerReceiver.Source(idx, display, sel);
+            result.add(source);
+        }
+        return result;
+    }
+
+
+    private CompletableFuture<String> sendDenonGet(String address, String pathAndQuery) {
+        return CompletableFuture.supplyAsync(() -> {
+            String url = "https://" + address + ":10443" + pathAndQuery;
+            HttpURLConnection conn = null;
+            try {
+                URL u = new URL(url);
+                conn = (HttpURLConnection) u.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(15000);
+                int code = conn.getResponseCode();
+                InputStream is = code >= 200 && code < 400 ? conn.getInputStream() : conn.getErrorStream();
+                String body = readStream(is);
+                logger.debug("Denon GET {} -> {} body={}", url, code, body);
+                return body;
+            } catch (Exception e) {
+                logger.error("Denon GET {} fehlgeschlagen: {}", url, e.getMessage(), e);
+                throw new RuntimeException(e);
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        });
+    }
+
+    private String urlEncode(String data) {
+        try {
+            return URLEncoder.encode(data, StandardCharsets.UTF_8.toString());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String readStream(InputStream is) throws IOException {
+        if (is == null) {
+            return "";
+        }
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            return sb.toString();
+        }
+    }
+
+    private String mapZoneTag(String zoneName) {
+        if (zoneName == null) {
+            return "MainZone";
+        }
+        switch (zoneName.toLowerCase()) {
+            case "zone2":
+            case "zone 2":
+                return "Zone2";
+            case "zone3":
+            case "zone 3":
+                return "Zone3";
+            case "mainzone":
+            case "main":
+            default:
+                return "MainZone";
+        }
+    }
+
+    private String mapZoneIndex(String zoneName) {
+        if (zoneName == null) {
+            return "1";
+        }
+        switch (zoneName.toLowerCase()) {
+            case "zone2":
+            case "zone 2":
+                return "2";
+            case "zone3":
+            case "zone 3":
+                return "3";
+            case "mainzone":
+            case "main":
+            default:
+                return "1";
+        }
     }
 }
