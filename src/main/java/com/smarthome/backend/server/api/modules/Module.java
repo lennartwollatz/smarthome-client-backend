@@ -49,6 +49,17 @@ public enum Module {
         "Hue Geräte verbinden und steuern",
         "lighting",
         "&#128161;" // Glühbirne
+    ),
+
+    /**
+     * LG-Modul für LG-Fernseher (webOS o.Ä.).
+     */
+    LG(
+        "lg",
+        "LG TV",
+        "Verwaltung und Steuerung von LG Fernsehern",
+        "audioTv",
+        "&#128250;" // Fernseher
     );
     
     private final String moduleId;

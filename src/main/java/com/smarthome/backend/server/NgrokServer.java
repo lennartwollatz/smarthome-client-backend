@@ -3,12 +3,16 @@ package com.smarthome.backend.server;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.sql.SQLException;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.smarthome.backend.server.actions.ActionManager;
 import com.smarthome.backend.server.api.ApiHandler;
+import com.smarthome.backend.server.api.modules.lg.LGTV;
+import com.smarthome.backend.server.api.modules.xiaomi.XiaomiDiscover;
+import com.smarthome.backend.server.api.modules.xiaomi.XiaomiDiscoveredDevice;
 import com.smarthome.backend.server.db.DatabaseManager;
 import com.smarthome.backend.server.events.EventStreamManager;
 import com.sun.net.httpserver.HttpServer;
@@ -70,6 +74,9 @@ public class NgrokServer {
             // Starte Server
             httpServer.setExecutor(null); // Verwendet Standard-Executor
             httpServer.start();
+
+            //TESTEN
+            testen();
             
             logger.info("HTTP-Server gestartet auf Port {}", port);
             logger.info("API-Endpunkte verfügbar unter: http://localhost:{}/", port);
@@ -116,6 +123,14 @@ public class NgrokServer {
         
         NgrokServer server = new NgrokServer(port);
         server.start();
+    }
+
+    public void testen() { 
+        XiaomiDiscover xiaomiDiscover = new XiaomiDiscover(databaseManager);
+        Set<XiaomiDiscoveredDevice> devices = xiaomiDiscover.discover("admin", "admin");
+        for (XiaomiDiscoveredDevice device : devices) {
+            logger.info("Xiaomi Gerät gefunden: {}", device.getName());
+        }
     }
 }
 

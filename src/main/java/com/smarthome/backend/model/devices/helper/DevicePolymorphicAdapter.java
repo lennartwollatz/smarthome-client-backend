@@ -22,6 +22,7 @@ import com.smarthome.backend.model.devices.DeviceLightDimmerTemperatureColor;
 import com.smarthome.backend.model.devices.DeviceLightLevel;
 import com.smarthome.backend.model.devices.DeviceMotion;
 import com.smarthome.backend.model.devices.DeviceSpeaker;
+import com.smarthome.backend.model.devices.DeviceTV;
 import com.smarthome.backend.model.devices.DeviceTemperature;
 import com.smarthome.backend.server.api.modules.Module;
 import com.smarthome.backend.server.api.modules.heos.HeosController;
@@ -35,6 +36,7 @@ import com.smarthome.backend.server.api.modules.hue.HueLightDimmerTemperatureCol
 import com.smarthome.backend.server.api.modules.hue.HueLightLevelSensor;
 import com.smarthome.backend.server.api.modules.hue.HueMotionSensor;
 import com.smarthome.backend.server.api.modules.hue.HueTemperatureSensor;
+import com.smarthome.backend.server.api.modules.lg.LGTV;
 
 /**
  * Gson TypeAdapter für polymorphe Device-Deserialisierung.
@@ -229,6 +231,18 @@ public class DevicePolymorphicAdapter implements JsonSerializer<Device>, JsonDes
                     device = gson.fromJson(json, DeviceLightDimmerTemperature.class);
                 }
                 break;
+            case TV:
+                // Prüfe moduleId, um die richtige konkrete Klasse zu bestimmen
+                if (Module.LG.getModuleId().equals(moduleId)) {
+                    // Verwende LGTV für LG TV
+                    device = gson.fromJson(json, LGTV.class);
+                    
+                } else {
+                    // Fallback: Versuche DeviceTV (kann fehlschlagen, da abstrakt)
+                    device = gson.fromJson(json, DeviceTV.class);
+                    
+                }
+                break;
             default:
                 // Für alle anderen Typen verwende die Basis-Device-Klasse
                 device = gson.fromJson(json, Device.class);
@@ -254,10 +268,14 @@ public class DevicePolymorphicAdapter implements JsonSerializer<Device>, JsonDes
                 ((HueTemperatureSensor) device).setHueDeviceController(this.hueDeviceController);
             } else if (device instanceof HueMotionSensor) {
                 ((HueMotionSensor) device).setHueDeviceController(this.hueDeviceController);
-            }
+            } 
         } else if (this.heosController != null && Module.DENON.getModuleId().equals(moduleId)) {
             if (device instanceof HeosSpeaker) {
                 ((HeosSpeaker) device).setHeosController(this.heosController);
+            }
+        } else if (Module.LG.getModuleId().equals(moduleId)) {
+            if (device instanceof LGTV) {
+                ((LGTV) device).updateValues();
             }
         }
         

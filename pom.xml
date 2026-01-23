@@ -17,6 +17,7 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <openhab.version>4.2.0</openhab.version>
     </properties>
 
     <dependencies>
@@ -51,6 +52,20 @@
             <groupId>org.jmdns</groupId>
             <artifactId>jmdns</artifactId>
             <version>3.5.8</version>
+        </dependency>
+
+        <!-- WebSocket Client für LG TV - OkHttp bietet bessere Header-Kontrolle -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>4.12.0</version>
+        </dependency>
+        
+        <!-- WebSocket Client für LG TV (wie ws4py in Python) - Fallback -->
+        <dependency>
+            <groupId>org.java-websocket</groupId>
+            <artifactId>Java-WebSocket</artifactId>
+            <version>1.5.6</version>
         </dependency>
 
         <!-- BouncyCastle for Matter PASE/CASE Crypto (SPAKE2+, ECC, AES-CCM) -->

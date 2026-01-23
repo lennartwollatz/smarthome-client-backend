@@ -19,6 +19,7 @@ import com.smarthome.backend.server.api.ApiRouter;
 import com.smarthome.backend.server.api.modules.hue.HueDiscoveredBridge;
 import com.smarthome.backend.server.api.services.modules.DenonModuleService;
 import com.smarthome.backend.server.api.services.modules.HueModuleService;
+import com.smarthome.backend.server.api.services.modules.LGModuleService;
 import com.smarthome.backend.server.api.services.modules.MatterModuleService;
 import com.smarthome.backend.server.db.DatabaseManager;
 import com.smarthome.backend.server.db.JsonRepository;
@@ -36,6 +37,7 @@ public class ModuleService {
     private final MatterModuleService matterModuleService;
     private final DenonModuleService denonModuleService;
     private final HueModuleService hueModuleService;
+    private final LGModuleService lgModuleService;
     private final ActionManager actionManager;
     
     public ModuleService(DatabaseManager databaseManager, EventStreamManager eventStreamManager, ActionManager actionManager) {
@@ -44,6 +46,7 @@ public class ModuleService {
         this.denonModuleService = new DenonModuleService(databaseManager, eventStreamManager, actionManager);
         this.matterModuleService = new MatterModuleService(databaseManager, eventStreamManager, actionManager);
         this.hueModuleService = new HueModuleService(databaseManager, eventStreamManager, actionManager);
+        this.lgModuleService = new LGModuleService(databaseManager, eventStreamManager, actionManager);
     }
     
     public void handleRequest(com.sun.net.httpserver.HttpExchange exchange, String method, String path) throws IOException {
@@ -70,6 +73,12 @@ public class ModuleService {
         // Hue-spezifische Endpunkte
         if (path.startsWith("/modules/hue/")) {
             handleHueRequest(exchange, method, path);
+            return;
+        }
+
+        // LG-spezifische Endpunkte
+        if (path.startsWith("/modules/lg/")) {
+            handleLGRequest(exchange, method, path);
             return;
         }
         
@@ -134,6 +143,10 @@ public class ModuleService {
     private void handleHueRequest(com.sun.net.httpserver.HttpExchange exchange, String method, String path) throws IOException {
         // Weiterleitung an MatterModuleService
         hueModuleService.handleRequest(exchange, method, path);
+    }
+
+    private void handleLGRequest(com.sun.net.httpserver.HttpExchange exchange, String method, String path) throws IOException {
+        lgModuleService.handleRequest(exchange, method, path);
     }
     
     private void getModules(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
