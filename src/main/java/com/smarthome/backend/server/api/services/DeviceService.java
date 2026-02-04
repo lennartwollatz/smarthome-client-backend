@@ -124,7 +124,12 @@ public class DeviceService {
                     device.setName((String) request.get("name"));
                 }
                 if (request.containsKey("room")) {
-                    device.setRoom((String) request.get("room"));
+                    Object roomObj = request.get("room");
+                    if (roomObj == null) {
+                        device.setRoom(null);
+                    } else if (roomObj instanceof String) {
+                        device.setRoom((String) roomObj);
+                    }
                 }
                 if (request.containsKey("icon")) {
                     device.setIcon((String) request.get("icon"));
@@ -149,6 +154,14 @@ public class DeviceService {
                         device.setIsConnecting((Boolean) isConnectingObj);
                     } else if (isConnectingObj instanceof String) {
                         device.setIsConnecting(Boolean.parseBoolean((String) isConnectingObj));
+                    }
+                }
+                if (request.containsKey("quickAccess")) {
+                    Object quickAccessObj = request.get("quickAccess");
+                    if (quickAccessObj instanceof Boolean) {
+                        device.setQuickAccess((Boolean) quickAccessObj);
+                    } else if (quickAccessObj instanceof String) {
+                        device.setQuickAccess(Boolean.parseBoolean((String) quickAccessObj));
                     }
                 }
                 

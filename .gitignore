@@ -36,3 +36,8 @@ docs/
 
 # Data
 data/
+
+target/
+src/main/node/dist/
+src/main/node/node_modules/
+src/main/node/data/

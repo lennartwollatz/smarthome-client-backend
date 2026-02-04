@@ -51,6 +51,9 @@ public class Device {
     protected Boolean hasBattery = false;
     @SerializedName("batteryLevel")
     protected Integer batteryLevel = 0;
+    
+    @SerializedName("quickAccess")
+    protected Boolean quickAccess = false;
 
     /**
      * Initialisiert triggerListeners, falls es null ist (z.B. nach Deserialisierung).

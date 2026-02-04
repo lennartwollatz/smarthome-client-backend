@@ -1,0 +1,32 @@
+{
+  "name": "smarthome-backend-node",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch com/smarthome/backend/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/com/smarthome/backend/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "miio": "^0.15.6",
+    "multicast-dns": "^7.2.0",
+    "node-hue-api": "^4.0.8",
+    "@project-chip/matter.js": "^0.16.7",
+    "undici": "^6.21.0",
+    "pino": "^9.0.0",
+    "pino-http": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.30",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.3"
+  }
+}
+
