@@ -11,6 +11,7 @@ export class Room {
   color?: string;
   temperature?: number;
   points?: Point[];
+  index?: number;
 
   constructor(init?: Partial<Room>) {
     Object.assign(this, init);

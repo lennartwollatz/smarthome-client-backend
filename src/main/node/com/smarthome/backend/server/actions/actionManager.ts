@@ -5,10 +5,10 @@ import { TimeTriggerRunnable } from "./timeTriggerRunnable.js";
 import { logger } from "../../logger.js";
 import type {
   Action,
-  Scene,
   DeviceTrigger,
   Device
 } from "../../model/index.js";
+import { Scene } from "../../model/index.js";
 import type { EnergyUsage, Energy } from "../../model/devices/DeviceSwitchEnergy.js";
 import { DeviceType } from "../../model/devices/helper/DeviceType.js";
 
@@ -39,6 +39,9 @@ import { MatterSwitchEnergy } from "../api/modules/matter/matterSwitchEnergy.js"
 
 // Xiaomi Module
 import { XiaomiVacuumCleaner } from "../api/modules/xiaomi/xiaomiVacuumCleaner.js";
+
+// Scene Definitions
+import { STANDARD_SCENE_DEFINITIONS } from "./sceneDefinitions.js";
 
 export class ActionManager {
   private actionRepository: JsonRepository<Action>;
@@ -194,8 +197,38 @@ export class ActionManager {
 
   private loadScenesFromDatabase() {
     const scenes = this.sceneRepository.findAll();
+    const existingSceneIds = new Set<string>();
+    
+    // Lade vorhandene Scenen aus der Datenbank
     scenes.forEach(scene => {
-      if (scene?.id) this.scenes.set(scene.id, scene);
+      if (scene?.id) {
+        this.scenes.set(scene.id, scene);
+        existingSceneIds.add(scene.id);
+      }
+    });
+    
+    // Initialisiere Standard-Scenen, wenn sie nicht existieren
+    this.initializeStandardScenes(existingSceneIds);
+  }
+
+  private initializeStandardScenes(existingSceneIds: Set<string>) {
+    STANDARD_SCENE_DEFINITIONS.forEach((def) => {
+      if (!existingSceneIds.has(def.id)) {
+        // Erstelle Standard-Szene, wenn sie nicht existiert
+        const standardScene = new Scene({
+          id: def.id,
+          name: def.name,
+          icon: def.icon,
+          active: false,
+          actionIds: [],
+          showOnHome: def.showOnHome ?? true,
+          isCustom: def.isCustom ?? false
+        });
+        
+        // Speichere im Memory und in der Datenbank
+        this.scenes.set(def.id, standardScene);
+        this.sceneRepository.save(def.id, standardScene);
+      }
     });
   }
 

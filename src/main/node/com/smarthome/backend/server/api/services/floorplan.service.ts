@@ -36,6 +36,17 @@ export function createFloorPlanRouter(deps: Deps) {
     const room = req.body as Room;
     if (!room.id) room.id = `room-${randomUUID()}`;
 
+    // Wenn kein Index gesetzt ist, den höchsten Index + 1 vergeben
+    if (room.index === undefined || room.index === null) {
+      const floorPlan = floorPlanRepository.findById("main-floorplan") ?? { rooms: [] };
+      if (!Array.isArray(floorPlan.rooms)) floorPlan.rooms = [];
+      const maxIndex = floorPlan.rooms.reduce((max, r) => {
+        const idx = r.index ?? -1;
+        return idx > max ? idx : max;
+      }, -1);
+      room.index = maxIndex + 1;
+    }
+
     roomRepository.save(room.id, room);
 
     const floorPlan = floorPlanRepository.findById("main-floorplan") ?? { rooms: [] };
