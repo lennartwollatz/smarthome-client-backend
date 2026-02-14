@@ -6,7 +6,7 @@ import { DeviceFunction, stringsToDeviceFunctions } from "../DeviceFunction.js";
 export class Device {
   protected triggerListeners: Map<string, DeviceListenerPair[]> = new Map();
 
-  id?: string;
+  id: string = "";
   name?: string;
   room?: string;
   icon?: string;
@@ -71,4 +71,6 @@ export class Device {
   protected initializeFunctionsAction() {}
 
   protected initializeFunctionsTrigger() {}
+
+  public async updateValues(): Promise<void> {}
 }

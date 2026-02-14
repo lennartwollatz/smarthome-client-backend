@@ -12,3 +12,6 @@ export * from './DeviceSwitchDimmer.js';
 export * from './DeviceTV.js';
 export * from './DeviceTemperature.js';
 export * from './DeviceVacuumCleaner.js';
+export * from './DeviceFan.js';
+export * from './DeviceFanLight.js';
+export * from './DeviceCar.js';

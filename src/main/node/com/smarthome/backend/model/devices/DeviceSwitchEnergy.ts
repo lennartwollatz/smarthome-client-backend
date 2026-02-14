@@ -78,7 +78,7 @@ export abstract class DeviceSwitchEnergy extends DeviceSwitch {
     this.initializeFunctionsTrigger();
   }
 
-  abstract updateValues(): void;
+  abstract updateValues(): Promise<void>;
 
   protected override initializeFunctionsBool() {
     super.initializeFunctionsBool();

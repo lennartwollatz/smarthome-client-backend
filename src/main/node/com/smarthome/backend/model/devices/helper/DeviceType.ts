@@ -22,6 +22,8 @@ export enum DeviceType {
   MOTION_LIGHT_LEVEL = "motion-light-level",
   MOTION_LIGHT_LEVEL_TEMPERATURE = "motion-light-level-temperature",
   SENSOR = "sensor",
+  FAN = "fan",
+  FAN_LIGHT = "fan-light",
   
   // Klima & Komfort
   THERMOSTAT = "thermostat",
@@ -42,8 +44,8 @@ export enum DeviceType {
   IRRIGATION = "irrigation",
   GARAGE = "garage",
   
-  // Fahrzeuge
-  CAR = "car"
+  // Fahrzeug,
+  CAR = "car",
 }
 
 export function deviceTypeFromString(value?: string | null) {

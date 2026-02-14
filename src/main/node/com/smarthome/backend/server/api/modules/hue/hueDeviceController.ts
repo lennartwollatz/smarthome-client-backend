@@ -1,8 +1,11 @@
 import { Agent } from "undici";
 import { logger } from "../../../../logger.js";
+import { ModuleDeviceController } from "../moduleDeviceController.js";
+import { HueEvent } from "./hueEvent.js";
+import { Device } from "../../../../model/devices/Device.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { JsonRepository } from "../../../db/jsonRepository.js";
-import type { HueDiscoveredBridge } from "./hueDiscoveredBridge.js";
+import type { HueBridgeDiscovered } from "./hueBridgeDiscovered.js";
 
 type HueDeviceRecord = Record<string, unknown> & {
   id?: string;
@@ -22,17 +25,18 @@ type MotionStatus = {
 
 type HueResource = Record<string, unknown> & { id?: string };
 
-export class HueDeviceController {
-  private bridgeRepository?: JsonRepository<HueDiscoveredBridge>;
+export class HueDeviceController extends ModuleDeviceController<HueEvent, Device> {
+  private bridgeRepository?: JsonRepository<HueBridgeDiscovered>;
   private deviceRepository?: JsonRepository<HueDeviceRecord>;
-  private bridgeCache = new Map<string, HueDiscoveredBridge>();
+  private bridgeCache = new Map<string, HueBridgeDiscovered>();
   private rateWindowStartMillis = 0;
   private requestsInCurrentWindow = 0;
   private rateLimitLock = false;
 
-  constructor(databaseManager?: DatabaseManager) {
+  constructor(databaseManager: DatabaseManager) {
+    super();
     if (databaseManager) {
-      this.bridgeRepository = new JsonRepository<HueDiscoveredBridge>(databaseManager, "HueDiscoveredBridge");
+      this.bridgeRepository = new JsonRepository<HueBridgeDiscovered>(databaseManager, "HueBridgeDiscovered");
       this.deviceRepository = new JsonRepository<HueDeviceRecord>(databaseManager, "Device");
     }
   }
@@ -100,7 +104,7 @@ export class HueDeviceController {
   ) {
     const bridge = await this.getBridge(bridgeId);
     await this.acquireRequestPermit();
-    const address = bridge.ipAddress;
+    const address = bridge.address;
     const port = 443;
     const httpsDispatcher = new Agent({ connect: { rejectUnauthorized: false } });
     const url = `https://${address}/clip/v2/resource/${resourcePath}`;

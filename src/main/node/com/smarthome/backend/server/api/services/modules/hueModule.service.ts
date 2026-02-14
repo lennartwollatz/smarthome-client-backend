@@ -13,7 +13,8 @@ type Deps = {
 
 export function createHueModuleRouter(deps: Deps) {
   const router = Router();
-  const hueModule = new HueModuleManager(deps.databaseManager, deps.eventStreamManager, deps.actionManager);
+  const hueModule = new HueModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  deps.actionManager.registerModuleManager(hueModule);
 
   const handleSetSensitivity = (req: { params: { deviceId: string }; body?: any }, res: any) => {
     try {
@@ -165,7 +166,7 @@ export function createHueModuleRouter(deps: Deps) {
 
   router.get("/discover/devices/:bridgeId", async (req, res) => {
     try {
-      const devices = await hueModule.discoverDevices(req.params.bridgeId);
+      const devices = await hueModule.discoverDevicesForBridge(req.params.bridgeId);
       res.status(200).json(devices);
     } catch (error) {
       logger.error({ error }, "Fehler beim Discover von Hue-Geraeten");

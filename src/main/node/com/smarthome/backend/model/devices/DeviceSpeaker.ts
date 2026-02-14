@@ -65,7 +65,7 @@ export abstract class DeviceSpeaker extends Device {
     return values.includes(value) ? value : null;
   }
 
-  abstract updateValues(): void;
+  abstract updateValues(): Promise<void>;
 
   protected override initializeFunctionsBool() {
     this.functionsBool = [

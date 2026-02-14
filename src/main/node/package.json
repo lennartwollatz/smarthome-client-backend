@@ -9,17 +9,19 @@
     "start": "node dist/com/smarthome/backend/index.js"
   },
   "dependencies": {
+    "@project-chip/matter.js": "^0.16.7",
     "better-sqlite3": "^9.5.0",
+    "bmw-connected-drive": "^2.4.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "miio": "^0.15.6",
     "multicast-dns": "^7.2.0",
     "node-hue-api": "^4.0.8",
-    "@project-chip/matter.js": "^0.16.7",
-    "undici": "^6.21.0",
     "pino": "^9.0.0",
-    "pino-http": "^9.0.0"
+    "pino-http": "^9.0.0",
+    "sonos": "^1.14.2",
+    "undici": "^6.21.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -29,4 +31,3 @@
     "typescript": "^5.7.3"
   }
 }
-

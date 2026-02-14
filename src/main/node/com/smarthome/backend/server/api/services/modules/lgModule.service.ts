@@ -13,7 +13,8 @@ type Deps = {
 
 export function createLGModuleRouter(deps: Deps) {
   const router = Router();
-  const lgModule = new LGModuleManager(deps.databaseManager, deps.eventStreamManager, deps.actionManager);
+  const lgModule = new LGModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  deps.actionManager.registerModuleManager(lgModule);
 
   router.get("/devices/discover", async (_req, res) => {
     try {
@@ -37,9 +38,9 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setOn", (req, res) => {
+  router.post("/devices/:deviceId/setOn", async (req, res) => {
     try {
-      const success = lgModule.powerOn(req.params.deviceId);
+      const success = await lgModule.powerOn(req.params.deviceId);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" }
       );
@@ -49,9 +50,9 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setOff", (req, res) => {
+  router.post("/devices/:deviceId/setOff", async (req, res) => {
     try {
-      const success = lgModule.powerOff(req.params.deviceId);
+      const success = await lgModule.powerOff(req.params.deviceId);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" }
       );
@@ -61,7 +62,7 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setVolume", (req, res) => {
+  router.post("/devices/:deviceId/setVolume", async (req, res) => {
     try {
       const rawVolume = (req.body ?? {}).volume;
       let volume: number | null = null;
@@ -75,7 +76,7 @@ export function createLGModuleRouter(deps: Deps) {
         res.status(400).json({ error: "volume parameter is required" });
         return;
       }
-      const success = lgModule.setVolume(req.params.deviceId, volume);
+      const success = await lgModule.setVolume(req.params.deviceId, volume);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" }
       );
@@ -85,9 +86,9 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/screenOn", (req, res) => {
+  router.post("/devices/:deviceId/screenOn", async (req, res) => {
     try {
-      const success = lgModule.screenOn(req.params.deviceId);
+      const success = await lgModule.screenOn(req.params.deviceId);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" }
       );
@@ -97,9 +98,9 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/screenOff", (req, res) => {
+  router.post("/devices/:deviceId/screenOff", async (req, res) => {
     try {
-      const success = lgModule.screenOff(req.params.deviceId);
+      const success = await lgModule.screenOff(req.params.deviceId);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" }
       );
@@ -109,14 +110,14 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setChannel", (req, res) => {
+  router.post("/devices/:deviceId/setChannel", async (req, res) => {
     try {
       const channelId = String((req.body ?? {}).channelId ?? "");
       if (!channelId) {
         res.status(400).json({ error: "channelId parameter is required" });
         return;
       }
-      const success = lgModule.setChannel(req.params.deviceId, channelId);
+      const success = await lgModule.setChannel(req.params.deviceId, channelId);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" }
       );
@@ -126,14 +127,14 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/startApp", (req, res) => {
+  router.post("/devices/:deviceId/startApp", async (req, res) => {
     try {
       const appId = String((req.body ?? {}).appId ?? "");
       if (!appId) {
         res.status(400).json({ error: "appId parameter is required" });
         return;
       }
-      const success = lgModule.startApp(req.params.deviceId, appId);
+      const success = await lgModule.startApp(req.params.deviceId, appId);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" }
       );
@@ -143,14 +144,14 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/notify", (req, res) => {
+  router.post("/devices/:deviceId/notify", async (req, res) => {
     try {
       const message = String((req.body ?? {}).message ?? "");
       if (!message) {
         res.status(400).json({ error: "message parameter is required" });
         return;
       }
-      const success = lgModule.notify(req.params.deviceId, message);
+      const success = await lgModule.notify(req.params.deviceId, message);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" }
       );
@@ -216,7 +217,7 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setHomeAppNumber", (req, res) => {
+  router.post("/devices/:deviceId/setHomeAppNumber", async (req, res) => {
     try {
       const appId = String((req.body ?? {}).appId ?? "");
       const rawNumber = (req.body ?? {}).homeAppNumber;
@@ -231,7 +232,7 @@ export function createLGModuleRouter(deps: Deps) {
         res.status(400).json({ error: "appId und homeAppNumber sind erforderlich" });
         return;
       }
-      const success = lgModule.setHomeAppNumber(req.params.deviceId, appId, homeAppNumber);
+      const success = await lgModule.setHomeAppNumber(req.params.deviceId, appId, homeAppNumber);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät/App nicht gefunden oder ungültige Nummer" }
       );
@@ -241,7 +242,7 @@ export function createLGModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setHomeChannelNumber", (req, res) => {
+  router.post("/devices/:deviceId/setHomeChannelNumber", async (req, res) => {
     try {
       const channelId = String((req.body ?? {}).channelId ?? "");
       const rawNumber = (req.body ?? {}).homeChannelNumber;
@@ -256,7 +257,7 @@ export function createLGModuleRouter(deps: Deps) {
         res.status(400).json({ error: "channelId und homeChannelNumber sind erforderlich" });
         return;
       }
-      const success = lgModule.setHomeChannelNumber(req.params.deviceId, channelId, homeChannelNumber);
+      const success = await lgModule.setHomeChannelNumber(req.params.deviceId, channelId, homeChannelNumber);
       res.status(success ? 200 : 404).json(
         success ? { success: true } : { error: "Gerät/Channel nicht gefunden oder ungültige Nummer" }
       );

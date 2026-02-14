@@ -32,19 +32,22 @@ export abstract class DeviceSwitch extends Device {
     initialPressTime: number;
     lastPressTime: number;
     firstPressTime: number;
+    name?: string;
 
     constructor(
       on = false,
       pressCount = 0,
       initialPressTime = 0,
       lastPressTime = 0,
-      firstPressTime = 0
+      firstPressTime = 0,
+      name?: string
     ) {
       this.on = on;
       this.pressCount = pressCount;
       this.initialPressTime = initialPressTime;
       this.lastPressTime = lastPressTime;
       this.firstPressTime = firstPressTime;
+      this.name = name;
     }
 
     isOn() {
@@ -102,7 +105,7 @@ export abstract class DeviceSwitch extends Device {
     this.initializeFunctionsTrigger();
   }
 
-  abstract updateValues(): void;
+  abstract updateValues(): Promise<void>;
 
   addButton(buttonId: string) {
     this.buttons ??= {};

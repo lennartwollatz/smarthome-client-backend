@@ -13,7 +13,8 @@ type Deps = {
 
 export function createDenonModuleRouter(deps: Deps) {
   const router = Router();
-  const denonModule = new DenonModuleManager(deps.databaseManager, deps.eventStreamManager, deps.actionManager);
+  const denonModule = new DenonModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  deps.actionManager.registerModuleManager(denonModule);
 
   router.get("/devices/discover", async (_req, res) => {
     try {
@@ -25,7 +26,7 @@ export function createDenonModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setVolume", (req, res) => {
+  router.post("/devices/:deviceId/setVolume", async (req, res) => {
     try {
       const deviceId = req.params.deviceId;
       if (!deviceId) {
@@ -44,7 +45,7 @@ export function createDenonModuleRouter(deps: Deps) {
         res.status(400).json({ error: "Volume-Parameter fehlt" });
         return;
       }
-      const success = denonModule.setVolume(deviceId, volume);
+      const success = await denonModule.setVolume(deviceId, volume);
       res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
     } catch (error) {
       logger.error({ error }, "Fehler beim Setzen der Lautstärke");
@@ -52,14 +53,14 @@ export function createDenonModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setOn", (req, res) => {
+  router.post("/devices/:deviceId/setOn", async (req, res) => {
     try {
       const deviceId = req.params.deviceId;
       if (!deviceId) {
         res.status(400).json({ error: "Ungültige Device ID" });
         return;
       }
-      const success = denonModule.setPlayState(deviceId, "play");
+      const success = await denonModule.setPlayState(deviceId, "play");
       res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
     } catch (error) {
       logger.error({ error }, "Fehler beim Einschalten des Geräts");
@@ -67,14 +68,14 @@ export function createDenonModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setOff", (req, res) => {
+  router.post("/devices/:deviceId/setOff", async (req, res) => {
     try {
       const deviceId = req.params.deviceId;
       if (!deviceId) {
         res.status(400).json({ error: "Ungültige Device ID" });
         return;
       }
-      const success = denonModule.setPlayState(deviceId, "stop");
+      const success = await denonModule.setPlayState(deviceId, "stop");
       res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
     } catch (error) {
       logger.error({ error }, "Fehler beim Ausschalten des Geräts");
@@ -82,7 +83,7 @@ export function createDenonModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setPlayState", (req, res) => {
+  router.post("/devices/:deviceId/setPlayState", async (req, res) => {
     try {
       const deviceId = req.params.deviceId;
       if (!deviceId) {
@@ -94,7 +95,7 @@ export function createDenonModuleRouter(deps: Deps) {
         res.status(400).json({ error: "Ungültiger State-Wert (muss 'play', 'pause' oder 'stop' sein)" });
         return;
       }
-      const success = denonModule.setPlayState(deviceId, state);
+      const success = await denonModule.setPlayState(deviceId, state);
       res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
     } catch (error) {
       logger.error({ error }, "Fehler beim Setzen des Wiedergabestatus");
@@ -102,7 +103,7 @@ export function createDenonModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/setMute", (req, res) => {
+  router.post("/devices/:deviceId/setMute", async (req, res) => {
     try {
       const deviceId = req.params.deviceId;
       if (!deviceId) {
@@ -122,7 +123,7 @@ export function createDenonModuleRouter(deps: Deps) {
         res.status(400).json({ error: "Mute-Parameter fehlt" });
         return;
       }
-      const success = denonModule.setMute(deviceId, mute);
+      const success = await denonModule.setMute(deviceId, mute);
       res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
     } catch (error) {
       logger.error({ error }, "Fehler beim Setzen der Stummschaltung");
@@ -130,14 +131,14 @@ export function createDenonModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/playNext", (req, res) => {
+  router.post("/devices/:deviceId/playNext", async (req, res) => {
     try {
       const deviceId = req.params.deviceId;
       if (!deviceId) {
         res.status(400).json({ error: "Ungültige Device ID" });
         return;
       }
-      const success = denonModule.playNext(deviceId);
+      const success = await denonModule.playNext(deviceId);
       res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
     } catch (error) {
       logger.error({ error }, "Fehler beim Abspielen des naechsten Titels");
@@ -145,14 +146,14 @@ export function createDenonModuleRouter(deps: Deps) {
     }
   });
 
-  router.post("/devices/:deviceId/playPrevious", (req, res) => {
+  router.post("/devices/:deviceId/playPrevious", async (req, res) => {
     try {
       const deviceId = req.params.deviceId;
       if (!deviceId) {
         res.status(400).json({ error: "Ungültige Device ID" });
         return;
       }
-      const success = denonModule.playPrevious(deviceId);
+      const success = await denonModule.playPrevious(deviceId);
       res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
     } catch (error) {
       logger.error({ error }, "Fehler beim Abspielen des vorherigen Titels");

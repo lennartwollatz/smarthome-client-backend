@@ -104,7 +104,7 @@ export abstract class DeviceVacuumCleaner extends Device {
     this.initializeFunctionsTrigger();
   }
 
-  abstract updateValues(): void;
+  abstract updateValues(): Promise<void>;
 
   protected override initializeFunctionsBool() {
     this.functionsBool = [

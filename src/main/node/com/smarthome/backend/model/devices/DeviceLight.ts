@@ -34,7 +34,7 @@ export abstract class DeviceLight extends Device {
     this.initializeFunctionsTrigger();
   }
 
-  abstract updateValues(): void;
+  abstract updateValues(): Promise<void>;
 
   protected override initializeFunctionsBool() {
     this.functionsBool = [
@@ -83,7 +83,13 @@ export abstract class DeviceLight extends Device {
     const oldOn = this.on;
     this.on = true;
     if (execute) {
-      this.executeSetOn();
+      const result = this.executeSetOn();
+      // Wenn executeSetOn ein Promise zurückgibt, Fehler abfangen
+      if (result instanceof Promise) {
+        result.catch((error) => {
+          // Fehler wird bereits in der Implementierung geloggt
+        });
+      }
     }
     this.checkListener(DeviceLight.TriggerFunctionName.ON_ON);
     const changed = oldOn == null || oldOn !== this.on;
@@ -92,13 +98,19 @@ export abstract class DeviceLight extends Device {
     }
   }
 
-  protected abstract executeSetOn(): void;
+  protected abstract executeSetOn(): void | Promise<void>;
 
   setOff(execute: boolean) {
     const oldOn = this.on;
     this.on = false;
     if (execute) {
-      this.executeSetOff();
+      const result = this.executeSetOff();
+      // Wenn executeSetOff ein Promise zurückgibt, Fehler abfangen
+      if (result instanceof Promise) {
+        result.catch((error) => {
+          // Fehler wird bereits in der Implementierung geloggt
+        });
+      }
     }
     this.checkListener(DeviceLight.TriggerFunctionName.ON_OFF);
     const changed = oldOn == null || oldOn !== this.on;
@@ -107,14 +119,24 @@ export abstract class DeviceLight extends Device {
     }
   }
 
-  protected abstract executeSetOff(): void;
+  protected abstract executeSetOff(): void | Promise<void>;
 
   toggle() {
     this.on = !this.on;
     if (this.on) {
-      this.executeSetOn();
+      const result = this.executeSetOn();
+      if (result instanceof Promise) {
+        result.catch((error) => {
+          // Fehler wird bereits in der Implementierung geloggt
+        });
+      }
     } else {
-      this.executeSetOff();
+      const result = this.executeSetOff();
+      if (result instanceof Promise) {
+        result.catch((error) => {
+          // Fehler wird bereits in der Implementierung geloggt
+        });
+      }
     }
     this.checkListener(DeviceLight.TriggerFunctionName.TOGGLED);
     if (this.on) {

@@ -13,7 +13,8 @@ type Deps = {
 
 export function createMatterModuleRouter(deps: Deps) {
   const router = Router();
-  const matterModule = new MatterModuleManager(deps.databaseManager, deps.eventStreamManager, deps.actionManager);
+  const matterModule = new MatterModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  deps.actionManager.registerModuleManager(matterModule);
 
   router.get("/devices/discover", async (_req, res) => {
     try {

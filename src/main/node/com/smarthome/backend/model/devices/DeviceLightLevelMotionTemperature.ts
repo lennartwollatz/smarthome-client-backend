@@ -79,7 +79,7 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
     this.initializeFunctionsTrigger();
   }
 
-  abstract updateValues(): void;
+  abstract updateValues(): Promise<void>;
 
   override removeListener(key?: string, name?: string) {
     if (key) {

@@ -41,6 +41,7 @@ export function createDeviceRouter(deps: Deps) {
     if ("isConnected" in patch && typeof patch.isConnected === "boolean") next.isConnected = patch.isConnected;
     if ("isConnecting" in patch && typeof patch.isConnecting === "boolean") next.isConnecting = patch.isConnecting;
     if ("quickAccess" in patch && typeof patch.quickAccess === "boolean") next.quickAccess = patch.quickAccess;
+    if ("buttons" in patch && typeof patch.buttons === "object" && patch.buttons !== null) (next as any).buttons = patch.buttons;
 
     repo.save(deviceId, next);
     // Aktualisiere auch den ActionManager
