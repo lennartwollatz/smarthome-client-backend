@@ -29,8 +29,6 @@ export function createServer(deps: ServerDeps) {
     res.status(404).json({ error: `Endpoint not found: ${req.path}` });
   });
 
-  //TESTS
-
  return app;
 }
 
