@@ -26,7 +26,7 @@ export abstract class DeviceSwitch extends Device {
     OFF_INT: "off(int)"
   } as const;
 
-  protected static Button = class Button {
+  public static Button = class Button {
     on: boolean;
     pressCount: number;
     initialPressTime: number;
@@ -95,7 +95,7 @@ export abstract class DeviceSwitch extends Device {
 
   constructor(init?: Partial<DeviceSwitch>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.SWITCH;
     this.icon = "🔌";
     this.typeLabel = "deviceType.switch";
@@ -110,6 +110,10 @@ export abstract class DeviceSwitch extends Device {
   addButton(buttonId: string) {
     this.buttons ??= {};
     this.buttons[buttonId] = new DeviceSwitch.Button();
+  }
+
+  getButton(buttonId: string): Button | undefined{
+    return this.buttons[buttonId];
   }
 
   protected override initializeFunctionsBool() {
@@ -325,3 +329,5 @@ export abstract class DeviceSwitch extends Device {
 
   protected abstract executeSetBrightness(buttonId: string, intensity: number): void;
 }
+
+export type Button = InstanceType<typeof DeviceSwitch.Button>;

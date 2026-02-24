@@ -14,6 +14,8 @@ import { HueSwitchDimmer } from "./devices/hueSwitchDimmer.js";
 import { HueLightLevelMotionTemperature } from "./devices/hueLightLevelMotionTemperature.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
 import { HueDeviceDiscovered } from "./hueDeviceDiscovered.js";
+import { Device } from "../../../../model/devices/Device.js";
+import { HUECONFIG, HUEMODULE } from "./hueModule.js";
 
 type HueResource = Record<string, unknown> & { id?: string; type?: string; rtype?: string };
 type HueServiceRef = { rid?: string; rtype?: string };
@@ -28,15 +30,15 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
   }
 
   getModuleName(): string {
-    return "Hue";
+    return HUEMODULE.name;
   }
 
   getDiscoveredDeviceTypeName(): string {
-    return "HueBridgeDiscovered";
+    return HUECONFIG.deviceTypeName;
   }
 
   getDiscoveredBridgeTypeName(): string {
-    return "HueBridgeDiscovered";
+    return HUECONFIG.bridgeTypeName;
   }
 
   protected isBridgePaired(bridge: HueBridgeDiscovered): boolean {
@@ -52,7 +54,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     return;
   }
 
-  public async discoverDevices(bridgeId: string): Promise<Array<Record<string, unknown> & { id?: string }>> {
+  public async discoverDevices(bridgeId: string): Promise<Device[]> {
     const resources = await this.hueController.fetchAllResourcesAll(bridgeId);
     const resourceMap = new Map<string, HueResource>();
     resources.forEach(resource => {
@@ -62,13 +64,11 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     });
 
     const deviceResources = resources.filter(resource => getResourceType(resource) === "device") as DeviceResource[];
-    const discoveredDevices: Array<Record<string, unknown> & { id?: string }> = [];
-    const deviceIds: string[] = [];
+    const discoveredDevices: Device[] = [];
 
     deviceResources.forEach(deviceResource => {
       const devices = this.convertToDevices(deviceResource, bridgeId, resourceMap);
       devices.forEach(device => {
-        if (device.id) deviceIds.push(device.id);
         discoveredDevices.push(device);
       });
     });
@@ -80,8 +80,8 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     deviceObj: DeviceResource,
     bridgeId: string,
     resourceMap: Map<string, HueResource>
-  ) {
-    const devices: Array<Record<string, unknown> & { id?: string }> = [];
+  ):Device[] {
+    const devices: Device[] = [];
     const deviceProps = extractDeviceProperties(deviceObj);
     if (!deviceProps) return devices;
     const services = Array.isArray(deviceObj.services) ? deviceObj.services : [];
@@ -151,7 +151,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
         return;
       }
 
-      let device: Record<string, unknown> & { id?: string } | null = null;
+      let device: Device | null = null;
       switch (rtype) {
         case "motion":
           device = this.convertToHueMotionSensor(deviceObj, deviceProps, bridgeId, rid, resourceMap);
@@ -177,7 +177,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     return devices;
   }
 
-  private applyBattery(device: Record<string, unknown>, batteryLevel: number | null | undefined) {
+  private applyBattery(device: Device, batteryLevel: number | null | undefined) {
     if (batteryLevel == null) {
       device.hasBattery = false;
       return;
@@ -203,7 +203,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     bridgeId: string,
     rid: string,
     resourceMap: Map<string, HueResource>
-  ) {
+  ):HueLight | HueLightDimmer | HueLightDimmerTemperature | HueLightDimmerTemperatureColor {
     const on = Boolean((lightObj.on as Record<string, unknown> | undefined)?.on);
     const brightness = (lightObj.dimming as Record<string, unknown> | undefined)?.brightness as
       | number
@@ -264,8 +264,8 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
       device.setOff(false);
     }
     device.setHueDeviceController(this.hueController);
-    this.applyBattery(device as unknown as Record<string, unknown>, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    return device as unknown as Record<string, unknown> & { id?: string };
+    this.applyBattery(device, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
+    return device;
   }
 
   private convertToHueMotionSensor(
@@ -274,7 +274,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     bridgeId: string,
     rid: string,
     resourceMap: Map<string, HueResource>
-  ) {
+  ):HueMotionSensor {
     const deviceId = `hue-motion-${rid}`;
     const sensor = new HueMotionSensor(
       deviceProps.deviceName,
@@ -298,8 +298,8 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     if (typeof sensitivity === "number") {
       sensor.setSensibility(sensitivity, false);
     }
-    this.applyBattery(sensor as unknown as Record<string, unknown>, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    return sensor as unknown as Record<string, unknown> & { id?: string };
+    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
+    return sensor;
   }
 
   private convertToHueCameraMotionSensor(
@@ -308,7 +308,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     bridgeId: string,
     rid: string,
     resourceMap: Map<string, HueResource>
-  ) {
+  ):HueCameraMotionSensor {
     const deviceId = `hue-camera-motion-${rid}`;
     const sensor = new HueCameraMotionSensor(
       deviceProps.deviceName,
@@ -332,8 +332,8 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     if (typeof sensitivity === "number") {
       sensor.setSensibility(sensitivity, false);
     }
-    this.applyBattery(sensor as unknown as Record<string, unknown>, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    return sensor as unknown as Record<string, unknown> & { id?: string };
+    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
+    return sensor;
   }
 
   private convertToHueLightLevelSensor(
@@ -342,7 +342,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     bridgeId: string,
     rid: string,
     resourceMap: Map<string, HueResource>
-  ) {
+  ):HueLightLevelSensor {
     const deviceId = `hue-light-level-${rid}`;
     const sensor = new HueLightLevelSensor(
       deviceProps.deviceName,
@@ -358,8 +358,8 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     if (typeof lightValue === "number") {
       sensor.setLightLevel(lightValue, false);
     }
-    this.applyBattery(sensor as unknown as Record<string, unknown>, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    return sensor as unknown as Record<string, unknown> & { id?: string };
+    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
+    return sensor;
   }
 
   private convertToHueTemperatureSensor(
@@ -368,7 +368,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     bridgeId: string,
     rid: string,
     resourceMap: Map<string, HueResource>
-  ) {
+  ):HueTemperatureSensor {
     const deviceId = `hue-temperature-${rid}`;
     const sensor = new HueTemperatureSensor(
       deviceProps.deviceName,
@@ -384,8 +384,8 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     if (typeof temperature === "number") {
       sensor.setTemperature(temperature, false);
     }
-    this.applyBattery(sensor as unknown as Record<string, unknown>, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    return sensor as unknown as Record<string, unknown> & { id?: string };
+    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
+    return sensor;
   }
 
   private convertToHueLightLevelMotionTemperature(
@@ -397,7 +397,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     lightLevelRid: string,
     temperatureRid: string,
     resourceMap: Map<string, HueResource>
-  ) {
+  ):HueLightLevelMotionTemperature {
     const hueDeviceId = `hue-light-level-motion-temperature-${deviceId}`;
     const sensor = new HueLightLevelMotionTemperature(
       deviceProps.deviceName,
@@ -450,18 +450,16 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
       }
     }
 
-    this.applyBattery(sensor as unknown as Record<string, unknown>, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
+    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
     sensor.setHueDeviceController(this.hueController);
     
     // Stelle sicher, dass die Resource IDs im Device-Objekt gespeichert werden
-    const deviceRecord = sensor as unknown as Record<string, unknown> & { id?: string };
-    deviceRecord.bridgeId = bridgeId;
-    deviceRecord.motionRid = motionRid;
-    deviceRecord.lightLevelRid = lightLevelRid;
-    deviceRecord.temperatureRid = temperatureRid;
-    deviceRecord.batteryRid = deviceProps.ridBattery;
-    
-    return deviceRecord;
+    sensor.setBridgeId(bridgeId);
+    sensor.setMotionRid(motionRid);
+    sensor.setLightLevelRid(lightLevelRid);
+    sensor.setTemperatureRid(temperatureRid);
+    sensor.setBatteryRid(deviceProps.ridBattery ?? "");
+    return sensor;
   }
 
   private convertToHueButtonWithMultipleRids(
@@ -469,7 +467,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     bridgeId: string,
     deviceId: string,
     buttonRids: string[]
-  ) {
+  ):Device {
     const hueDeviceId = `hue-button-${deviceId}`;
     const device = new HueSwitchDimmer(
       deviceProps.deviceName,
@@ -479,8 +477,8 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
       deviceProps.ridBattery,
       this.hueController
     );
-    this.applyBattery(device as unknown as Record<string, unknown>, null);
-    return device as unknown as Record<string, unknown> & { id?: string };
+    this.applyBattery(device, null);
+    return device;
   }
 }
 

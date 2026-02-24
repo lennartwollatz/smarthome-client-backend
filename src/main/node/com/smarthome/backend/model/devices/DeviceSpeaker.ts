@@ -50,7 +50,7 @@ export abstract class DeviceSpeaker extends Device {
 
   constructor(init?: Partial<DeviceSpeaker>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.SPEAKER;
     this.icon = "&#128266;";
     this.typeLabel = "deviceType.speaker";

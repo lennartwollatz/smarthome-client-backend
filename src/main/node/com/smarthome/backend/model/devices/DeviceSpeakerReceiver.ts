@@ -10,7 +10,7 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
 
   constructor(init?: Partial<DeviceSpeakerReceiver>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.SPEAKER_RECEIVER;
     this.icon = "&#128266;";
     this.typeLabel = "deviceType.speaker-receiver";

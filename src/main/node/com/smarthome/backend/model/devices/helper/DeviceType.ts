@@ -46,6 +46,9 @@ export enum DeviceType {
   
   // Fahrzeug,
   CAR = "car",
+
+  // Kalender
+  CALENDAR = "calendar",
 }
 
 export function deviceTypeFromString(value?: string | null) {

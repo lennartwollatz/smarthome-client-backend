@@ -3,7 +3,7 @@ import type { DatabaseManager } from "../../../db/database.js";
 import { XiaomiDeviceDiscovered } from "./xiaomiDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
 import miio from "miio";
-import { XIAOMIMODULE } from "./xiaomiModule.js";
+import { XIAOMICONFIG, XIAOMIMODULE } from "./xiaomiModule.js";
 
 export class XiaomiDeviceDiscover extends ModuleDeviceDiscover<XiaomiDeviceDiscovered> {
   
@@ -16,7 +16,7 @@ export class XiaomiDeviceDiscover extends ModuleDeviceDiscover<XiaomiDeviceDisco
   }
 
   getDiscoveredDeviceTypeName(): string {
-    return "XiaomiDeviceDiscovered";
+    return XIAOMICONFIG.deviceTypeName;
   }
 
   public async startDiscovery(timeoutSeconds: number): Promise<XiaomiDeviceDiscovered[]> {

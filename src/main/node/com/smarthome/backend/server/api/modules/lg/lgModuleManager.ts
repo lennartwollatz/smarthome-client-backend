@@ -41,7 +41,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
   async discoverDevices(): Promise<Device[]> {
     logger.info("Suche nach LG Fernsehern über SSDP (LGDiscover)");
     try {
-      const discoveredDevices = await this.deviceDiscover.discover(5);
+      const discoveredDevices = await this.deviceDiscover.discover(5, []);
       logger.info({ count: discoveredDevices.length }, "Geraete gefunden");
       
       const tvs = discoveredDevices.map(device =>
@@ -58,7 +58,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
 
   async connectDevice(deviceId: string): Promise<boolean> {
     logger.info({ deviceId }, "Verbinde mit LG TV");
-    const discoveredDevices = await this.deviceDiscover.discover(5);
+    const discoveredDevices = await this.deviceDiscover.discover(5, []);
     const device = discoveredDevices.find((d: LGDeviceDiscovered) => d.id === deviceId);
     if (!device) {
       logger.warn({ deviceId }, "LG TV nicht gefunden");

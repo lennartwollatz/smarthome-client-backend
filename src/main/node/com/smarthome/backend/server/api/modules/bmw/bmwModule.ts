@@ -3,7 +3,8 @@ import { ModuleConfig, ModuleModel } from "../modules.js";
 export const BMWCONFIG: ModuleConfig = {
   id: "bmw",
   managerId: "bmw-event-stream-manager",
-  defaultDeviceName: "BMW Fahrzeug"
+  defaultDeviceName: "BMW Fahrzeug",
+  deviceTypeName: "BMWDeviceDiscovered"
 };
 
 export const BMWMODULE: ModuleModel = {

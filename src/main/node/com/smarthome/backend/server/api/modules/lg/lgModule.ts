@@ -3,7 +3,8 @@ import { ModuleConfig, ModuleModel } from "../modules.js";
 export const LGCONFIG: ModuleConfig = {
     id: "lg",
     managerId: "lg-event-stream-manager",
-    defaultDeviceName: "LG TV"
+    defaultDeviceName: "LG TV",
+    deviceTypeName: "LGDeviceDiscovered",
 }
 
 export const LGMODULE: ModuleModel = {

@@ -45,6 +45,7 @@ export class MatterVendors {
     // Vendor 4897 (aus deinem Beispiel)
     this.addVendor(4897, "SONOFF");
     this.addProduct(4897, 2, "MINIR4M", "device.switch");
+    this.addProduct(4897, 292, "MINIDIM", "device.switch-dimmer");
   }
 
   private addVendor(vendorId: number, vendorName: string): void {

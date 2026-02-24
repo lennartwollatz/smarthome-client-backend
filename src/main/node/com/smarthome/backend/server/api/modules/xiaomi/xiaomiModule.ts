@@ -3,7 +3,8 @@ import { ModuleConfig, ModuleModel } from "../modules.js";
 export const XIAOMICONFIG: ModuleConfig = {
     id: "xiaomi",
     managerId: "xiaomi-event-stream-manager",
-    defaultDeviceName: "Xiaomi Vacuum Cleaner"
+    defaultDeviceName: "Xiaomi Vacuum Cleaner",
+    deviceTypeName: "XiaomiDeviceDiscovered",
 }
 
 export const XIAOMIMODULE: ModuleModel = {

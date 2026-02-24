@@ -3,7 +3,8 @@ import { ModuleConfig, ModuleModel } from "../modules.js";
 export const HEOSCONFIG: ModuleConfig = {  
     id: "heos",
     managerId: "heos-event-stream-manager",
-    defaultDeviceName: "HEOS Device"
+    defaultDeviceName: "HEOS Device",
+    deviceTypeName: "HEOSDeviceDiscovered"
 }
 
 // Heos ist abstrakt und wird nicht im Frontend angezeigt

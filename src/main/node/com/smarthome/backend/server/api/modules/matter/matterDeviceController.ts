@@ -4,170 +4,258 @@ import { NodeNetwork } from "./matterNodeNetwork.js";
 import { MatterEvent } from "./matterEvent.js";
 import { Device } from "../../../../model/devices/Device.js";
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
+import { MatterDevice } from "./devices/matterDevice.js";
 
-type MatterModule = Record<string, any>;
-type MatterNodeId = string | number;
+import { CommissioningController, NodeCommissioningOptions } from "@project-chip/matter.js";
+import type { PairedNode } from "@project-chip/matter.js/device";
+import { GeneralCommissioning, OnOff } from "@matter/types/clusters";
+import { ManualPairingCodeCodec, ManualPairingData, NodeId } from "@matter/types";
+import { Environment, Network, StorageService } from "@matter/general";
+import { MatterDeviceDiscovered } from "./matterDeviceDiscovered.js";
+import { PairingPayload } from "./matterModuleManager.js";
+import { DatabaseManager } from "../../../db/database.js";
+import { MatterDatabaseStorage } from "./matterDatabaseStorage.js";
+
 
 export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEvent, Device> {
-  private initializing?: Promise<unknown>;
-  private controller?: unknown;
   private eventEmitter = new EventEmitter();
   private eventSubscriptionStop?: Function;
   private eventStreamRunning = false;
-  private commissioningController: unknown | null = null;
+  private commissioningController: CommissioningController | null = null;
   private commissioningControllerStarted = false;
-
-  constructor() {
+  private databaseManager: DatabaseManager;
+  constructor(databaseManager: DatabaseManager) {
     super();
+    this.databaseManager = databaseManager;
+    this.ensureCommissioningController().then(controller => {
+        this.commissioningControllerStarted = true;
+    });
   }
 
-  async ensureController() {
-    if (this.initializing) return this.initializing;
-    this.initializing = this.createController();
-    try {
-      const created = await this.initializing;
-      this.controller = created;
-      this.initializing = undefined;
-      return created;
-    } catch (err) {
-      this.initializing = undefined;
-      logger.error({ err }, "Matter Controller konnte nicht erstellt werden");
-      return null;
-    }
-  }
-
-  async pairDevice(ip: string, port: number, deviceId: string, pairingCode: string) {
+  async pairDevice(device: MatterDeviceDiscovered, payload: PairingPayload): Promise<MatterDeviceDiscovered | null> {
+    //ip: string, port: number, deviceId: string, pairingCode: string
     const controller = await this.ensureCommissioningController();
     if (!controller) {
       logger.warn("Matter CommissioningController ist nicht verfuegbar");
       return null;
     }
-    if (!this.commissioningControllerStarted && typeof (controller as any).start === "function") {
-      await (controller as any).start();
+
+    // Controller starten falls noch nicht geschehen (analog ControllerNode.js)
+    if (!this.commissioningControllerStarted) {
+      await controller.start();
       this.commissioningControllerStarted = true;
+      logger.info("Matter CommissioningController gestartet");
     }
 
-    const { ManualPairingCodeCodec, NodeId } = await import("@matter/types");
-    const { GeneralCommissioning } = await import("@matter/types/clusters");
+    const port = typeof device.port === "number" && device.port > 0 ? device.port : 5540;
+
+    const pairingData = this.resolvePairingCode(payload);
+    if (!pairingData) {
+      logger.warn({ deviceId: device.id }, "Pairing-Code fehlt");
+      return null;
+    }
+
+    const shortDiscriminator = pairingData.shortDiscriminator;
+    const setupPin = pairingData.passcode;
+
+    const nodeId = NodeId(device.nodeId ?? 0);
+
+    // Prüfe ob das Gerät bereits kommissioniert ist
+    const commissionedNodes = controller.getCommissionedNodes();
+    const commissionedNodesBefore = new Set(commissionedNodes.map(id => String(id)));
+    let targetNodeId: NodeId = nodeId;
+
+    if (!commissionedNodes.some(n => n === nodeId)) {
+      // Neues Gerät kommissionieren (analog ControllerNode.js)
+      console.log("Starte Matter Commissioning für", device.id);
+
+      const options: NodeCommissioningOptions = {
+        commissioning: {
+          regulatoryLocation: GeneralCommissioning.RegulatoryLocationType.IndoorOutdoor,
+          regulatoryCountryCode: "DE"
+        },
+        discovery: {
+          identifierData: { shortDiscriminator },
+          discoveryCapabilities: { ble:false },
+          knownAddress: { type: "udp", ip: device.address, port: port }
+        },
+        passcode: setupPin
+      };
+
+      // Vollständiges Commissioning inkl. operativer Discovery/Connect.
+      // Manche Geräte scheitern erst im finalen operativen Reconnect, obwohl AddNOC bereits erfolgreich war.
+      // Dann übernehmen wir die frisch kommissionierte NodeId aus dem Controller, statt das Pairing komplett zu verwerfen.
+      try {
+        targetNodeId = await controller.commissionNode(options);
+      } catch (err) {
+        if (!this.isOperativeReconnectFailure(err)) {
+          throw err;
+        }
+        const recoveredNodeId = this.findNewCommissionedNodeId(controller, commissionedNodesBefore);
+        if (!recoveredNodeId) {
+          throw err;
+        }
+        logger.warn(
+          { err, deviceId: device.id, recoveredNodeId: String(recoveredNodeId) },
+          "Commissioning-Reconnect fehlgeschlagen, übernehme dennoch kommissionierte NodeId"
+        );
+        targetNodeId = recoveredNodeId;
+      }
+      
+    } else {
+      console.log("Matter Gerät ist bereits kommissioniert, verbinde...", nodeId);
+    }
+
+    device.nodeId = String(targetNodeId);
+    device.isPaired = true;
+    device.pairedAt = Date.now();
+    device.isOperational = true;
+    device.isCommissionable = false;
+    return device;
+
+  }
+
+  async unpairDevice(device: MatterDevice): Promise<boolean> {
+    const nodeId = device.getNodeId();
+    if (!nodeId) return false;
+    const controller = await this.ensureCommissioningController();
+    if (!controller) {
+      logger.warn({ nodeId }, "Matter CommissioningController nicht verfügbar für unpairDevice");
+      return false;
+    }
+    const node: PairedNode = await controller.getNode(nodeId);
+    await node.decommission();
+    return true;
+  }
+
+  /**
+   * Commissioniert ein Matter-Gerät ausschließlich über den Pairing-Code (ohne bekannte IP/Port).
+   * Nutzt Discovery (mDNS/BLE je nach Plattform) basierend auf shortDiscriminator + passcode.
+   *
+   * Beispiel:
+   *   const result = await controller.pairDeviceByCode("1234-5678");
+   */
+  async pairDeviceByCode(pairingCode: string): Promise<{ nodeId: NodeId } | null> {
+    const controller = await this.ensureCommissioningController();
+    if (!controller) {
+      logger.warn("Matter CommissioningController ist nicht verfuegbar");
+      return null;
+    }
+
+    if (!this.commissioningControllerStarted) {
+      await controller.start();
+      this.commissioningControllerStarted = true;
+      logger.info("Matter CommissioningController gestartet");
+    }
 
     const pairingData = ManualPairingCodeCodec.decode(pairingCode);
     const shortDiscriminator = pairingData.shortDiscriminator;
     const setupPin = pairingData.passcode;
 
-    const nodeId = toNodeId(NodeId, deviceId);
-    const commissionedNodes = typeof (controller as any).getCommissionedNodes === "function"
-      ? (controller as any).getCommissionedNodes()
-      : [];
+    if (shortDiscriminator == null) {
+      logger.warn({ pairingData }, "Pairing-Code enthält keinen shortDiscriminator");
+      return null;
+    }
 
-    let targetNodeId = nodeId;
-    if (!commissionedNodes.includes(nodeId)) {
-      const commissioningOptions = {
+    const options: NodeCommissioningOptions = {
+      commissioning: {
         regulatoryLocation: GeneralCommissioning.RegulatoryLocationType.IndoorOutdoor,
         regulatoryCountryCode: "DE"
-      };
-      const options = {
-        commissioning: commissioningOptions,
-        discovery: {
-          knownAddress: { ip, port, type: "udp" },
-          identifierData: { shortDiscriminator },
-          discoveryCapabilities: { ble: false }
-        },
-        passcode: setupPin
-      };
-      targetNodeId = await (controller as any).commissionNode(options);
-    }
+      },
+      discovery: {
+        identifierData: { shortDiscriminator },
+        // onIpNetwork ist i.d.R. der relevante Pfad; BLE kann auf manchen Plattformen zusätzlich helfen
+        discoveryCapabilities: { onIpNetwork: true, ble: true }
+      },
+      passcode: setupPin
+    };
 
-    if (typeof (controller as any).getNode === "function") {
-      return (controller as any).getNode(targetNodeId);
+    const commissionedNodesBefore = new Set(controller.getCommissionedNodes().map(id => String(id)));
+    try {
+      const nodeId = await controller.commissionNode(options);
+      return { nodeId };
+    } catch (err) {
+      if (!this.isOperativeReconnectFailure(err)) {
+        throw err;
+      }
+      const recoveredNodeId = this.findNewCommissionedNodeId(controller, commissionedNodesBefore);
+      if (!recoveredNodeId) {
+        throw err;
+      }
+      logger.warn(
+        { err, recoveredNodeId: String(recoveredNodeId) },
+        "Commissioning-Reconnect (Pairing by Code) fehlgeschlagen, übernehme dennoch kommissionierte NodeId"
+      );
+      return { nodeId: recoveredNodeId };
     }
-    if (typeof (controller as any).connectNode === "function") {
-      return (controller as any).connectNode(targetNodeId);
-    }
-    return null;
   }
 
-  async getNode(nodeId: MatterNodeId) {
-    const controller = await this.ensureController();
+  async getButtonsForDevice(device: MatterDeviceDiscovered): Promise<string[]> {
+    console.log("getButtonsForDevice", device);
+    if( !device.nodeId) return [];
+    const node = await this.getNode(NodeId(device.nodeId));
+    if( !node) return [];
+    const buttons = node.getDevices();
+    if (buttons.length === 0) {
+      logger.warn({ nodeId: device.nodeId }, "Keine Endpoints gefunden (leer nach Connect)");
+    }
+    console.log("buttons", buttons);
+    return buttons.map(b => String(b.getNumber()));
+  }
+
+  /**
+   * Liefert einen PairedNode aus dem CommissioningController.
+   * Vorgehen analog zu `SonoffPlatform.ts`: NodeId parsen -> controller.getNode(nodeId) -> optional connect().
+   */
+  async getNode(nodeId: NodeId): Promise<PairedNode | null> {
+    console.log("getNode", String(nodeId));
+    const controller = await this.ensureCommissioningController();
+    console.log("controller startet");
     if (!controller) {
-      logger.warn({ nodeId }, "Matter Controller nicht verfügbar für getNode");
+      logger.warn({ nodeId }, "Matter CommissioningController nicht verfügbar für getNode");
       return null;
     }
-    const calls: Array<{ name: string; args: unknown[] }> = [
-      { name: "getNode", args: [nodeId] },
-      { name: "getDevice", args: [nodeId] },
-      { name: "connectToNode", args: [nodeId] },
-      { name: "connectDevice", args: [nodeId] }
-    ];
-    return this.callFirst(controller, calls, "getNode");
-  }
 
-  async readAttribute(
-    nodeId: MatterNodeId,
-    endpointId: number,
-    clusterId: number,
-    attributeId: number
-  ) {
-    const node = await this.getNode(nodeId);
-    if (node && typeof (node as any).readAttribute === "function") {
-      return (node as any).readAttribute({ endpointId, clusterId, attributeId });
+    if (!this.commissioningControllerStarted) {
+      await controller.start();
+      this.commissioningControllerStarted = true;
+      console.log("controller startet");
     }
-    const controller = await this.ensureController();
-    if (!controller) {
-      logger.warn({ nodeId }, "Matter Controller nicht verfügbar für readAttribute");
+
+    const nodes = controller.getCommissionedNodes();
+    console.log("nodes", nodes);
+
+    // Nur wenn bereits commissioned, sonst null zurück
+    if (!controller.isNodeCommissioned(nodeId)) {
+      console.log("Matter Node ist nicht commissioned", nodeId);
       return null;
     }
-    const calls: Array<{ name: string; args: unknown[] }> = [
-      { name: "readAttribute", args: [nodeId, endpointId, clusterId, attributeId] },
-      { name: "readAttribute", args: [{ nodeId, endpointId, clusterId, attributeId }] }
-    ];
-    return this.callFirst(controller, calls, "readAttribute");
+
+    const node = await controller.connectNode(nodeId);
+    console.log("Node found", node);
+
+    
+
+    return node;
   }
 
-  async writeAttribute(
-    nodeId: MatterNodeId,
-    endpointId: number,
-    clusterId: number,
-    attributeId: number,
-    value: unknown
-  ) {
-    const node = await this.getNode(nodeId);
-    if (node && typeof (node as any).writeAttribute === "function") {
-      return (node as any).writeAttribute({ endpointId, clusterId, attributeId, value });
+  async toggleSwitch(device: MatterDevice, buttonId: string) {
+    const node = await this.getNode(device.getNodeId());
+    if( node !== null){
+      const button  = node.getDeviceById(Number(buttonId) ?? 0);
+      if(!button) return false;
+      const onOff:any = button.getClusterClient(OnOff.Complete);
+      if (onOff !== undefined) {
+          if( device.getButton(buttonId)?.isOn() ?? false ){
+            onOff.on();
+          } else {
+            onOff.off();
+          }
+          return status;
+      }
     }
-    const controller = await this.ensureController();
-    if (!controller) {
-      logger.warn({ nodeId }, "Matter Controller nicht verfügbar für writeAttribute");
-      return false;
-    }
-    const calls: Array<{ name: string; args: unknown[] }> = [
-      { name: "writeAttribute", args: [nodeId, endpointId, clusterId, attributeId, value] },
-      { name: "writeAttribute", args: [{ nodeId, endpointId, clusterId, attributeId, value }] }
-    ];
-    return this.callFirst(controller, calls, "writeAttribute");
   }
 
-  async invokeCommand(
-    nodeId: MatterNodeId,
-    endpointId: number,
-    clusterId: number,
-    commandId: number,
-    payload?: Record<string, unknown>
-  ) {
-    const node = await this.getNode(nodeId);
-    if (node && typeof (node as any).invokeCommand === "function") {
-      return (node as any).invokeCommand({ endpointId, clusterId, commandId, payload });
-    }
-    const controller = await this.ensureController();
-    if (!controller) {
-      logger.warn({ nodeId }, "Matter Controller nicht verfügbar für invokeCommand");
-      return null;
-    }
-    const calls: Array<{ name: string; args: unknown[] }> = [
-      { name: "invokeCommand", args: [nodeId, endpointId, clusterId, commandId, payload] },
-      { name: "invokeCommand", args: [{ nodeId, endpointId, clusterId, commandId, payload }] }
-    ];
-    return this.callFirst(controller, calls, "invokeCommand");
-  }
 
   private deviceCallbacks = new Map<string, (event: MatterEvent) => void>();
 
@@ -187,7 +275,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     }
     
     try {
-      const controller = await this.ensureController();
+      const controller = await this.ensureCommissioningController();
       if (!controller) {
         logger.warn({ deviceId }, "Matter Controller nicht verfügbar, EventStream kann nicht gestartet werden");
         return;
@@ -254,83 +342,59 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async shutdown() {
-    const controller = this.controller;
-    if (controller && typeof (controller as any).close === "function") {
-      await (controller as any).close();
-    } else if (controller && typeof (controller as any).shutdown === "function") {
-      await (controller as any).shutdown();
+    const controller = this.commissioningController;
+    if (controller && controller.isCommissioned()){
+      controller?.close();
     }
-    this.controller = null;
+    
+    this.commissioningController = null;
+    this.commissioningControllerStarted = false;
   }
 
-  private async createController() {
-    try {
-      const matter = await loadMatterModule();
-      const candidates = [
-        matter.CommissioningController,
-        matter.Controller,
-        matter.MatterController,
-        matter.NodeController
-      ].filter(Boolean);
-      for (const candidate of candidates) {
-        try {
-          if (typeof candidate?.create === "function") {
-            return await candidate.create();
-          }
-          if (typeof candidate === "function") {
-            return new candidate();
-          }
-        } catch (err) {
-          logger.warn({ err }, "Matter Controller Kandidat konnte nicht erstellt werden");
-        }
-      }
-      logger.error("Kein kompatibler Matter Controller in @project-chip/matter.js gefunden");
-      return null;
-    } catch (err) {
-      logger.error({ err }, "Fehler beim Laden oder Erstellen des Matter Controllers");
-      return null;
-    }
-  }
-
-  private async ensureCommissioningController() {
+  private async ensureCommissioningController(): Promise<CommissioningController | null> {
     if (this.commissioningController) return this.commissioningController;
     const controller = await this.createCommissioningController();
     this.commissioningController = controller;
     return controller;
   }
 
-  private async createCommissioningController() {
+  private async createCommissioningController(): Promise<CommissioningController | null> {
     try {
-      const matter = await loadMatterModule();
-      const { Environment, Network, StorageBackendMemory, StorageService } = await import("@matter/general");
-      
+
       if (!Environment || !Environment.default) {
         logger.error("Matter Environment ist nicht verfügbar");
         return null;
       }
-      
+
       const environment = Environment.default;
       if (!environment) {
         logger.error("Matter Environment.default ist undefined");
         return null;
       }
-      
+
+      // Persistenter Matter-Storage über die vorhandene Datenbank
       const storageService =
         environment.maybeGet(StorageService) ?? new StorageService(environment);
-      storageService.factory = async () => StorageBackendMemory.create();
-      storageService.location = "memory";
+      const storage = new MatterDatabaseStorage(this.databaseManager);
+      storageService.factory = async () => storage;
+      storageService.location = "sqlite:matter";
+
+      // Netzwerk registrieren falls nicht vorhanden
       if (!environment.has(Network)) {
         environment.set(Network, new NodeNetwork());
       }
-      if (matter.CommissioningController) {
-        return new matter.CommissioningController({
-          environment: { environment, id: "smarthome-backend-controller" },
-          adminFabricLabel: "smarthome-backend",
-          autoConnect: true
-        });
-      }
-      logger.warn("Matter CommissioningController ist nicht verfügbar");
-      return null;
+
+      // CommissioningController erstellen (analog ControllerNode.js)
+      const controller = new CommissioningController({
+        environment: { environment, id: "1668012345678" },
+        adminFabricLabel: "smarthome-backend",
+        autoConnect: true
+      });
+
+      await controller.start();
+
+      logger.info("Matter CommissioningController erstellt");
+      return controller;
     } catch (err) {
       logger.error({ err }, "Fehler beim Erstellen des Matter CommissioningControllers");
       return null;
@@ -380,38 +444,62 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     }
   }
 
-  private async callFirst(
-    target: unknown,
-    calls: Array<{ name: string; args: unknown[] }>,
-    label: string
-  ) {
-    const record = target as Record<string, any>;
-    for (const call of calls) {
-      const fn = record?.[call.name];
-      if (typeof fn !== "function") continue;
-      try {
-        return await fn.apply(target, call.args);
-      } catch (err) {
-        logger.debug({ err, method: call.name }, "Matter Controller Methode fehlgeschlagen");
+  private resolvePairingCode(payload: PairingPayload): ManualPairingData {
+    const code = payload.pairingCode ?? "";
+    return ManualPairingCodeCodec.decode(code);
+  }
+
+  private async waitForNodeRemoteInitialization(node: PairedNode, timeoutMs: number): Promise<void> {
+    if (node.remoteInitializationDone) {
+      return;
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    while (!node.remoteInitializationDone && Date.now() < deadline) {
+      await this.sleep(200);
+    }
+
+    if (!node.remoteInitializationDone) {
+      throw new Error(`Matter Node Initialisierung Timeout nach ${timeoutMs}ms`);
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private findNewCommissionedNodeId(
+    controller: CommissioningController,
+    commissionedNodesBefore: Set<string>
+  ): NodeId | null {
+    const commissionedNodesAfter = controller.getCommissionedNodes();
+    for (const candidate of commissionedNodesAfter) {
+      if (!commissionedNodesBefore.has(String(candidate))) {
+        return candidate;
       }
     }
-    logger.warn({ label }, "Matter Controller Methode nicht verfügbar");
     return null;
   }
-}
 
-async function loadMatterModule(): Promise<MatterModule> {
-  const matter = (await import("@project-chip/matter.js")) as unknown;
-  return matter as MatterModule;
-}
+  private isOperativeReconnectFailure(err: unknown): boolean {
+    const message = this.stringifyError(err);
+    return (
+      message.includes("Operative reconnection with device failed") ||
+      message.includes("No discovery was requested")
+    );
+  }
 
-function toNodeId(NodeId: (id: bigint) => unknown, deviceId: string) {
-  if (!deviceId) return NodeId(BigInt(0));
-  try {
-    const asBigInt = BigInt(deviceId);
-    return NodeId(asBigInt);
-  } catch {
-    return NodeId(BigInt(0));
+  private stringifyError(err: unknown): string {
+    if (err instanceof Error) {
+      const parts = [err.message, err.stack ?? ""];
+      return parts.join("\n");
+    }
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
   }
 }
+
 

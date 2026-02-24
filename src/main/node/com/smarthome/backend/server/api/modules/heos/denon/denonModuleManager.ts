@@ -42,8 +42,8 @@ export class DenonModuleManager extends HeosModuleManager {
   async discoverDevices(): Promise<Device[]> {
     logger.info("Suche nach Denon HEOS-Geraeten");
     try {
-      const searchDurationMs = 30000;
-      const denonSpeakers = await this.deviceDiscover.discover(searchDurationMs);
+      const searchDurationMs = 30;
+      const denonSpeakers = await this.deviceDiscover.discover(searchDurationMs, []);
       logger.info({ count: denonSpeakers.length }, "Geraete gefunden");
       const speakers = await this.convertDiscoveredDevicesToDenonSpeakers(denonSpeakers);
       this.actionManager.saveDevices(speakers);

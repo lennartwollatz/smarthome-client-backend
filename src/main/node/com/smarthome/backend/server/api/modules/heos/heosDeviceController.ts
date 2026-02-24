@@ -449,6 +449,8 @@ export class Connection {
   private state = "disconnected";
   private stateListeners: Array<(state: string) => void> = [];
   private eventListeners: Array<(event: Record<string, unknown>) => void> = [];
+  private readonly connectTimeoutMs = 5000;
+  private readonly disconnectTimeoutMs = 1000;
 
   constructor(address: string) {
     this.address = address;
@@ -490,13 +492,48 @@ export class Connection {
     }
     this.setState("connecting");
     this.socket = new net.Socket();
-    await new Promise<void>((resolve, reject) => {
-      this.socket!.once("error", reject);
-      this.socket!.connect(1255, this.address, () => {
-        this.socket!.off("error", reject);
-        resolve();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const socket = this.socket!;
+        let settled = false;
+        const cleanup = () => {
+          clearTimeout(timer);
+          socket.off("error", onError);
+          socket.off("connect", onConnect);
+        };
+        const finishResolve = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve();
+        };
+        const finishReject = (err: Error) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(err);
+        };
+        const onError = (err: Error) => finishReject(err);
+        const onConnect = () => finishResolve();
+        const timer = setTimeout(() => {
+          finishReject(new Error(`Timeout beim Verbinden mit HEOS Host ${this.address}`));
+          socket.destroy();
+        }, this.connectTimeoutMs);
+
+        socket.once("error", onError);
+        socket.once("connect", onConnect);
+        socket.connect(1255, this.address);
       });
-    });
+    } catch (err) {
+      try {
+        this.socket?.destroy();
+      } catch {
+        // ignore socket destroy errors during failed connect
+      }
+      this.socket = undefined;
+      this.setState("disconnected");
+      throw err;
+    }
     this.socket.on("data", chunk => {
       this.buffer += chunk.toString("utf8");
       this.emitEvent({ raw: chunk.toString("utf8") });
@@ -506,11 +543,42 @@ export class Connection {
 
   async disconnect() {
     if (!this.socket) return;
+    const socket = this.socket;
+    this.socket = undefined;
     this.setState("disconnecting");
     await new Promise<void>(resolve => {
-      this.socket!.end(() => resolve());
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.off("close", onClose);
+        socket.off("error", onError);
+      };
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      const onClose = () => finish();
+      const onError = () => finish();
+      const timer = setTimeout(() => {
+        try {
+          socket.destroy();
+        } catch {
+          // ignore socket destroy errors during disconnect
+        }
+        finish();
+      }, this.disconnectTimeoutMs);
+
+      socket.once("close", onClose);
+      socket.once("error", onError);
+
+      try {
+        socket.end(() => finish());
+      } catch {
+        finish();
+      }
     });
-    this.socket = undefined;
     this.setState("disconnected");
   }
 

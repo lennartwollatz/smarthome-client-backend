@@ -49,7 +49,7 @@ export abstract class DeviceTV extends Device {
 
   constructor(init?: Partial<DeviceTV>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.TV;
     this.icon = "&#128250;";
     this.typeLabel = "deviceType.tv";

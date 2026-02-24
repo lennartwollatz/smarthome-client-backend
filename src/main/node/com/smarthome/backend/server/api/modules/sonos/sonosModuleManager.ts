@@ -11,7 +11,7 @@ import { SonosEvent } from "./sonosEvent.js";
 import { Device } from "../../../../model/index.js";
 import { SonosEventStreamManager } from "./sonosEventStreamManager.js";
 import { EventStreamManager } from "../../../events/eventStreamManager.js";
-import { SONOSCONFIG, SONOSMODULE } from "./sonosModule.js";
+import { SONOSCONFIG } from "./sonosModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 
 export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, SonosDeviceController, SonosDeviceController, SonosEvent, DeviceSpeaker, SonosDeviceDiscover, SonosDeviceDiscovered> {
@@ -33,10 +33,9 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
   async discoverDevices(): Promise<Device[]> {
     logger.info("Suche nach Sonos-Geraeten");
     try {
-      const discoveredDevices = await this.deviceDiscover.discover(5);
+      const discoveredDevices = await this.deviceDiscover.discover(5, []);
       logger.info({ count: discoveredDevices.length }, "Geraete gefunden");
       
-      this.initialiseEventStreamManager();
       // TODO: eventuell sollte die Konvertierung zu einem SonosSpeaker und Speicherung
       // erst dann geschehen, wenn das Device übernommen wird.
       const speakers = await this.convertDiscoveredDevicesToSonosSpeakers(discoveredDevices);

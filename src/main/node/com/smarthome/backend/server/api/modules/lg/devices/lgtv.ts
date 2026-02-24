@@ -40,18 +40,22 @@ export class LGTV extends DeviceTV {
     if (!this.lg) {
       return;
     }
-    if (this.clientKey) {
-      const selectedApp = await this.lg.getSelectedApp(this);
-      this.selectedApp = selectedApp ?? undefined;
-      if (selectedApp) {
-        const selectedChannel = await this.lg.getSelectedChannel(this);
-        this.selectedChannel = selectedChannel ?? undefined;
-        const vol = await this.lg.getVolume(this);
-        if (typeof vol === "number") {
-          this.volume = vol;
+    try {
+      if (this.clientKey) {
+        const selectedApp = await this.lg.getSelectedApp(this);
+        this.selectedApp = selectedApp ?? undefined;
+        if (selectedApp) {
+          const selectedChannel = await this.lg.getSelectedChannel(this);
+          this.selectedChannel = selectedChannel ?? undefined;
+          const vol = await this.lg.getVolume(this);
+          if (typeof vol === "number") {
+            this.volume = vol;
+          }
         }
+        this.power = Boolean(this.selectedChannel || this.selectedApp);
       }
-      this.power = Boolean(this.selectedChannel || this.selectedApp);
+    } catch {
+      this.isConnected = false;
     }
   }
 

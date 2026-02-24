@@ -11,6 +11,8 @@ import { createMatterModuleRouter } from "./modules/matterModule.service.js";
 import { createSonosModuleRouter } from "./modules/sonosModule.service.js";
 import { createWACLightingModuleRouter } from "./modules/waclightingModule.service.js";
 import { createBMWModuleRouter } from "./modules/bmwModule.service.js";
+import { createAppleCalendarModuleRouter } from "./modules/appleCalendarModule.service.js";
+import { createCalendarModuleRouter } from "./modules/calendarModule.service.js";
 
 type Deps = {
   databaseManager: DatabaseManager;
@@ -22,6 +24,8 @@ export function createModuleRouter(deps: Deps) {
   const router = Router();
   const moduleRepository = new JsonRepository<ModuleModel>(deps.databaseManager, "Module");
 
+  router.use("/calendar", createCalendarModuleRouter(deps));
+  router.use("/calendar-apple", createAppleCalendarModuleRouter(deps));
   router.use("/denon", createDenonModuleRouter(deps));
   router.use("/matter", createMatterModuleRouter(deps));
   router.use("/hue", createHueModuleRouter(deps));
@@ -37,6 +41,15 @@ export function createModuleRouter(deps: Deps) {
   });
 
   router.get("/:moduleId/install", (req, res) => {
+    if (req.params.moduleId === "calendar") {
+      // Zentrales Kalender-Modul ist immer aktiv
+      const module = getOrCreateModule(moduleRepository, req.params.moduleId);
+      module.isInstalled = true;
+      module.isActive = true;
+      moduleRepository.save(req.params.moduleId, module);
+      res.status(200).json(true);
+      return;
+    }
     const module = getOrCreateModule(moduleRepository, req.params.moduleId);
     module.isInstalled = true;
     module.isActive = true;
@@ -46,6 +59,15 @@ export function createModuleRouter(deps: Deps) {
   });
 
   router.get("/:moduleId/uninstall", (req, res) => {
+    if (req.params.moduleId === "calendar") {
+      // Zentrales Kalender-Modul darf nicht deinstalliert werden
+      const module = getOrCreateModule(moduleRepository, req.params.moduleId);
+      module.isInstalled = true;
+      module.isActive = true;
+      moduleRepository.save(req.params.moduleId, module);
+      res.status(200).json(true);
+      return;
+    }
     const module = getOrCreateModule(moduleRepository, req.params.moduleId);
     module.isInstalled = false;
     module.isActive = false;
@@ -84,6 +106,13 @@ export function createModuleRouter(deps: Deps) {
   router.post("/:moduleId", (req, res) => {
     const request = req.body as { isActive?: boolean };
     const module = getOrCreateModule(moduleRepository, req.params.moduleId);
+    if (req.params.moduleId === "calendar") {
+      module.isActive = true;
+      module.isInstalled = true;
+      moduleRepository.save(req.params.moduleId, module);
+      res.status(200).json(true);
+      return;
+    }
     module.isActive = Boolean(request.isActive);
     if (module.isActive) {
       deps.actionManager.addDevicesForModule(req.params.moduleId);

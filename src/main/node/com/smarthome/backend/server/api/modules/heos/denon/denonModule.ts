@@ -3,7 +3,8 @@ import { ModuleConfig, ModuleModel } from "../../modules.js";
 export const DENONCONFIG: ModuleConfig = {
     id: "denon",
     managerId: "denon-event-stream-manager",
-    defaultDeviceName: "Denon HEOS Device"
+    defaultDeviceName: "Denon HEOS Device",
+    deviceTypeName: "DenonDeviceDiscovered"
 }
 
 export const DENONMODULE: ModuleModel = {

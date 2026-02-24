@@ -31,7 +31,7 @@ export abstract class DeviceMotion extends Device {
 
   constructor(init?: Partial<DeviceMotion>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.MOTION;
     this.icon = "&#128064;";
     this.typeLabel = "deviceType.motion";

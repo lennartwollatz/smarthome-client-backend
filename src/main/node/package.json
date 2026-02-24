@@ -9,10 +9,12 @@
     "start": "node dist/com/smarthome/backend/index.js"
   },
   "dependencies": {
+    "@matter/nodejs-ble": "^0.15.6",
     "@project-chip/matter.js": "^0.16.7",
     "better-sqlite3": "^9.5.0",
     "bmw-connected-drive": "^2.4.0",
     "cors": "^2.8.5",
+    "dav": "^1.8.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "miio": "^0.15.6",

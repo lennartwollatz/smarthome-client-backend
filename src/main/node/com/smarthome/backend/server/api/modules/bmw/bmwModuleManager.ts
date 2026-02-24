@@ -123,7 +123,7 @@ export class BMWModuleManager extends ModuleManager<
       return [];
     }
     try {
-      const discoveredVehicles = await this.deviceDiscover.discover(0);
+      const discoveredVehicles = await this.deviceDiscover.discover(0, []);
       // Wenn der Login erfolgreich war, liegt jetzt ein OAuth Token im TokenStore -> CaptchaToken entfernen.
       this.clearCaptchaTokenIfOauthTokenPresent();
       const cars = await this.convertDiscoveredVehiclesToCars(discoveredVehicles);

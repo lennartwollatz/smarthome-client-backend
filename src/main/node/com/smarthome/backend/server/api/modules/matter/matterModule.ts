@@ -3,7 +3,8 @@ import { ModuleConfig, ModuleModel } from "../modules.js";
 export const MATTERCONFIG: ModuleConfig = {
     id: "matter",
     managerId: "matter-event-stream-manager",
-    defaultDeviceName: "Matter Device"
+    defaultDeviceName: "Matter Device",
+    deviceTypeName: "MatterDeviceDiscovered",
 }
 
 

@@ -15,3 +15,4 @@ export * from './DeviceVacuumCleaner.js';
 export * from './DeviceFan.js';
 export * from './DeviceFanLight.js';
 export * from './DeviceCar.js';
+export * from './DeviceCalendar.js';

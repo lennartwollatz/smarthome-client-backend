@@ -144,6 +144,16 @@ export function createHueModuleRouter(deps: Deps) {
     }
   };
 
+  router.get("/bridges", async (_req, res) => {
+    try {
+      const bridges = await hueModule.getBridges();
+      res.status(200).json(bridges);
+    } catch (error) {
+      logger.error({ error }, "Fehler beim Discover von Hue-Bridges");
+      res.status(500).json({ error: "Fehler beim Discover von Hue-Bridges" });
+    }
+  });
+
   router.get("/bridges/discover", async (_req, res) => {
     try {
       const bridges = await hueModule.discoverBridges();

@@ -43,7 +43,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
   async discoverDevices(): Promise<Device[]> {
     logger.info("Suche nach Xiaomi-Geraeten");
     try {
-      const discoveredDevices = await this.deviceDiscover.discover(5);
+      const discoveredDevices = await this.deviceDiscover.discover(5, []);
       logger.info({ count: discoveredDevices.length }, "Geraete gefunden");
 
       // TODO: eventuell sollte die Konvertierung zu einem XiaomiVacuumCleaner und Speicherung

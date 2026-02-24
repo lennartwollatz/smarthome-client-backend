@@ -18,7 +18,7 @@ export abstract class DeviceLightDimmerTemperatureColor extends DeviceLightDimme
 
   constructor(init?: Partial<DeviceLightDimmerTemperatureColor>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.LIGHT_DIMMER_TEMPERATURE_COLOR;
     this.icon = "&#128161;";
     this.typeLabel = "deviceType.light-dimmer-temperature-color";

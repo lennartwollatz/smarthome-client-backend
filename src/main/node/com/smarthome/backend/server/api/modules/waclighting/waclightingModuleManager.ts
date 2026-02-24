@@ -48,7 +48,7 @@ export abstract class WACLightingModuleManager extends ModuleManager<WACLighting
     logger.info("Suche nach WAC LIGHTING-Geraeten");
     try {
       const searchDurationSek = 30;
-      const wacLightingDevices = await this.deviceDiscover.discover(searchDurationSek);
+      const wacLightingDevices = await this.deviceDiscover.discover(searchDurationSek, []);
       logger.info({ count: wacLightingDevices.length }, "Geraete gefunden");
       const fans = await this.convertDiscoveredDevicesToWACLightingDevices(wacLightingDevices);
       this.actionManager.saveDevices(fans);

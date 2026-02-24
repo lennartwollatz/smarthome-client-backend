@@ -68,6 +68,7 @@ export class WACFanLight extends DeviceFanLight {
 
       logger.debug({ deviceId: this.id }, "WAC Fan Light Werte aktualisiert");
     } catch (err) {
+      this.isConnected = false;
       logger.error({ err, deviceId: this.id }, "Fehler beim Aktualisieren der WAC Fan Light Werte");
     }
   }

@@ -24,11 +24,21 @@ export class Device {
   quickAccess?: boolean;
 
   constructor(init?: Partial<Device>) {
-    Object.assign(this, init);
+    this.assignInit(init);
+  }
+
+  /**
+   * Initialdaten übernehmen, aber Runtime-Felder (z.B. triggerListeners) ignorieren.
+   * Viele Device-Subklassen werden aus persisted JSON reconstrued -> Map darf dabei nie überschrieben werden.
+   */
+  protected assignInit(init?: Partial<Device>) {
+    if (!init || typeof init !== "object") return;
+    const { triggerListeners: _ignore, ...rest } = init as any;
+    Object.assign(this, rest);
   }
 
   private ensureTriggerListenersInitialized() {
-    if (!this.triggerListeners) {
+    if (!(this.triggerListeners instanceof Map)) {
       this.triggerListeners = new Map();
     }
   }
@@ -48,7 +58,8 @@ export class Device {
   }
 
   removeListener(key?: string, name?: string) {
-    if (!key || !name || !this.triggerListeners) return;
+    if (!key || !name) return;
+    this.ensureTriggerListenersInitialized();
     const list = this.triggerListeners.get(name);
     if (!list) return;
     const filtered = list.filter(listener => listener.getParams()?.key !== key);
@@ -73,4 +84,9 @@ export class Device {
   protected initializeFunctionsTrigger() {}
 
   public async updateValues(): Promise<void> {}
+
+  toJSON(): Record<string, unknown> {
+    const { triggerListeners: _ignore, ...rest } = this as any;
+    return rest;
+  }
 }

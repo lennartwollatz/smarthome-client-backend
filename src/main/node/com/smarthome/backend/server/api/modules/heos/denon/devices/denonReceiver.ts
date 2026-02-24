@@ -56,6 +56,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
         this.volume = currentVolume;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Lautstaerke");
       });
 
@@ -65,6 +66,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
         this.muted = isMuted;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren des Muted Attributs");
       });
 
@@ -74,6 +76,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
         this.playState = currentPlayState;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren des PlayState");
       });
 
@@ -83,6 +86,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
         this.zones = zones;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Zonen");
       });
 
@@ -92,6 +96,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
         this.sources = sources;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Quellen");
       });
 
@@ -101,6 +106,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
         this.subwoofers = subwoofers;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Subwoofer");
       });
 
@@ -111,6 +117,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
         this.volumeMax = volumeMax;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Lautstaerke-Konfiguration");
       });
   }

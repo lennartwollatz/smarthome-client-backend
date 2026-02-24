@@ -21,7 +21,7 @@ export abstract class DeviceTemperature extends Device {
 
   constructor(init?: Partial<DeviceTemperature>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.TEMPERATURE;
     this.icon = "&#127777;";
     this.typeLabel = "deviceType.temperature";

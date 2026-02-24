@@ -67,6 +67,7 @@ export class HeosSpeaker extends DeviceSpeaker {
         this.volume = volume;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Lautstaerke");
       });
 
@@ -76,6 +77,7 @@ export class HeosSpeaker extends DeviceSpeaker {
         this.muted = mute;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren des Muted Attributs");
       });
 
@@ -85,6 +87,7 @@ export class HeosSpeaker extends DeviceSpeaker {
         this.playState = playState;
       })
       .catch(err => {
+        this.isConnected = false;
         logger.error({ err, id: this.id }, "Fehler beim Initialisieren des PlayState");
       });
   }

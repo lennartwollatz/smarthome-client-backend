@@ -1,9 +1,11 @@
-import { ModuleConfig, ModuleModel } from "../modules.js";
+import { ModuleBridggedConfig, ModuleModel } from "../modules.js";
 
-export const HUECONFIG: ModuleConfig = {
+export const HUECONFIG: ModuleBridggedConfig = {
     id: "hue",
     managerId: "hue-event-stream-manager",
-    defaultDeviceName: "Hue Device"
+    defaultDeviceName: "Hue Device",
+    deviceTypeName: "HueDeviceDiscovered",
+    bridgeTypeName: "HueBridgeDiscovered"
 }
     	
 export const HUEMODULE: ModuleModel = {

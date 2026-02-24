@@ -44,7 +44,7 @@ export abstract class DeviceSwitchEnergy extends DeviceSwitch {
 
   constructor(init?: Partial<DeviceSwitchEnergy>) {
     super(init);
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.SWITCH_ENERGY;
     this.icon = "⚡";
     this.typeLabel = "deviceType.switch-energy";

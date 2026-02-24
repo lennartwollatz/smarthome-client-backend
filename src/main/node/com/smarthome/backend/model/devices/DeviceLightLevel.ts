@@ -26,7 +26,7 @@ export abstract class DeviceLightLevel extends Device {
 
   constructor(init?: Partial<DeviceLightLevel>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.LIGHT_LEVEL;
     this.icon = "&#9728;";
     this.typeLabel = "deviceType.lightLevel";

@@ -40,18 +40,23 @@ export class BMWCar extends DeviceCar {
       logger.debug({ deviceId: this.id }, "BMW updateValues uebersprungen - Credentials fehlen");
       return;
     }
-    const rawStatus = await this.bmwController.getVehicleStatus(credentials, this.vin);
-    if (!rawStatus) return;
-    const status = this.bmwController.toCarStatus(rawStatus);
-    this.fuelLevelPercent = status.fuelLevelPercent;
-    this.rangeKm = status.rangeKm;
-    this.mileageKm = status.mileageKm;
-    this.lockedState = status.lockedState;
-    this.inUseState = status.inUseState;
-    this.climateControlState = status.climateControlState;
-    this.location = status.location;
-    this.windows = status.windows;
-    this.doors = status.doors;
+    try {
+      const rawStatus = await this.bmwController.getVehicleStatus(credentials, this.vin);
+      if (!rawStatus) return;
+      const status = this.bmwController.toCarStatus(rawStatus);
+      this.fuelLevelPercent = status.fuelLevelPercent;
+      this.rangeKm = status.rangeKm;
+      this.mileageKm = status.mileageKm;
+      this.lockedState = status.lockedState;
+      this.inUseState = status.inUseState;
+      this.climateControlState = status.climateControlState;
+      this.location = status.location;
+      this.windows = status.windows;
+      this.doors = status.doors;
+    } catch (err) {
+      this.isConnected = false;
+      logger.error({ err, deviceId: this.id }, "Fehler beim Aktualisieren der BMW Werte");
+    }
   }
 
   protected executeStartClimateControl(): void {

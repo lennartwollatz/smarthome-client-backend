@@ -14,6 +14,31 @@ type WACDeviceStatus = {
 };
 
 export class WACLightingDeviceController extends ModuleDeviceControllerEvent<WACLightingEvent, DeviceFanLight> {
+  private isConnectionIssue(err: unknown): boolean {
+    if (!err || typeof err !== "object") {
+      return false;
+    }
+
+    const maybeError = err as {
+      message?: string;
+      cause?: { code?: string; message?: string; name?: string };
+    };
+
+    const message = maybeError.message ?? "";
+    const causeName = maybeError.cause?.name ?? "";
+    const causeCode = maybeError.cause?.code ?? "";
+    const causeMessage = maybeError.cause?.message ?? "";
+    const combined = `${message} ${causeName} ${causeCode} ${causeMessage}`.toLowerCase();
+
+    return (
+      combined.includes("connect timeout") ||
+      combined.includes("etimedout") ||
+      combined.includes("econnrefused") ||
+      combined.includes("ehostunreach") ||
+      combined.includes("enetunreach") ||
+      combined.includes("socket hang up")
+    );
+  }
   
   /**
    * Sendet eine HTTP POST-Anfrage an ein WAC Lighting-Gerät
@@ -37,6 +62,10 @@ export class WACLightingDeviceController extends ModuleDeviceControllerEvent<WAC
       const data = await response.json();
       return data;
     } catch (err) {
+      if (this.isConnectionIssue(err)) {
+        logger.debug({ address }, "WAC Lighting-Gerät aktuell nicht erreichbar");
+        return null;
+      }
       logger.warn({ err, address }, "WAC Lighting HTTP-Request fehlgeschlagen");
       return null;
     }

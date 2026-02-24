@@ -4,6 +4,8 @@ import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { MatterDeviceDiscovered } from "./matterDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
+import { MATTERCONFIG, MATTERMODULE } from "./matterModule.js";
+import { matterVendors } from "./matterVendors.js";
 
 type MdnsInstance = ReturnType<typeof mdns>;
 
@@ -17,7 +19,11 @@ type ServiceCache = {
 };
 
 export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDiscovered> {
-  private static SERVICE_TYPE = "_matter._tcp.local";
+  /** Operational Discovery (bereits gepaarte Geraete) */
+  public static SERVICE_TYPE_OPERATIONAL = "_matter._tcp.local";
+  /** Commissionable Discovery (noch nicht gepaarte Geraete) */
+  public static SERVICE_TYPE_COMMISSIONABLE = "_matterc._udp.local";
+
   private mdnsInstances: MdnsInstance[] = [];
   private mdnsTimers: Array<NodeJS.Timeout> = [];
   private serviceCache = new Map<string, ServiceCache>();
@@ -29,15 +35,14 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
   }
 
   getModuleName(): string {
-    return "Matter";
+    return MATTERMODULE.name;
   }
 
   getDiscoveredDeviceTypeName(): string {
-    return "MatterDeviceDiscovered";
+    return MATTERCONFIG.deviceTypeName;
   }
 
   public async startDiscovery(timeoutSeconds: number): Promise<MatterDeviceDiscovered[]> {
-    logger.info({ serviceType: MatterDeviceDiscover.SERVICE_TYPE }, "Starte mDNS-Discovery fuer Matter");
     this.devicesMap.clear();
     this.serviceCache.clear();
     this.ipv4Addresses.clear();
@@ -66,15 +71,18 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
           instance.on("response", (response: any) => this.handleMdnsResponse(response));
           const query = () => {
             instance.query({
-              questions: [{ name: MatterDeviceDiscover.SERVICE_TYPE, type: "PTR" }]
+              questions: [
+                { name: MatterDeviceDiscover.SERVICE_TYPE_OPERATIONAL, type: "PTR" },
+                { name: MatterDeviceDiscover.SERVICE_TYPE_COMMISSIONABLE, type: "PTR" }
+              ]
             });
           };
           query();
           const timer = setInterval(query, 2000);
           this.mdnsTimers.push(timer);
           logger.info(
-            { iface: addr.address, serviceType: MatterDeviceDiscover.SERVICE_TYPE },
-            "mDNS Discovery gestartet"
+            { iface: addr.address },
+            "mDNS Discovery gestartet (operational + commissionable)"
           );
         } catch (err) {
           logger.warn({ err, iface: addr.address }, "Konnte mDNS nicht starten");
@@ -114,7 +122,9 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
       }
       if (record.type === "TXT") {
         const entry = this.ensureService(record.name as string);
-        entry.txt = this.parseTxt(record.data);
+        const parsed = this.parseTxt(record.data);
+        // Merge statt ueberschreiben, damit Daten aus mehreren Responses erhalten bleiben
+        entry.txt = { ...(entry.txt ?? {}), ...parsed };
       }
       if (record.type === "A") {
         const entry = this.findServiceByHost(record.name);
@@ -146,12 +156,35 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
     return undefined;
   }
 
+  /**
+   * Parst TXT-Record-Daten in key=value Paare.
+   * Unterstuetzt echte Buffer-Objekte, JSON-serialisierte Buffer ({type:"Buffer",data:[...]})
+   * und plain Strings.
+   */
   private parseTxt(data: any[]): Record<string, string> {
     const txt: Record<string, string> = {};
     (data ?? []).forEach(entry => {
-      const text = Buffer.isBuffer(entry) ? entry.toString("utf8") : String(entry);
-      const [key, value] = text.split("=", 2);
-      if (key) txt[key] = value ?? "";
+      let text: string;
+      if (Buffer.isBuffer(entry)) {
+        text = entry.toString("utf8");
+      } else if (
+        entry && typeof entry === "object" &&
+        entry.type === "Buffer" && Array.isArray(entry.data)
+      ) {
+        // JSON-serialisierter Buffer: {type: "Buffer", data: [byte, byte, ...]}
+        text = Buffer.from(entry.data).toString("utf8");
+      } else {
+        text = String(entry ?? "");
+      }
+      const eqIdx = text.indexOf("=");
+      if (eqIdx > 0) {
+        const key = text.substring(0, eqIdx);
+        const value = text.substring(eqIdx + 1);
+        if (key) txt[key] = value;
+      } else if (text.trim()) {
+        // Schluessel ohne Wert (Flag)
+        txt[text.trim()] = "";
+      }
     });
     return txt;
   }
@@ -163,10 +196,14 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
       return;
     }
     if (this.ipv4Addresses.has(ipv4)) {
+      // Wenn das Geraet schon existiert, aktualisiere es mit neuen TXT-Daten
+      this.tryMergeDevice(ipv4, serviceName, txt);
       return;
     }
-    const host = service.host ?? ipv4;
     const instanceName = getTxtValue(txt, ["DN", "dn", "name"]) ?? serviceName ?? ipv4;
+    const displayName = sanitizeDiscoveredName(instanceName);
+
+    // Commissioning-Felder (aus _matterc._udp)
     const [vendorId, productId] = parseVendorProduct(getTxtValue(txt, ["VP", "vp"]) ?? "");
     const discriminator = parseNumber(getTxtValue(txt, ["D", "d", "discriminator"]));
     const deviceType = parseNumber(getTxtValue(txt, ["DT", "dt", "deviceType"]));
@@ -175,39 +212,163 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
     const rotatingId = getTxtValue(txt, ["RI", "ri", "rotatingId"]);
     const commissionMode = parseNumber(getTxtValue(txt, ["CM", "cm", "commissioningMode"]));
     const isCommissionable = typeof commissionMode === "number" ? commissionMode > 0 : false;
-    const isOperational = true;
+
+    // Name bevorzugt aus Vendor/Product ableiten (falls bekannt), sonst displayName/Fallback
+    const vendorProduct = (vendorId != null && productId != null)
+      ? matterVendors.getVendorAndProductName(vendorId, productId)
+      : null;
+    const nameFromVendor = vendorProduct?.productName
+      ? `${vendorProduct.vendorName} ${vendorProduct.productName}`.trim()
+      : null;
+    const preferredName = nameFromVendor ?? (displayName || "Matter Device");
+
+    // Operational TXT-Felder (aus _matter._tcp – MRP Parameter)
+    const sessionIdleInterval = parseNumber(getTxtValue(txt, ["SII", "sii"]));
+    const sessionActiveInterval = parseNumber(getTxtValue(txt, ["SAI", "sai"]));
+    const sessionActiveThreshold = parseNumber(getTxtValue(txt, ["SAT", "sat"]));
+    const tcpRaw = getTxtValue(txt, ["T", "t"]);
+    const tcpSupported = tcpRaw != null ? tcpRaw !== "0" : undefined;
+
+    // Servicename-Format fuer operational: "{compressedFabricId}-{nodeId}._matter._tcp.local"
+    const { compressedFabricId, operationalNodeId } = parseOperationalServiceName(serviceName);
+    const isOperational = Boolean(compressedFabricId && operationalNodeId);
+
     const address = ipv4;
     const id = buildDeviceId(
-      getTxtValue(txt, ["id", "ID", "nodeId", "nodeID"]),
-      instanceName,
+      operationalNodeId ?? getTxtValue(txt, ["id", "ID", "nodeId", "nodeID"]),
+      // Wichtig: Service-Type-Suffixe aus der ID entfernen
+      displayName,
       address,
       discriminator
     );
 
     if (this.devicesMap.has(id)) return;
 
-    const device = new MatterDeviceDiscovered(
+    const device = new MatterDeviceDiscovered({
       id,
-      instanceName || "Matter Device",
-      address || "",
-      service.port ?? 5540,
-      vendorId ?? undefined,
-      productId ?? undefined,
-      discriminator ?? undefined,
-      deviceType ?? undefined,
-      instanceName ?? undefined,
-      pairingHint ?? undefined,
-      pairingInstruction ?? undefined,
-      rotatingId ?? undefined,
+      // Primär aus vendorId/productId über matterVendors, sonst displayName/Fallback
+      name: preferredName,
+      address: address || "",
+      port: service.port ?? 5540,
+      vendorId: vendorId ?? undefined,
+      productId: productId ?? undefined,
+      discriminator: discriminator ?? undefined,
+      deviceType: deviceType ?? undefined,
+      instanceName: instanceName ?? undefined,
+      pairingHint: pairingHint ?? undefined,
+      pairingInstruction: pairingInstruction ?? undefined,
+      rotatingId: rotatingId ?? undefined,
       isCommissionable,
       isOperational,
-      Date.now()
-    );
+      sessionIdleInterval: sessionIdleInterval ?? undefined,
+      sessionActiveInterval: sessionActiveInterval ?? undefined,
+      sessionActiveThreshold: sessionActiveThreshold ?? undefined,
+      tcpSupported,
+      compressedFabricId: compressedFabricId ?? undefined,
+      operationalNodeId: operationalNodeId ?? undefined,
+      txtRecord: Object.keys(txt).length > 0 ? { ...txt } : undefined,
+      isPaired: false
+    });
 
     this.devicesMap.set(id, device);
     this.ipv4Addresses.add(ipv4);
-    logger.info({ deviceId: id, address }, "Matter-Geraet gefunden");
+    logger.info(
+      {
+        deviceId: id,
+        address,
+        deviceType: deviceType ?? undefined,
+        vendorId: vendorId ?? undefined,
+        productId: productId ?? undefined,
+        isCommissionable,
+        isOperational,
+        txtKeys: Object.keys(txt)
+      },
+      "Matter-Geraet gefunden"
+    );
   }
+
+  private tryMergeDevice(ipv4: string, serviceName: string, txt: Record<string, string>) {
+    const existing = Array.from(this.devicesMap.values()).find(d => d.address === ipv4);
+    if (!existing) return;
+
+    // Commissioning-Felder nachtraeglich ergaenzen (falls noch leer)
+    const [vendorId, productId] = parseVendorProduct(getTxtValue(txt, ["VP", "vp"]) ?? "");
+    if (vendorId != null && existing.vendorId == null) existing.vendorId = vendorId;
+    if (productId != null && existing.productId == null) existing.productId = productId;
+
+    const discriminator = parseNumber(getTxtValue(txt, ["D", "d", "discriminator"]));
+    if (discriminator != null && existing.discriminator == null) existing.discriminator = discriminator;
+
+    const deviceType = parseNumber(getTxtValue(txt, ["DT", "dt", "deviceType"]));
+    if (deviceType != null && existing.deviceType == null) existing.deviceType = deviceType;
+
+    const pairingHint = getTxtValue(txt, ["PH", "ph", "pairingHint"]);
+    if (pairingHint && !existing.pairingHint) existing.pairingHint = pairingHint;
+
+    const pairingInstruction = getTxtValue(txt, ["PI", "pi", "pairingInstruction"]);
+    if (pairingInstruction && !existing.pairingInstruction) existing.pairingInstruction = pairingInstruction;
+
+    const rotatingId = getTxtValue(txt, ["RI", "ri", "rotatingId"]);
+    if (rotatingId && !existing.rotatingId) existing.rotatingId = rotatingId;
+
+    const dn = getTxtValue(txt, ["DN", "dn", "name"]);
+    if (dn && (!existing.instanceName || existing.instanceName === existing.address)) {
+      existing.instanceName = dn;
+      existing.name = dn;
+    }
+
+    // Operational-Felder nachtraeglich ergaenzen
+    const sii = parseNumber(getTxtValue(txt, ["SII", "sii"]));
+    if (sii != null && existing.sessionIdleInterval == null) existing.sessionIdleInterval = sii;
+    const sai = parseNumber(getTxtValue(txt, ["SAI", "sai"]));
+    if (sai != null && existing.sessionActiveInterval == null) existing.sessionActiveInterval = sai;
+    const sat = parseNumber(getTxtValue(txt, ["SAT", "sat"]));
+    if (sat != null && existing.sessionActiveThreshold == null) existing.sessionActiveThreshold = sat;
+
+    const tcpRaw = getTxtValue(txt, ["T", "t"]);
+    if (tcpRaw != null && existing.tcpSupported == null) existing.tcpSupported = tcpRaw !== "0";
+
+    const { compressedFabricId, operationalNodeId } = parseOperationalServiceName(serviceName);
+    if (compressedFabricId && !existing.compressedFabricId) existing.compressedFabricId = compressedFabricId;
+    if (operationalNodeId && !existing.operationalNodeId) existing.operationalNodeId = operationalNodeId;
+
+    if (compressedFabricId && operationalNodeId) existing.isOperational = true;
+
+    const commissionMode = parseNumber(getTxtValue(txt, ["CM", "cm", "commissioningMode"]));
+    if (typeof commissionMode === "number" && commissionMode > 0) existing.isCommissionable = true;
+
+    // TXT-Record mergen
+    if (Object.keys(txt).length > 0) {
+      existing.txtRecord = { ...(existing.txtRecord ?? {}), ...txt };
+    }
+  }
+}
+
+/**
+ * Extrahiert compressedFabricId und nodeId aus dem operativen Servicenamen.
+ * Format: "{compressedFabricId}-{nodeId}._matter._tcp.local"
+ * Beispiel: "E88D9A700E9C3DE2-0000000033F78B0E._matter._tcp.local"
+ */
+function parseOperationalServiceName(serviceName: string): { compressedFabricId?: string; operationalNodeId?: string } {
+  if (!serviceName) return {};
+  // Entferne den Service-Suffix
+  const prefixes = ["."+ MatterDeviceDiscover.SERVICE_TYPE_OPERATIONAL, "."+ MatterDeviceDiscover.SERVICE_TYPE_COMMISSIONABLE];
+  let instancePart = serviceName;
+  for (const suffix of prefixes) {
+    if (serviceName.endsWith(suffix)) {
+      instancePart = serviceName.slice(0, -suffix.length);
+      break;
+    }
+  }
+  // Operational-Format: {fabricId}-{nodeId} (beide Hex)
+  const match = instancePart.match(/^([0-9A-Fa-f]{16})-([0-9A-Fa-f]{16})$/);
+  if (match) {
+    return {
+      compressedFabricId: match[1],
+      operationalNodeId: match[2]
+    };
+  }
+  return {};
 }
 
 function buildDeviceId(
@@ -217,7 +378,7 @@ function buildDeviceId(
   discriminator: number | null | undefined
 ) {
   if (nodeId) return `matter-${nodeId}`;
-  if (instanceName) return `matter-${instanceName}`;
+  if (instanceName) return `matter-${sanitizeDiscoveredName(instanceName)}`;
   if (address) return `matter-${address}`;
   if (discriminator != null) return `matter-${discriminator}`;
   return `matter-${Math.random().toString(16).slice(2)}`;
@@ -243,3 +404,22 @@ function parseNumber(value?: string | null) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+function sanitizeDiscoveredName(input: string) {
+  let s = String(input ?? "").trim();
+  if (!s) return "";
+
+  // Entferne Service-Type-Suffixe (werden im serviceName oft angehängt)
+  const types = [
+    MatterDeviceDiscover.SERVICE_TYPE_OPERATIONAL,
+    MatterDeviceDiscover.SERVICE_TYPE_COMMISSIONABLE
+  ];
+  for (const t of types) {
+    // Varianten mit/ohne führenden Punkt entfernen
+    s = s.replaceAll(`.${t}`, "");
+    s = s.replaceAll(t, "");
+  }
+
+  // Überflüssige Punkte am Anfang/Ende bereinigen
+  s = s.replace(/^\.+/, "").replace(/\.+$/, "").trim();
+  return s;
+}

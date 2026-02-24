@@ -3,7 +3,8 @@ import { ModuleModel, ModuleConfig } from "../modules.js";
 export const SONOSCONFIG: ModuleConfig = {
     id: "sonos",
     managerId: "sonos-event-stream-manager",
-    defaultDeviceName: "Sonos Speaker"
+    defaultDeviceName: "Sonos Speaker",
+    deviceTypeName: "SonosDeviceDiscovered",
 }
 
 export const SONOSMODULE: ModuleModel = {

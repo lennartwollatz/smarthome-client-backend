@@ -95,7 +95,7 @@ export abstract class DeviceVacuumCleaner extends Device {
 
   constructor(init?: Partial<DeviceVacuumCleaner>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.VACUUM;
     this.icon = "&#129529;";
     this.typeLabel = "deviceType.vacuum";

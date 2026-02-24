@@ -52,7 +52,7 @@ export class EventStreamManager {
     );
 
     try {
-      void manager.start();
+      //void manager.start();
       logger.info({ moduleId, managerId }, "ModuleEventStreamManager gestartet");
     } catch (err) {
       logger.error(

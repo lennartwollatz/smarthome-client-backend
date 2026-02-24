@@ -6,11 +6,18 @@ import { SONOSMODULE } from "./sonos/sonosModule.js";
 import { XIAOMIMODULE } from "./xiaomi/xiaomiModule.js";
 import { WACLIGHTINGMODULE } from "./waclighting/waclightingModule.js";
 import { BMWMODULE } from "./bmw/bmwModule.js";
+import { APPLECALENDARMODULE } from "./appleCalendar/appleCalendarModule.js";
+import { CALENDARMODULE } from "./calendar/calendarModule.js";
 
 export interface ModuleConfig {
   id: string;
   managerId: string;
   defaultDeviceName: string;
+  deviceTypeName: string;
+}
+
+export interface ModuleBridggedConfig extends ModuleConfig {
+  bridgeTypeName: string;
 }
 
 export interface ModuleModel {
@@ -32,6 +39,7 @@ export interface ModuleModel {
 };
 
 const DEFAULTS: ModuleModel[] = [
+  CALENDARMODULE,
   DENONMODULE,
   MATTERMODULE,
   HUEMODULE,
@@ -39,7 +47,8 @@ const DEFAULTS: ModuleModel[] = [
   SONOSMODULE,
   XIAOMIMODULE,
   WACLIGHTINGMODULE,
-  BMWMODULE
+  BMWMODULE,
+  APPLECALENDARMODULE
 ];
 
 export function getDefaultModules(): ModuleModel[] {

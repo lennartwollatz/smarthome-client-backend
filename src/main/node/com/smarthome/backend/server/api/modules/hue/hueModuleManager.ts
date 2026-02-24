@@ -64,6 +64,21 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
     return new HueEventStreamManager(this.getManagerId(), this.bridgeController, this.actionManager, this.databaseManager);
   }
 
+  async getBridges() {
+    return this.bridgeDiscover.getBridges()
+      .filter(bridge => bridge.isPaired === true)
+      .map(bridge => ({
+      id: bridge.id,
+      name: bridge.name,
+      address: bridge.address,
+      port: bridge.port,
+      modelId: bridge.modelId,
+      devices: bridge.devices,
+      swVersion: bridge.swVersion,
+      isPaired: bridge.isPaired,
+    }));
+  }
+
   async discoverBridges() {
     return this.bridgeDiscover.discover(10);
   }
@@ -80,7 +95,10 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
   }
 
   async discoverDevicesForBridge(bridgeId: string) {
-    return this.deviceDiscover.discoverDevices(bridgeId);
+    const devices = await this.deviceDiscover.discoverDevices(bridgeId);
+    this.actionManager.saveDevices(devices);
+    console.log("devices", devices);
+    return devices;
   }
 
   setSensitivity(deviceId: string, sensitivity: number) {

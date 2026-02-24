@@ -3,7 +3,8 @@ import { ModuleConfig, ModuleModel } from "../modules.js";
 export const WACLIGHTINGCONFIG: ModuleConfig = {  
     id: "waclighting",
     managerId: "waclighting-event-stream-manager",
-    defaultDeviceName: "WAC Device"
+    defaultDeviceName: "WAC Device",
+    deviceTypeName: "WACLightingDeviceDiscovered",
 }
 
 // Heos ist abstrakt und wird nicht im Frontend angezeigt

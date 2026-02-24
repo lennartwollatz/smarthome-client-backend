@@ -25,7 +25,7 @@ export abstract class DeviceLightDimmer extends DeviceLight {
 
   constructor(init?: Partial<DeviceLightDimmer>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.LIGHT_DIMMER;
     this.icon = "&#128161;";
     this.typeLabel = "deviceType.light-dimmer";

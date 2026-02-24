@@ -3,7 +3,7 @@ import https from "node:https";
 import type { DatabaseManager } from "../../../db/database.js";
 import type { HueBridgeDiscovered } from "./hueBridgeDiscovered.js";
 import { v3 } from "node-hue-api";
-import { HUEMODULE } from "./hueModule.js";
+import { HUECONFIG, HUEMODULE } from "./hueModule.js";
 import { HueEvent } from "./hueEvent.js";
 import { ModuleBridgeControllerEvent } from "../moduleBridgeControllerEvent.js";
 
@@ -14,7 +14,7 @@ export class HueBridgeController extends ModuleBridgeControllerEvent<HueBridgeDi
   }
 
   protected getDiscoveredBridgeTypeName(): string {
-    return "HueBridgeDiscovered";
+    return HUECONFIG.bridgeTypeName;
   }
   protected getModuleName(): string {
     return HUEMODULE.id;
@@ -33,7 +33,7 @@ export class HueBridgeController extends ModuleBridgeControllerEvent<HueBridgeDi
       bridge.isPaired = true;
       bridge.username = createdUser.username;
       bridge.clientKey = createdUser.clientkey;
-      this.saveBridge(bridgeId, bridge);
+      super.saveBridge(bridgeId, bridge);
       return bridge;
     } catch (err: unknown) {
       logger.warn({ err, bridgeId }, "Hue Pairing fehlgeschlagen für {} ({})", bridgeId, err instanceof Error ? err.message : String(err));

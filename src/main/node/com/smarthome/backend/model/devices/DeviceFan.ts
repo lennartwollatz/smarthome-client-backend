@@ -25,7 +25,7 @@ export abstract class DeviceFan extends DeviceLight {
 
   constructor(init?: Partial<DeviceFan>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.FAN;
     this.icon = "&#127744;";
     this.typeLabel = "deviceType.fan";

@@ -70,7 +70,7 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
 
   constructor(init?: Partial<DeviceLightLevelMotionTemperature>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.type = DeviceType.MOTION_LIGHT_LEVEL_TEMPERATURE;
     this.icon = "&#128064;&#9728;&#127777;";
     this.typeLabel = "deviceType.light-level-motion-temperature";

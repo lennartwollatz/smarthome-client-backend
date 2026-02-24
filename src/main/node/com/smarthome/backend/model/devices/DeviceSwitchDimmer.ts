@@ -10,7 +10,7 @@ export abstract class DeviceSwitchDimmer extends DeviceSwitch {
 
   constructor(init?: Partial<DeviceSwitchDimmer>) {
     super();
-    Object.assign(this, init);
+    this.assignInit(init as any);
     this.buttons ??= {};
     this.type = DeviceType.SWITCH_DIMMER;
     this.icon = "🔌";

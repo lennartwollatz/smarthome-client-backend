@@ -9,13 +9,6 @@ import type {
   Device
 } from "../../model/index.js";
 import { Scene } from "../../model/index.js";
-import type { EnergyUsage, Energy } from "../../model/devices/DeviceSwitchEnergy.js";
-
-
-// Matter Module
-import { MatterSwitchEnergy } from "../api/modules/matter/devices/matterSwitchEnergy.js";
-
-// Scene Definitions
 import { STANDARD_SCENE_DEFINITIONS } from "./sceneDefinitions.js";
 import type { ModuleManager } from "../api/modules/moduleManager.js";
 
@@ -42,6 +35,12 @@ export class ActionManager {
   registerModuleManager(moduleManager: ModuleManager<any, any, any, any, any, any, any>): void {
     const moduleId = moduleManager.getModuleId();
     this.moduleManagers.set(moduleId, moduleManager);
+    this.getDevicesForModule(moduleId).forEach(device => {
+      const convertedDevice = moduleManager.convertDeviceFromDatabase(device);
+      if (convertedDevice) {
+        this.devices.set(device.id, convertedDevice);
+      }
+    });
     moduleManager.initializeDeviceControllers().catch(err => {
       logger.error({ err, moduleId }, "Fehler beim Initialisieren der Device-Controller");
     });
@@ -58,32 +57,9 @@ export class ActionManager {
     const devices = this.deviceRepository.findAll();
     devices.forEach(device => {
       if (device?.id) {
-        const convertedDevice = this.convertToDeviceClass(device);
-        this.devices.set(device.id, convertedDevice);
+        this.devices.set(device.id, device);
       }
     });
-  }
-
-  private convertToDeviceClass(device: Device): Device {
-    if (!device.type || !device.moduleId) {
-      return device;
-    }
-
-    try {
-      // Versuche das entsprechende Modul zu finden
-      const moduleManager = this.moduleManagers.get(device.moduleId);
-      if (moduleManager) {
-        const convertedDevice = moduleManager.convertDeviceFromDatabase(device);
-        if (convertedDevice) {
-          return convertedDevice;
-        }
-      }
-    } catch (err) {
-      logger.warn({ err, deviceId: device.id, moduleId:device.moduleId }, "Fehler beim Konvertieren des Devices");
-    }
-
-    // Fallback: Device unverändert zurückgeben
-    return device;
   }
 
   private loadActionsFromDatabase() {

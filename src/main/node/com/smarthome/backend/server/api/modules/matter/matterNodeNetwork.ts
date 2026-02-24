@@ -95,7 +95,12 @@ class NodeUdpChannel implements UdpChannel {
 
   onData(listener: (netInterface: string | undefined, peerAddress: string, peerPort: number, data: Uint8Array) => void) {
     const handler = (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
-      listener(this.netInterface, remoteInfo.address, remoteInfo.port, new Uint8Array(message));
+      // IPv4-mapped IPv6-Adressen (::ffff:x.x.x.x) zurück in reine IPv4 umwandeln
+      let address = remoteInfo.address;
+      if (address.startsWith("::ffff:")) {
+        address = address.slice(7);
+      }
+      listener(this.netInterface, address, remoteInfo.port, new Uint8Array(message));
     };
     this.socket.on("message", handler);
     return {
@@ -106,8 +111,15 @@ class NodeUdpChannel implements UdpChannel {
   }
 
   async send(host: string, port: number, data: Uint8Array) {
+    // Auf einem udp6/Dual-Stack-Socket müssen IPv4-Adressen als IPv4-mapped
+    // IPv6-Adressen gesendet werden (::ffff:x.x.x.x), da Windows bei
+    // direktem Send an eine IPv4-Adresse EINVAL liefert.
+    let targetHost = host;
+    if (this.socketType === "udp6" && net.isIPv4(host)) {
+      targetHost = `::ffff:${host}`;
+    }
     await new Promise<void>((resolve, reject) => {
-      this.socket.send(Buffer.from(data), port, host, err => {
+      this.socket.send(Buffer.from(data), port, targetHost, err => {
         if (err) reject(err);
         else resolve();
       });

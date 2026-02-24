@@ -4,7 +4,7 @@ import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { LGDeviceDiscovered } from "./lgDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
-import { LGMODULE } from "./lgModule.js";
+import { LGCONFIG, LGMODULE } from "./lgModule.js";
 
 type MdnsInstance = ReturnType<typeof mdns>;
 
@@ -28,7 +28,7 @@ export class LGDeviceDiscover extends ModuleDeviceDiscover<LGDeviceDiscovered> {
   }
 
   getDiscoveredDeviceTypeName(): string {
-    return "LGDeviceDiscovered";
+    return LGCONFIG.deviceTypeName;
   }
 
   private matchesLGDevice(txt?: Record<string, string>) {

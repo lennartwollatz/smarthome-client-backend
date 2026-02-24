@@ -28,12 +28,26 @@ export function createMatterModuleRouter(deps: Deps) {
 
   router.post("/devices/:deviceId/pair", async (req, res) => {
     try {
-      const success = await matterModule.pairDevice(req.params.deviceId, req.body ?? {});
-      res.status(success ? 200 : 404).json(
-        success ? { success: true } : { error: "Gerät nicht gefunden oder Pairing fehlgeschlagen" }
+      const result = await matterModule.pairDevice(req.params.deviceId, req.body ?? {});
+      res.status(result.success ? 200 : 404).json(
+        result.success
+          ? { success: true, nodeId: result.nodeId, deviceId: result.deviceId }
+          : { success: false, error: result.error ?? "Gerät nicht gefunden oder Pairing fehlgeschlagen" }
       );
     } catch (error) {
       logger.error({ error }, "Fehler beim Pairing des Matter-Geraets");
+      res.status(400).json({ error: "Invalid request" });
+    }
+  });
+
+  // Pairing nur über Code (ohne deviceId)
+  router.post("/devices/pair-by-code", async (req, res) => {
+    try {
+      const code = String((req.body ?? {})?.pairingCode ?? (req.body ?? {})?.code ?? "").trim();
+      const result = await matterModule.pairDeviceByCode(code);
+      res.status(result.success ? 200 : 400).json(result.success ? result : { success: false });
+    } catch (error) {
+      logger.error({ error }, "Fehler beim Pairing by Code des Matter-Geraets");
       res.status(400).json({ error: "Invalid request" });
     }
   });

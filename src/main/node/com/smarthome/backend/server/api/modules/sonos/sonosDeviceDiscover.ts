@@ -3,7 +3,7 @@ import { logger } from "../../../../logger.js";
 import { SonosDeviceDiscovered } from "./sonosDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
 import { DatabaseManager } from "../../../db/database.js";
-import { SONOSMODULE } from "./sonosModule.js";
+import { SONOSCONFIG, SONOSMODULE } from "./sonosModule.js";
 
 const require = createRequire(import.meta.url);
 const DeviceDiscovery = require('sonos').AsyncDeviceDiscovery;
@@ -18,7 +18,7 @@ export class SonosDeviceDiscover extends ModuleDeviceDiscover<SonosDeviceDiscove
     return SONOSMODULE.name;
   }
   getDiscoveredDeviceTypeName(): string {
-    return "SonosDeviceDiscovered";
+    return SONOSCONFIG.deviceTypeName;
   }
 
   public async startDiscovery(timeoutSeconds: number): Promise<SonosDeviceDiscovered[]> {

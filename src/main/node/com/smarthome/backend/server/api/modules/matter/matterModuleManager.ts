@@ -12,16 +12,12 @@ import { EventStreamManager } from "../../../events/eventStreamManager.js";
 import { MATTERCONFIG } from "./matterModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { MatterSwitchEnergy } from "./devices/matterSwitchEnergy.js";
+import { MatterSwitch } from "./devices/matterSwitch.js";
+import { MatterSwitchDimmer } from "./devices/matterSwitchDimmer.js";
+import { matterVendors } from "./matterVendors.js";
 
-type PairingPayload = {
-  pairingCode?: string;
-  manualCode?: string;
-  qrCode?: string;
-  code?: string;
-  nodeId?: number | string;
-  discriminator?: number | string;
-  passcode?: number | string;
-  timeoutSeconds?: number | string;
+export type PairingPayload = {
+  pairingCode: string;
 };
 
 export class MatterModuleManager extends ModuleManager<MatterEventStreamManager, MatterDeviceController, MatterDeviceController, MatterEvent, Device, MatterDeviceDiscover, MatterDeviceDiscovered> {
@@ -31,7 +27,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     actionManager: ActionManager,
     eventStreamManager: EventStreamManager
   ) {
-    const controller = new MatterDeviceController();
+    const controller = new MatterDeviceController(databaseManager);
     super(
       databaseManager,
       actionManager,
@@ -48,135 +44,146 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   protected getManagerId(): string {
     return MATTERCONFIG.managerId;
   }
-  async discoverDevices(): Promise<Device[]> {
-    logger.info("Suche nach Matter-Geraeten im Netzwerk");
+
+  async discoverDevices(): Promise<MatterDeviceDiscovered[]> {
     try {
-      const discoveredDevices = await this.deviceDiscover.discover(5);
-      logger.info({ count: discoveredDevices.length }, "Geraete gefunden");
-      this.initialiseEventStreamManager();
-      // Matter-Geräte werden erst nach dem Pairing zu Devices konvertiert
-      // Hier geben wir nur die discovered devices zurück
-      return [];
+      const existingDevices = this.actionManager.getDevicesForModule(this.getModuleId());
+      return await this.deviceDiscover.discover(5, existingDevices.map(d => d.id));
     } catch (err) {
       logger.error({ err }, "Fehler bei der Geraeteerkennung");
       return [];
     }
   }
 
-  async pairDevice(deviceId: string, payload: PairingPayload = {}): Promise<boolean> {
+  async pairDevice(
+    deviceId: string,
+    payload: PairingPayload
+  ): Promise<{ success: boolean; nodeId?: string | number | bigint | boolean; deviceId?: string; error?:string}> {
     logger.info({ deviceId }, "Starte Matter Pairing");
-    const discoveredDevices = await this.deviceDiscover.discover(5);
-    const device = discoveredDevices.find(d => d.id === deviceId);
+
+    let device = this.deviceDiscover.getStored(deviceId);
+
     if (!device) {
-      logger.warn({ deviceId }, "Matter-Geraet nicht gefunden");
-      return false;
-    }
-    if (!device.address) {
-      logger.warn({ deviceId }, "Matter-Geraet hat keine IPv4-Adresse");
-      return false;
-    }
-    const port = typeof device.port === "number" && device.port > 0 ? device.port : 5540;
-
-    const pairingCode = this.resolvePairingCode(payload);
-    if (!pairingCode) {
-      logger.warn({ deviceId }, "Pairing-Code fehlt");
-      return false;
+      return await this.pairDeviceByCode(payload.pairingCode);
     }
 
-    const nodeIdHint = payload.nodeId != null ? String(payload.nodeId) : "0";
-    const resultNode = await this.deviceController.pairDevice(device.address, port, nodeIdHint, pairingCode);
-    const nodeId = this.extractNodeId(resultNode) ?? this.extractNodeId(device) ?? nodeIdHint;
-    const matterDevice = this.toMatterDevice(device, nodeId ?? device.id);
+    if( device.isPaired ?? false){
+      return { success: true, nodeId: device.nodeId, deviceId: deviceId };
+    }
+
+    const pairedDevice = await this.deviceController.pairDevice(device, payload);
+
+    if (!pairedDevice) {
+      logger.warn({ deviceId }, "Pairing fehlgeschlagen (kein Node zurückgegeben)");
+      return { success: false, error: "Pairing fehlgeschlagen (kein Node zurückgegeben)" };
+    }
+    // Persistenz im Discovered Device: Pairing-/Verbindungsdaten sollen dort liegen (nicht im Device selbst)
+    this.deviceDiscover.setStored(deviceId, pairedDevice);
+
+
+    const matterDevice = await this.toMatterDevice(pairedDevice);
     const saved = this.actionManager.saveDevice(matterDevice);
     if (saved) {
       this.initialiseEventStreamManager();
     }
-    return saved;
+    return { success: saved, nodeId: pairedDevice.nodeId ?? undefined, deviceId: matterDevice.id };
+  }
+
+  async unpairDevice(deviceId: string): Promise<boolean> {
+    const device = this.actionManager.getDevice(deviceId);
+    if (!device) return false;
+    return this.deviceController.unpairDevice(device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer);
+  }
+
+  /**
+   * Pairing/Commissioning nur über den Code (ohne vorheriges Discover eines konkreten Geräts).
+   * Speichert anschließend ein Device im ActionManager.
+   */
+  async pairDeviceByCode(
+    pairingCode: string
+  ): Promise<{ success: boolean; nodeId?: string | number; deviceId?: string }> {
+    logger.info("Starte Matter Pairing by Code");
+    if (!pairingCode?.trim()) return { success: false };
+
+    const result = await this.deviceController.pairDeviceByCode(pairingCode.trim());
+    if (!result) return { success: false };
+
+    const nodeId = this.extractNodeId(result);
+    const nodeIdStr = typeof nodeId === "number" ? String(nodeId) : String(nodeId ?? "");
+    const deviceId = nodeIdStr ? `matter-${nodeIdStr}` : undefined;
+
+    // Wir haben (noch) keine Vendor/Product Infos -> generisches Device
+    const saved = deviceId
+      ? this.actionManager.saveDevice(new Device({ id: deviceId, name: "Matter Device", moduleId: "matter", isConnected: true }))
+      : false;
+
+    if (saved && deviceId) {
+      // minimalen Discovered-Record anlegen, damit später Metadaten ergänzt werden können
+      this.deviceDiscover.upsertStored(deviceId, { id: deviceId, name: "Matter Device", address: "", port: 5540, isCommissionable: false, isOperational: true, lastSeenAt: Date.now(), nodeId: nodeIdStr || undefined, pairedAt: Date.now() } as any);
+      this.initialiseEventStreamManager();
+    }
+
+    return { success: saved, nodeId: nodeId ?? undefined, deviceId };
   }
 
   protected createEventStreamManager(): MatterEventStreamManager {
     return new MatterEventStreamManager(this.getManagerId(), this.deviceController, this.actionManager);
   }
 
-  async readAttribute(deviceId: string, endpointId: number, clusterId: number, attributeId: number) {
-    const nodeId = this.resolveNodeId(deviceId);
-    if (!nodeId) return null;
-    return this.deviceController.readAttribute(nodeId, endpointId, clusterId, attributeId);
-  }
-
-  async writeAttribute(
-    deviceId: string,
-    endpointId: number,
-    clusterId: number,
-    attributeId: number,
-    value: unknown
-  ) {
-    const nodeId = this.resolveNodeId(deviceId);
-    if (!nodeId) return false;
-    await this.deviceController.writeAttribute(nodeId, endpointId, clusterId, attributeId, value);
-    return true;
-  }
-
-  async invokeCommand(
-    deviceId: string,
-    endpointId: number,
-    clusterId: number,
-    commandId: number,
-    payload?: Record<string, unknown>
-  ) {
-    const nodeId = this.resolveNodeId(deviceId);
-    if (!nodeId) return null;
-    return this.deviceController.invokeCommand(nodeId, endpointId, clusterId, commandId, payload);
-  }
-
-
-  private resolvePairingCode(payload: PairingPayload) {
-    return (
-      payload.pairingCode ??
-      payload.manualCode ??
-      payload.qrCode ??
-      payload.code ??
-      null
-    );
-  }
-
-  private resolvePairingOptions(payload: PairingPayload) {
-    const nodeId = toNumber(payload.nodeId);
-    const discriminator = toNumber(payload.discriminator);
-    const passcode = toNumber(payload.passcode);
-    const timeoutSeconds = toNumber(payload.timeoutSeconds);
-    return {
-      nodeId: nodeId ?? undefined,
-      discriminator: discriminator ?? undefined,
-      passcode: passcode ?? undefined,
-      timeoutSeconds: timeoutSeconds ?? undefined
-    };
-  }
 
   private extractNodeId(value: unknown): string | number | null {
     if (!value || typeof value !== "object") return null;
     const record = value as Record<string, unknown>;
     const nodeId = record.nodeId ?? record.nodeID ?? record.id;
+    if (typeof nodeId === "bigint") {
+      // Matter NodeId ist runtime meist ein bigint → stabil als 16-stellige HEX speichern (wie in mDNS)
+      return nodeId.toString(16).padStart(16, "0").toUpperCase();
+    }
     if (typeof nodeId === "string" || typeof nodeId === "number") {
       return nodeId;
     }
     return null;
   }
 
-  private resolveNodeId(deviceId: string) {
-    if (!deviceId) return null;
-    if (deviceId.startsWith("matter-")) {
-      return deviceId.slice("matter-".length);
-    }
-    return deviceId;
-  }
+  private async toMatterDevice(device: MatterDeviceDiscovered) {
+    const id = device.id;
+    const nodeId = device.nodeId ?? "0";
+    const vendorId = typeof device.vendorId === "number" ? device.vendorId : undefined;
+    const productId = typeof device.productId === "number" ? device.productId : undefined;
+    const vendorInfo = vendorId != null && productId != null
+      ? matterVendors.getVendorAndProductName(vendorId, productId)
+      : null;
 
-  private toMatterDevice(device: MatterDeviceDiscovered, nodeId: string | number) {
-    const id = typeof nodeId === "string" || typeof nodeId === "number" ? `matter-${nodeId}` : device.id;
+    // Default-Name aus Vendor/Product ableiten (falls verfügbar), ansonsten discovered Name behalten
+    const derivedName =
+      vendorInfo?.productName
+        ? `${vendorInfo.vendorName} ${vendorInfo.productName}`.trim()
+        : (device.name ?? "Matter Device");
+
+    const typeFromVendor = toDeviceType(vendorInfo?.deviceType ?? null);
+
+    // Passendes Device instanziieren
+    if (typeFromVendor === DeviceType.SWITCH_DIMMER) {
+      //get Buttons for Node
+      const buttons = await this.deviceController.getButtonsForDevice(device);
+      return new MatterSwitchDimmer(derivedName, id, nodeId, buttons);
+    }
+    if (typeFromVendor === DeviceType.SWITCH) {
+      //get Buttons for Node
+      const buttons = await this.deviceController.getButtonsForDevice(device);
+      return new MatterSwitch(derivedName, id, nodeId, buttons);
+    }
+    if (typeFromVendor === DeviceType.SWITCH_ENERGY) {
+      //get Buttons for Node
+      const buttons = await this.deviceController.getButtonsForDevice(device);
+      return new MatterSwitchEnergy(derivedName, id, nodeId, buttons);
+    }
+
+    // Fallback: wenn Vendor/Product unbekannt oder kein Mapping existiert, generisches Device speichern
     return new Device({
       id,
-      name: device.name,
-      moduleId: "matter",
+      name: derivedName,
+      moduleId: MATTERCONFIG.id,
       isConnected: true
     });
   }
@@ -195,6 +202,16 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
         Object.assign(matterSwitchEnergy, device);
         convertedDevice = matterSwitchEnergy;
         break;
+      case DeviceType.SWITCH:
+        const matterSwitch = new MatterSwitch();
+        Object.assign(matterSwitch, device);
+        convertedDevice = matterSwitch;
+        break;
+      case DeviceType.SWITCH_DIMMER:
+        const matterSwitchDimmer = new MatterSwitchDimmer();
+        Object.assign(matterSwitchDimmer, device);
+        convertedDevice = matterSwitchDimmer;
+        break;
     }
 
     return convertedDevice;
@@ -207,16 +224,24 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
           await device.updateValues();
           this.actionManager.saveDevice(device);
       }
+      if (device instanceof MatterSwitch) {
+          await device.updateValues();
+          this.actionManager.saveDevice(device);
+      }
+      if (device instanceof MatterSwitchDimmer) {
+          await device.updateValues();
+          this.actionManager.saveDevice(device);
+      }
     }
   }
 }
 
-function toNumber(value: number | string | undefined) {
-  if (typeof value === "number" && !Number.isNaN(value)) return value;
-  if (typeof value === "string" && value.trim().length) {
-    const parsed = Number(value);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
+function toDeviceType(deviceTypeKey: string | null): DeviceType | null {
+  if (!deviceTypeKey) return null;
+  // `matterVendors.ts` nutzt aktuell i18n Keys wie "device.switch"
+  if (deviceTypeKey === "device.switch") return DeviceType.SWITCH;
+  if (deviceTypeKey === "device.switch-dimmer") return DeviceType.SWITCH_DIMMER;
+  if (deviceTypeKey === "device.switch-energy") return DeviceType.SWITCH_ENERGY;
   return null;
 }
 

@@ -2,7 +2,7 @@ import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { WACLightingDeviceDiscovered } from "./waclightingDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
-import { WACLIGHTINGMODULE } from "./waclightingModule.js";
+import { WACLIGHTINGCONFIG, WACLIGHTINGMODULE } from "./waclightingModule.js";
 import mdns from "multicast-dns";
 import os from "os";
 import { WACLightingDeviceController } from "./waclightingDeviceController.js";
@@ -27,7 +27,7 @@ export class WACLightingDeviceDiscover extends ModuleDeviceDiscover<WACLightingD
   }
 
   getDiscoveredDeviceTypeName(): string {
-    return "WACLightingDeviceDiscovered";
+    return WACLIGHTINGCONFIG.deviceTypeName;
   }
 
   public async startDiscovery(timeoutSeconds: number): Promise<WACLightingDeviceDiscovered[]> {
