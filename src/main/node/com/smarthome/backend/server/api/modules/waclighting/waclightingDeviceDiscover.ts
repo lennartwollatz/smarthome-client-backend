@@ -142,7 +142,7 @@ export class WACLightingDeviceDiscover extends ModuleDeviceDiscover<WACLightingD
     } catch (err) {
       logger.error({ err }, "Fehler bei der WAC Lighting mDNS-Discovery");
     } finally {
-      this.stopMdnsDiscovery();
+      this.stopDiscovery();
     }
 
     return Array.from(this.devicesMap.values());
@@ -207,10 +207,6 @@ export class WACLightingDeviceDiscover extends ModuleDeviceDiscover<WACLightingD
   }
 
   public async stopDiscovery(): Promise<void> {
-    this.stopMdnsDiscovery();
-  }
-
-  private stopMdnsDiscovery() {
     this.mdnsTimers.forEach(timer => clearInterval(timer));
     this.mdnsTimers = [];
     this.mdnsInstances.forEach(instance => {
@@ -222,6 +218,7 @@ export class WACLightingDeviceDiscover extends ModuleDeviceDiscover<WACLightingD
     });
     this.mdnsInstances = [];
   }
+
 
   private pickServiceName(response: any): string | undefined {
     const fqdn = typeof response?.fqdn === "string" ? response.fqdn : undefined;

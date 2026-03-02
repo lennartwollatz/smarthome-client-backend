@@ -72,6 +72,13 @@ export abstract class ModuleDeviceDiscover<D extends ModuleDeviceDiscovered> {
   public abstract getDiscoveredDeviceTypeName():string;
   public abstract startDiscovery(timeoutSeconds: number): Promise<D[]>;
   public abstract stopDiscovery(): Promise<void>;
+  
+  
+  public async findChangedIPAddressForDevice(device: D): Promise<D> {
+    const devices = await this.startDiscovery(5);
+    const newDevice = devices.find(d => d.id === device.id);
+    return newDevice ?? device;
+  }
 
 }
 

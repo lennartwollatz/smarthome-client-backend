@@ -73,7 +73,7 @@ export class BMWModuleManager extends ModuleManager<
       hasValidBmwToken,
       bmwTokenExpired,
       // Captcha nur nötig, wenn kein gueltiger BMW OAuth Token vorhanden ist.
-      canDiscover: this.credentialsStore.canDiscover() && (hasValidBmwToken || hasCaptchaToken)
+      canDiscover: this.credentialsStore.canDiscover() && (hasValidBmwToken)
     };
   }
 
@@ -93,6 +93,8 @@ export class BMWModuleManager extends ModuleManager<
     }
     if (typeof captchaToken === "string" && captchaToken.length > 0) {
       this.credentialsStore.setCaptchaToken(captchaToken);
+      // Neuer Captcha-Token soll fuer den naechsten Login verwendet werden.
+      this.tokenStore.clear();
     }
   }
 

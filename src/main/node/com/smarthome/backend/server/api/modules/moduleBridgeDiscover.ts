@@ -41,7 +41,12 @@ export abstract class ModuleBridgeDiscover<DB extends ModuleBridgeDiscovered> {
       logger.info(this.getModuleName()+" Discovered Device: "+JSON.stringify(bridge));
     });
     return bridges;
+  }
 
+  public async findChangedIPAddressForBridge(bridge: DB): Promise<DB> {
+    const bridges = await this.startDiscovery(5);
+    const newBridge = bridges.find(b => b.id === bridge.id);
+    return newBridge ?? bridge;
   }
 
 }

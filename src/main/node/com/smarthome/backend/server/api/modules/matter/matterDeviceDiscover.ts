@@ -342,6 +342,7 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
       existing.txtRecord = { ...(existing.txtRecord ?? {}), ...txt };
     }
   }
+
 }
 
 /**

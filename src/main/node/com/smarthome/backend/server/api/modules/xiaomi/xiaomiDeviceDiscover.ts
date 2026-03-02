@@ -22,7 +22,7 @@ export class XiaomiDeviceDiscover extends ModuleDeviceDiscover<XiaomiDeviceDisco
   public async startDiscovery(timeoutSeconds: number): Promise<XiaomiDeviceDiscovered[]> {
     logger.info("Starte Xiaomi MiIO Discovery via miio");
     const devices: XiaomiDeviceDiscovered[] = [];
-    const discovery = miio.browse({ cacheTime: 5 });
+    const discovery = miio.browse({ cacheTime: timeoutSeconds * 1000 });
     
     await new Promise<void>(resolve => {
       const timeout = setTimeout(() => {
@@ -53,6 +53,39 @@ export class XiaomiDeviceDiscover extends ModuleDeviceDiscover<XiaomiDeviceDisco
 
   public async stopDiscovery(): Promise<void> {
     return;
+  }
+  
+  public async findChangedIPAddressForDevice(device: XiaomiDeviceDiscovered): Promise<XiaomiDeviceDiscovered> {
+    let newDevice: XiaomiDeviceDiscovered | null = null;
+    const discovery = miio.browse({ cacheTime: 5000 });
+    
+    await new Promise<void>(resolve => {
+      const timeout = setTimeout(() => {
+        resolve();
+      }, 5000);
+
+      discovery.on("available", (device: Record<string, unknown>) => {
+        try {
+          const mapped = this.createDeviceFromMiio(device);
+          if( mapped.did === device.did ) {
+            newDevice = mapped;
+            resolve();
+          }
+        } catch (err) {
+          logger.warn({ err, device }, "Fehler beim Erstellen des Xiaomi-Geräts");
+        }
+      });
+
+      discovery.on("error", (err: Error) => {
+        logger.warn({ err }, "Miio Discovery Fehler");
+      });
+
+      discovery.on("unavailable", () => {
+        logger.warn("Miio Discovery unverfuegbar");// ignore
+      });
+    });
+    
+    return newDevice ?? device;
   }
 
   private createDeviceFromMiio(dev: Record<string, unknown>): XiaomiDeviceDiscovered {

@@ -6,7 +6,7 @@ import { ActionManager } from "./server/actions/actionManager.js";
 import { logger } from "./logger.js";
 
 const port = Number(process.env.PORT ?? 4040);
-const dbPath = process.env.DB_URL ?? "data/smarthome.sqlite";
+const dbPath = process.env.DB_URL ?? "data/smarthomeNew.sqlite";
 
 const databaseManager = new DatabaseManager(dbPath);
 databaseManager.connect();
