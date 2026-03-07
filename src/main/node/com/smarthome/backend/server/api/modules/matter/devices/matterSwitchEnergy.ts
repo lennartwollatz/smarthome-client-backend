@@ -28,27 +28,35 @@ export class MatterSwitchEnergy extends DeviceSwitchEnergy implements MatterDevi
     // Matter Device Controller in Node ist aktuell stubbed.
   }
 
-  protected executeToggle(buttonId: string) {
-    logger.debug("executeToggle fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
+  protected async executeToggle(buttonId: string): Promise<void> {
+    await this.matterController?.toggleSwitch(this, buttonId);
   }
 
-  protected executeDoublePress(buttonId: string) {
+  protected async executeSetOn(buttonId: string): Promise<void> {
+    await this.matterController?.setOn(this, buttonId);
+  }
+
+  protected async executeSetOff(buttonId: string): Promise<void> {
+    await this.matterController?.setOff(this, buttonId);
+  }
+
+  protected async executeDoublePress(buttonId: string): Promise<void> {
     logger.debug("executeDoublePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
   }
 
-  protected executeTriplePress(buttonId: string) {
+  protected async executeTriplePress(buttonId: string): Promise<void> {
     logger.debug("executeTriplePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
   }
 
-  protected executeSetBrightness(buttonId: string, brightness: number) {
+  protected async executeSetIntensity(buttonId: string, intensity: number): Promise<void> {
     logger.debug(
-      "executeSetBrightness fuer Button {} - wird ueber Event-Stream verarbeitet",
+      "executeSetIntensity fuer Button {} - wird ueber Event-Stream verarbeitet",
       buttonId,
-      brightness
+      intensity
     );
   }
 
-  protected executeSetEnergyUsage(_energyUsage: Energy) {
+  protected async executeSetEnergyUsage(_energyUsage: Energy): Promise<void> {
     logger.debug("executeSetEnergyUsage - wird ueber Event-Stream verarbeitet");
   }
 

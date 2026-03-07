@@ -1,19 +1,11 @@
 import { Router } from "express";
-import type { DatabaseManager } from "../../../db/database.js";
-import type { EventStreamManager } from "../../../events/eventStreamManager.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
 import { SonosModuleManager } from "../../modules/sonos/sonosModuleManager.js";
 import { logger } from "../../../../logger.js";
+import type { RouterDeps } from "../../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
-
-export function createSonosModuleRouter(deps: Deps) {
+export function createSonosModuleRouter(deps: RouterDeps) {
   const router = Router();
-  const sonosModule = new SonosModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  const sonosModule = new SonosModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
   deps.actionManager.registerModuleManager(sonosModule);
 
   router.get("/devices/discover", async (_req, res) => {

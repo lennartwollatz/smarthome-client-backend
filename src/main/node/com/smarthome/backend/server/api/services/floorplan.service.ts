@@ -1,16 +1,11 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
-import type { DatabaseManager } from "../../db/database.js";
-import type { ActionManager } from "../../actions/actionManager.js";
 import { JsonRepository } from "../../db/jsonRepository.js";
 import type { FloorPlan, Room } from "../../../model/index.js";
+import type { RouterDeps } from "../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  actionManager: ActionManager;
-};
 
-export function createFloorPlanRouter(deps: Deps) {
+export function createFloorPlanRouter(deps: RouterDeps) {
   const router = Router();
   const floorPlanRepository = new JsonRepository<FloorPlan>(deps.databaseManager, "FloorPlan");
   const roomRepository = new JsonRepository<Room>(deps.databaseManager, "Room");

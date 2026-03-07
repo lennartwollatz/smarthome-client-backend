@@ -1,19 +1,12 @@
 import { Router } from "express";
-import type { DatabaseManager } from "../../../db/database.js";
-import type { EventStreamManager } from "../../../events/eventStreamManager.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
 import { HueModuleManager } from "../../modules/hue/hueModuleManager.js";
 import { logger } from "../../../../logger.js";
+import type { RouterDeps } from "../../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
 
-export function createHueModuleRouter(deps: Deps) {
+export function createHueModuleRouter(deps: RouterDeps) {
   const router = Router();
-  const hueModule = new HueModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  const hueModule = new HueModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
   deps.actionManager.registerModuleManager(hueModule);
 
   const handleSetSensitivity = (req: { params: { deviceId: string }; body?: any }, res: any) => {
@@ -31,8 +24,9 @@ export function createHueModuleRouter(deps: Deps) {
         res.status(400).json({ error: "sensitivity parameter is required" });
         return;
       }
-      const success = hueModule.setSensitivity(req.params.deviceId, sensitivity);
-      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
+      hueModule.setSensitivity(req.params.deviceId, sensitivity).then((success: boolean) => {
+        res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
+      });
     } catch (error) {
       logger.error({ error }, "Fehler beim Setzen der Sensitivity");
       res.status(400).json({ error: "Invalid request" });
@@ -42,8 +36,9 @@ export function createHueModuleRouter(deps: Deps) {
   const handleSetOn = (req: { params: { deviceId: string } }, res: any) => {
     try {
       logger.info("Schalte Hue Light ein: {}", req.params.deviceId);
-      const success = hueModule.setOn(req.params.deviceId);
-      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      hueModule.setOn(req.params.deviceId).then((success: boolean) => {
+        res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      });
     } catch (error) {
       logger.error({ error }, "Fehler beim Einschalten des Hue Light");
       res.status(400).json({ error: "Invalid request" });
@@ -53,8 +48,9 @@ export function createHueModuleRouter(deps: Deps) {
   const handleSetOff = (req: { params: { deviceId: string } }, res: any) => {
     try {
       logger.info("Schalte Hue Light aus: {}", req.params.deviceId);
-      const success = hueModule.setOff(req.params.deviceId);
-      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      hueModule.setOff(req.params.deviceId).then((success: boolean) => {
+        res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      });
     } catch (error) {
       logger.error({ error }, "Fehler beim Ausschalten des Hue Light");
       res.status(400).json({ error: "Invalid request" });
@@ -76,8 +72,9 @@ export function createHueModuleRouter(deps: Deps) {
         res.status(400).json({ error: "brightness parameter is required" });
         return;
       }
-      const success = hueModule.setBrightness(req.params.deviceId, brightness);
-      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      hueModule.setBrightness(req.params.deviceId, brightness).then((success: boolean) => {
+        res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      });
     } catch (error) {
       logger.error({ error }, "Fehler beim Setzen der Helligkeit");
       res.status(400).json({ error: "Invalid request" });
@@ -99,8 +96,9 @@ export function createHueModuleRouter(deps: Deps) {
         res.status(400).json({ error: "temperature parameter is required" });
         return;
       }
-      const success = hueModule.setTemperature(req.params.deviceId, temperature);
-      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      hueModule.setTemperature(req.params.deviceId, temperature).then(success => {
+        res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      });
     } catch (error) {
       logger.error({ error }, "Fehler beim Setzen der Farbtemperatur");
       res.status(400).json({ error: "Invalid request" });
@@ -136,8 +134,9 @@ export function createHueModuleRouter(deps: Deps) {
       }
       const roundedX = Math.round(x * 1000) / 1000;
       const roundedY = Math.round(y * 1000) / 1000;
-      const success = hueModule.setColor(req.params.deviceId, roundedX, roundedY);
-      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      hueModule.setColor(req.params.deviceId, roundedX, roundedY).then((success: boolean) => {
+        res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" });
+      });
     } catch (error) {
       logger.error({ error }, "Fehler beim Setzen der Farbe");
       res.status(400).json({ error: "Invalid request" });

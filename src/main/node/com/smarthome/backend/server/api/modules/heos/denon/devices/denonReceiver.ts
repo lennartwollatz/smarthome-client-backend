@@ -122,65 +122,65 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       });
   }
 
-  protected executeSetVolume(volume: number) {
-    this.heos?.setVolume(this.toHeosSpeaker(), volume);
+  protected async executeSetVolume(volume: number): Promise<void> {
+    await this.heos?.setVolume(this.toHeosSpeaker(), volume);
   }
 
-  protected executePlay() {
-    this.heos?.setPlayState(this.toHeosSpeaker(), "play");
+  protected async executePlay(): Promise<void> {
+    await this.heos?.setPlayState(this.toHeosSpeaker(), "play");
   }
 
-  protected executePause() {
-    this.heos?.setPlayState(this.toHeosSpeaker(), "pause");
+  protected async executePause(): Promise<void> {
+    await this.heos?.setPlayState(this.toHeosSpeaker(), "pause");
   }
 
-  protected executeStopp() {
-    this.heos?.setPlayState(this.toHeosSpeaker(), "stop");
+  protected async executeStopp(): Promise<void> {
+    await this.heos?.setPlayState(this.toHeosSpeaker(), "stop");
   }
 
-  protected executeSetMute(muted: boolean) {
-    this.heos?.setMute(this.toHeosSpeaker(), muted);
+  protected async executeSetMute(muted: boolean): Promise<void> {
+    await this.heos?.setMute(this.toHeosSpeaker(), muted);
   }
 
-  protected executePlayNext() {
-    this.heos?.playNext(this.toHeosSpeaker());
+  protected async executePlayNext(): Promise<void> {
+    await this.heos?.playNext(this.toHeosSpeaker());
   }
 
-  protected executePlayPrevious() {
-    this.heos?.playPrevious(this.toHeosSpeaker());
+  protected async executePlayPrevious(): Promise<void> {
+    await this.heos?.playPrevious(this.toHeosSpeaker());
   }
 
-  protected executePlaySound(sound: string) {
-    this.heos?.playSong(this.toHeosSpeaker(), sound);
+  protected async executePlaySound(sound: string): Promise<void> {
+    await this.heos?.playSong(this.toHeosSpeaker(), sound);
   }
 
-  protected executePlayTextAsSound(text: string) {
-    this.heos?.playTextAsSpeech(this.toHeosSpeaker(), text);
+  protected async executePlayTextAsSound(text: string): Promise<void> {
+    await this.heos?.playTextAsSpeech(this.toHeosSpeaker(), text);
   }
 
-  protected executeSetSubwooferPower(_subwooferName: string, power: boolean) {
-    this.heos?.setDenonSubwooferPower(this, power);
+  protected async executeSetSubwooferPower(_subwooferName: string, power: boolean): Promise<void> {
+    await this.heos?.setDenonSubwooferPower(this, power);
   }
 
-  protected executeSetSubwooferLevel(subwooferName: string, level: number) {
-    this.heos?.setDenonSubwooferLevel(this, subwooferName, level);
+  protected async executeSetSubwooferLevel(subwooferName: string, level: number): Promise<void> {
+    await this.heos?.setDenonSubwooferLevel(this, subwooferName, level);
   }
 
-  protected executeSetVolumeStart(volumeStart: number) {
-    this.heos?.setDenonVolumeStart(this, volumeStart);
+  protected async executeSetVolumeStart(volumeStart: number): Promise<void> {
+    await this.heos?.setDenonVolumeStart(this, volumeStart);
   }
 
-  protected executeSetVolumeMax(volumeMax: number) {
-    this.heos?.setDenonVolumeMax(this, volumeMax);
+  protected async executeSetVolumeMax(volumeMax: number): Promise<void> {
+    await this.heos?.setDenonVolumeMax(this, volumeMax);
   }
 
-  protected executeSetZonePower(zoneName: string, power: boolean) {
-    this.heos?.setDenonZonePower(this, zoneName, power);
+  protected async executeSetZonePower(zoneName: string, power: boolean): Promise<void> {
+    await this.heos?.setDenonZonePower(this, zoneName, power);
   }
 
-  protected executeSetSource(sourceIndex: string, selected: boolean) {
+  protected async executeSetSource(sourceIndex: string, selected: boolean): Promise<void> {
     if (selected) {
-      this.heos?.setDenonSource(this, sourceIndex, true);
+      await this.heos?.setDenonSource(this, sourceIndex, true);
     }
   }
 

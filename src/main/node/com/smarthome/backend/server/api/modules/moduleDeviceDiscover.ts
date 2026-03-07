@@ -1,4 +1,3 @@
-import { logger } from "../../../logger.js";
 import { DatabaseManager } from "../../db/database.js";
 import { JsonRepository } from "../../db/jsonRepository.js";
 import { ModuleDeviceDiscovered } from "./moduleDeviceDiscovered.js";

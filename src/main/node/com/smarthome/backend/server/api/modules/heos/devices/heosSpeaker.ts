@@ -99,41 +99,41 @@ export class HeosSpeaker extends DeviceSpeaker {
     }
   }
 
-  protected executeSetVolume(volume: number) {
-    this.heos?.setVolume(this, volume);
+  protected async executeSetVolume(volume: number): Promise<void> {
+    await this.heos?.setVolume(this, volume);
   }
 
-  protected executePlay() {
+  protected async executePlay(): Promise<void> {
     logger.info("player play");
-    this.heos?.setPlayState(this, "play");
+    await this.heos?.setPlayState(this, "play");
   }
 
-  protected executePause() {
-    this.heos?.setPlayState(this, "pause");
+  protected async executePause(): Promise<void> {
+    await this.heos?.setPlayState(this, "pause");
   }
 
-  protected executeStopp() {
-    this.heos?.setPlayState(this, "stop");
+  protected async executeStopp(): Promise<void> {
+    await this.heos?.setPlayState(this, "stop");
   }
 
-  protected executeSetMute(muted: boolean) {
-    this.heos?.setMute(this, muted);
+  protected async executeSetMute(muted: boolean): Promise<void> {
+    await this.heos?.setMute(this, muted);
   }
 
-  protected executePlayNext() {
-    this.heos?.playNext(this);
+  protected async executePlayNext(): Promise<void>   {
+    await this.heos?.playNext(this);
   }
 
-  protected executePlayPrevious() {
-    this.heos?.playPrevious(this);
+  protected async executePlayPrevious(): Promise<void> {
+    await this.heos?.playPrevious(this);
   }
 
-  protected executePlaySound(sound: string) {
-    this.heos?.playSong(this, sound);
+  protected async executePlaySound(sound: string): Promise<void>   {
+    await this.heos?.playSong(this, sound);
   }
 
-  protected executePlayTextAsSound(text: string) {
-    this.heos?.playTextAsSpeech(this, text);
+  protected async executePlayTextAsSound(text: string): Promise<void> {
+    await this.heos?.playTextAsSpeech(this, text);
   }
 }
 

@@ -1,15 +1,7 @@
 import { Router } from "express";
-import type { DatabaseManager } from "../../../db/database.js";
-import type { EventStreamManager } from "../../../events/eventStreamManager.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
 import { logger } from "../../../../logger.js";
 import { AppleCalendarModuleManager } from "../../modules/appleCalendar/appleCalendarModuleManager.js";
-
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
+import type { RouterDeps } from "../../router.js";
 
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message || "Unbekannter Fehler";
@@ -26,9 +18,9 @@ function isCredentialsErrorMessage(message: string): boolean {
   return m.includes("caldav username ist nicht gesetzt") || m.includes("caldav password ist nicht gesetzt");
 }
 
-export function createAppleCalendarModuleRouter(deps: Deps) {
+export function createAppleCalendarModuleRouter(deps: RouterDeps) {
   const router = Router();
-  const appleModule = new AppleCalendarModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  const appleModule = new AppleCalendarModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
   deps.actionManager.registerModuleManager(appleModule);
 
   router.get("/credentials", (_req, res) => {

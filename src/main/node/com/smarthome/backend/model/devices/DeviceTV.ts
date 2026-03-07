@@ -1,44 +1,22 @@
 import { Device } from "./Device.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import type { DeviceListenerPair } from "./helper/DeviceListenerPair.js";
-import { DeviceFunction } from "../DeviceFunction.js";
+import { EventPowerToggled } from "../../server/events/events/EventPowerToggled.js";
+import { EventPowerOn } from "../../server/events/events/EventPowerOn.js";
+import { EventPowerOff } from "../../server/events/events/EventPowerOff.js";
+import { EventTVStatusChanged } from "../../server/events/events/EventTVStatusChanged.js";
+import { EventTVScreenChanged } from "../../server/events/events/EventTVScreenChanged.js";
+import { EventTVScreenOn } from "../../server/events/events/EventTVScreenOn.js";
+import { EventTVScreenOff } from "../../server/events/events/EventTVScreenOff.js";
+import { EventTVChannelChanged } from "../../server/events/events/EventTVChannelChanged.js";
+import { EventTVChannelSelected } from "../../server/events/events/EventTVChannelSelected.js";
+import { EventTVAppChanged } from "../../server/events/events/EventTVAppChanged.js";
+import { EventTVAppSelected } from "../../server/events/events/EventTVAppSelected.js";
+import { EventVolumeChanged } from "../../server/events/events/EventVolumeChanged.js";
+import { EventVolumeEquals } from "../../server/events/events/EventVolumeEquals.js";
+import { EventVolumeLess } from "../../server/events/events/EventVolumeLess.js";
+import { EventVolumeGreater } from "../../server/events/events/EventVolumeGreater.js";
 
 export abstract class DeviceTV extends Device {
-  static TriggerFunctionName = {
-    POWER_ON: "powerOn",
-    POWER_OFF: "powerOff",
-    SCREEN_ON: "screenOn",
-    SCREEN_OFF: "screenOff",
-    CHANNEL_CHANGED: "channelChanged",
-    APP_CHANGED: "appChanged",
-    CHANNEL_SELECTED: "channelSelected(string)",
-    APP_SELECTED: "appSelected(string)",
-    VOLUME_CHANGED: "volumeChanged",
-    VOLUME_GREATER: "volumeGreater(int)",
-    VOLUME_LESS: "volumeLess(int)"
-  } as const;
-
-  static ActionFunctionName = {
-    POWER_ON: "powerOn",
-    POWER_OFF: "powerOff",
-    SCREEN_ON: "screenOn",
-    SCREEN_OFF: "screenOff",
-    SELECT_APP: "selectApp(string)",
-    SELECT_CHANNEL: "selectChannel(string)",
-    SET_VOLUME: "setVolume(int)"
-  } as const;
-
-  static BoolFunctionName = {
-    POWER_ON: "powerOn",
-    POWER_OFF: "powerOff",
-    SCREEN_ON: "screenOn",
-    SCREEN_OFF: "screenOff",
-    VOLUME_GREATER: "volumeGreater(int)",
-    VOLUME_LESS: "volumeLess(int)",
-    APP_SELECTED: "appSelected(string)",
-    CHANNEL_SELECTED: "channelSelected(string)"
-  } as const;
-
   power?: boolean;
   screen?: boolean;
   volume = 0;
@@ -51,156 +29,106 @@ export abstract class DeviceTV extends Device {
     super();
     this.assignInit(init as any);
     this.type = DeviceType.TV;
-    this.icon = "&#128250;";
-    this.typeLabel = "deviceType.tv";
-    this.initializeFunctionsBool();
-    this.initializeFunctionsAction();
-    this.initializeFunctionsTrigger();
   }
 
-  protected override initializeFunctionsBool() {
-    this.functionsBool = [
-      DeviceFunction.fromString(DeviceTV.BoolFunctionName.POWER_ON, 'bool'),
-      DeviceFunction.fromString(DeviceTV.BoolFunctionName.POWER_OFF, 'bool'),
-      DeviceFunction.fromString(DeviceTV.BoolFunctionName.SCREEN_ON, 'bool'),
-      DeviceFunction.fromString(DeviceTV.BoolFunctionName.SCREEN_OFF, 'bool'),
-      DeviceFunction.fromString(DeviceTV.BoolFunctionName.VOLUME_GREATER, 'bool'),
-      DeviceFunction.fromString(DeviceTV.BoolFunctionName.VOLUME_LESS, 'bool'),
-      DeviceFunction.fromString(DeviceTV.BoolFunctionName.APP_SELECTED, 'bool'),
-      DeviceFunction.fromString(DeviceTV.BoolFunctionName.CHANNEL_SELECTED, 'bool')
-    ];
-  }
 
-  protected override initializeFunctionsAction() {
-    this.functionsAction = [
-      DeviceFunction.fromString(DeviceTV.ActionFunctionName.POWER_ON, 'void'),
-      DeviceFunction.fromString(DeviceTV.ActionFunctionName.POWER_OFF, 'void'),
-      DeviceFunction.fromString(DeviceTV.ActionFunctionName.SCREEN_ON, 'void'),
-      DeviceFunction.fromString(DeviceTV.ActionFunctionName.SCREEN_OFF, 'void'),
-      DeviceFunction.fromString(DeviceTV.ActionFunctionName.SELECT_APP, 'void'),
-      DeviceFunction.fromString(DeviceTV.ActionFunctionName.SELECT_CHANNEL, 'void'),
-      DeviceFunction.fromString(DeviceTV.ActionFunctionName.SET_VOLUME, 'void')
-    ];
-  }
-
-  protected override initializeFunctionsTrigger() {
-    this.functionsTrigger = [
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.POWER_ON, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.POWER_OFF, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.SCREEN_ON, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.SCREEN_OFF, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.CHANNEL_CHANGED, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.APP_CHANGED, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.CHANNEL_SELECTED, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.APP_SELECTED, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.VOLUME_CHANGED, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.VOLUME_GREATER, 'void'),
-      DeviceFunction.fromString(DeviceTV.TriggerFunctionName.VOLUME_LESS, 'void')
-    ];
-  }
-
-  protected override checkListener(triggerName: string) {
-    super.checkListener(triggerName);
-    if (!triggerName) return;
-    const isValid = Object.values(DeviceTV.TriggerFunctionName).includes(
-      triggerName as (typeof DeviceTV.TriggerFunctionName)[keyof typeof DeviceTV.TriggerFunctionName]
-    );
-    if (!isValid) return;
-    const listeners = this.triggerListeners.get(triggerName) as DeviceListenerPair[] | undefined;
-    if (!listeners || listeners.length === 0) return;
-
-    if (triggerName === DeviceTV.TriggerFunctionName.POWER_ON && this.powerOn()) {
-      listeners.forEach(listener => listener.run());
+  async setPowerOn(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    this.power = true;
+    if (execute) {
+      await this.executeSetPowerOn();
     }
-    if (triggerName === DeviceTV.TriggerFunctionName.POWER_OFF && this.powerOff()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceTV.TriggerFunctionName.SCREEN_ON && this.screenOn()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceTV.TriggerFunctionName.SCREEN_OFF && this.screenOff()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceTV.TriggerFunctionName.CHANNEL_CHANGED) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceTV.TriggerFunctionName.APP_CHANGED) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceTV.TriggerFunctionName.CHANNEL_SELECTED) {
-      listeners
-        .filter(pair => {
-          const channelId = pair.getParams()?.getParam1AsString();
-          return channelId != null && this.channelSelected(channelId);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceTV.TriggerFunctionName.APP_SELECTED) {
-      listeners
-        .filter(pair => {
-          const appId = pair.getParams()?.getParam1AsString();
-          return appId != null && this.appSelected(appId);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceTV.TriggerFunctionName.VOLUME_CHANGED) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceTV.TriggerFunctionName.VOLUME_GREATER) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.volumeGreater(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceTV.TriggerFunctionName.VOLUME_LESS) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.volumeLess(threshold);
-        })
-        .forEach(pair => pair.run());
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventPowerOn(this.id, (deviceBefore as { power?: boolean }).power ?? false));
+      await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  setPower(power: boolean, execute: boolean) {
+  protected abstract executeSetPowerOn(): Promise<void>;
+
+  async setPowerOff(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    this.power = false;
+    if (execute) {
+      await this.executeSetPowerOff();
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventPowerOff(this.id, (deviceBefore as { power?: boolean }).power ?? false));
+      await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
+    }
+  }
+
+  protected abstract executeSetPowerOff(): Promise<void>;
+
+  async setPower(power: boolean, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.power = power;
     if (execute) {
-      this.executeSetPower(power);
+      await this.executeSetPower(power);
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventPowerToggled(this.id, power));
+      await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
+      if(power){
+        await this.eventManager?.triggerEvent(new EventPowerOn(this.id, (deviceBefore as { power?: boolean }).power ?? false));
+      } else {
+        await this.eventManager?.triggerEvent(new EventPowerOff(this.id, (deviceBefore as { power?: boolean }).power ?? false));
+      }
     }
   }
 
-  protected abstract executeSetPower(power: boolean): void;
+  protected abstract executeSetPower(power: boolean): Promise<void>;
 
-  setScreen(screen: boolean, execute: boolean) {
+  async setScreen(screen: boolean, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.screen = screen;
     if (execute) {
       this.executeSetScreen(screen);
     }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventTVScreenChanged(this.id, deviceBefore, screen));
+      await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
+      if(screen){
+        await this.eventManager?.triggerEvent(new EventTVScreenOn(this.id, deviceBefore, screen));
+      } else {
+        await this.eventManager?.triggerEvent(new EventTVScreenOff(this.id, deviceBefore, screen));
+      }
+    }
   }
 
-  protected abstract executeSetScreen(screen: boolean): void;
+  protected abstract executeSetScreen(screen: boolean): Promise<void>;
 
-  setChannel(channel: string, execute: boolean) {
+  async setChannel(channel: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.selectedChannel = channel;
     this.power = true;
     if (execute) {
       this.executeSetChannel(channel);
     }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventTVChannelChanged(this.id, deviceBefore, channel));
+      await this.eventManager?.triggerEvent(new EventTVChannelSelected(this.id, deviceBefore, channel));
+      await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  protected abstract executeSetChannel(channel: string): void;
+  protected abstract executeSetChannel(channel: string): Promise<void>;
 
-  startApp(appId: string, execute: boolean) {
+  async startApp(appId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.selectedApp = appId;
     this.power = true;
     if (execute) {
       this.executeStartApp(appId);
     }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventTVAppChanged(this.id, deviceBefore, appId));
+      await this.eventManager?.triggerEvent(new EventTVAppSelected(this.id, deviceBefore, appId));
+      await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  protected abstract executeStartApp(appId: string): void;
+  protected abstract executeStartApp(appId: string): Promise<void>;
 
   notify(message: string, execute: boolean) {
     if (execute) {
@@ -208,56 +136,24 @@ export abstract class DeviceTV extends Device {
     }
   }
 
-  protected abstract executeNotify(message: string): void;
+  protected abstract executeNotify(message: string): Promise<void>;
 
-  setVolume(volume: number, execute: boolean) {
+  async setVolume(volume: number, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.volume = volume;
     if (execute) {
       this.executeSetVolume(volume);
     }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVolumeChanged(this.id, deviceBefore, volume));
+      await this.eventManager?.triggerEvent(new EventVolumeEquals(this.id, deviceBefore, volume));
+      await this.eventManager?.triggerEvent(new EventVolumeLess(this.id, deviceBefore, volume));
+      await this.eventManager?.triggerEvent(new EventVolumeGreater(this.id, deviceBefore, volume));
+      await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  protected abstract executeSetVolume(volume: number): void;
-
-  getChannels() {
-    return this.channels;
-  }
-
-  getApps() {
-    return this.apps;
-  }
-
-  powerOn() {
-    return this.power === true;
-  }
-
-  powerOff() {
-    return this.power === false;
-  }
-
-  screenOn() {
-    return this.screen === true;
-  }
-
-  screenOff() {
-    return this.screen === false;
-  }
-
-  volumeGreater(threshold: number) {
-    return this.volume > threshold;
-  }
-
-  volumeLess(threshold: number) {
-    return this.volume < threshold;
-  }
-
-  appSelected(appId: string) {
-    return appId != null && appId === this.selectedApp;
-  }
-
-  channelSelected(channelId: string) {
-    return channelId != null && channelId === this.selectedChannel;
-  }
+  protected abstract executeSetVolume(volume: number): Promise<void>;
 }
 
 export class Channel {

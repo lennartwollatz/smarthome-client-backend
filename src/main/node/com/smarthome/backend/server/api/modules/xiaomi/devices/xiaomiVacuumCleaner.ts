@@ -85,100 +85,100 @@ export class XiaomiVacuumCleaner extends DeviceVacuumCleaner {
     this.xiaomi = xiaomiController;
   }
 
-  protected executeSetPower(power: boolean) {
+  protected async executeSetPower(power: boolean): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeSetPower uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "setPower", power);
+    await this.xiaomi?.callMethod(this.address, this.token, "setPower", power);
   }
 
-  protected executeStartCleaning() {
+  protected async executeStartCleaning(): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeStartCleaning uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "start");
+    await this.xiaomi?.callMethod(this.address, this.token, "start");
   }
 
-  protected executeStopCleaning() {
+  protected async executeStopCleaning(): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeStopCleaning uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "stop");
+    await this.xiaomi?.callMethod(this.address, this.token, "stop");
   }
 
-  protected executePauseCleaning() {
+  protected async executePauseCleaning(): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executePauseCleaning uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "pause");
+    await this.xiaomi?.callMethod(this.address, this.token, "pause");
   }
 
-  protected executeResumeCleaning() {
+  protected async executeResumeCleaning(): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeResumeCleaning uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "resume");
+    await this.xiaomi?.callMethod(this.address, this.token, "resume");
   }
 
-  protected executeDock() {
+  protected async executeDock(): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeDock uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "home");
+    await this.xiaomi?.callMethod(this.address, this.token, "home");
   }
 
-  protected executeSetMode(mode: string) {
+  protected async executeSetMode(mode: string): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeSetMode uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "setMode", mode);
+    await this.xiaomi?.callMethod(this.address, this.token, "setMode", mode);
   }
 
-  protected executeCleanRoom(roomId: string) {
+  protected async executeCleanRoom(roomId: string): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeCleanRoom uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "cleanRoom", roomId);
+    await this.xiaomi?.callMethod(this.address, this.token, "cleanRoom", roomId);
   }
 
-  protected executeCleanZone(zoneId: string) {
+  protected async executeCleanZone(zoneId: string): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeCleanZone uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "cleanZone", zoneId);
+    await this.xiaomi?.callMethod(this.address, this.token, "cleanZone", zoneId);
   }
 
-  protected executeChangeFanSpeed(fanSpeed: number) {
+  protected async executeChangeFanSpeed(fanSpeed: number): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeChangeFanSpeed uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "setFanSpeed", fanSpeed);
+    await this.xiaomi?.callMethod(this.address, this.token, "setFanSpeed", fanSpeed);
   }
 
-  protected executeChangeMode(mode: string) {
+  protected async executeChangeMode(mode: string): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeChangeMode uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "setMode", mode);
+    await this.xiaomi?.callMethod(this.address, this.token, "setMode", mode);
   }
 
-  protected executeClearError() {
+  protected async executeClearError(): Promise<void> {
     if (!this.address || !this.token) {
       logger.warn({ id: this.id }, "executeClearError uebersprungen - address/token fehlen");
       return;
     }
-    void this.xiaomi?.callMethod(this.address, this.token, "reset");
+    await this.xiaomi?.callMethod(this.address, this.token, "reset");
   }
 }
 

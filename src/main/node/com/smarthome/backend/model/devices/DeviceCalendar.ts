@@ -1,8 +1,16 @@
 import { Device } from "./Device.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import type { DeviceListenerPair } from "./helper/DeviceListenerPair.js";
-import { DeviceFunction } from "../DeviceFunction.js";
-import { FunctionParameter } from "../DeviceFunction.js";
+import { EventCalendarEntryDeleted } from "../../server/events/events/EventCalendarEntryDeleted.js";
+import { EventCalendarEntryAdded } from "../../server/events/events/EventCalendarEntryAdded.js";
+import { EventCalendarEntryChangedAddress } from "../../server/events/events/EventCalendarEntryChangedAddress.js";
+import { EventCalendarEntryChanged } from "../../server/events/events/EventCalendarEntryChanged.js";
+import { EventCalendarEntryChangedTimeStart } from "../../server/events/events/EventCalendarEntryChangedTimeStart.js";
+import { EventCalendarEntryChangedTimeEnd } from "../../server/events/events/EventCalendarEntryChangedTimeEnd.js";
+import { EventCalendarEntryChangedName } from "../../server/events/events/EventCalendarEntryChangedName.js";
+import { EventCalendarEntryChangedCalendar } from "../../server/events/events/EventCalendarEntryChangedCalendar.js";
+import { EventCalendarEntryChangedNotification } from "../../server/events/events/EventCalendarEntryChangedNotification.js";
+import { EventCalendarEntryChangedNotice } from "../../server/events/events/EventCalendarEntryChangedNotice.js";
+import { EventCalendarEntryChangedAllDay } from "../../server/events/events/EventCalendarEntryChangedAllDay.js";
 
 export const DEFAULT_CALENDAR_MODULE_ID = "calendar";
 export const DEFAULT_CALENDAR_DEVICE_ID = "calendar-device";
@@ -88,49 +96,6 @@ export type CalendarSubModule = {
 };
 
 export class DeviceCalendar extends Device {
-  static TriggerFunctionName = {
-    ENTRY_CHANGED: "entryChanged",
-    ENTRY_ADDED: "entryAdded",
-    ENTRY_DELETED: "entryDeleted",
-    ENTRY_RESCHEDULED: "entryResheduled",
-    ENTRY_ADDRESS_CHANGED: "entryAddressChanged",
-    ENTRY_STARTED: "entryStarted",
-    ENTRY_STARTS_IN_MINUTES_20: "entryStartsInMinutes20",
-    ENTRY_STARTS_IN_MINUTES_15: "entryStartsInMinutes15",
-    ENTRY_STARTS_IN_MINUTES_10: "entryStartsInMinutes10",
-    ENTRY_STARTS_IN_MINUTES_5: "entryStartsInMinutes5",
-    ENTRY_HEADOFF_STARTS_IN_MINUTES_20: "entryHeadoffStartsInMinutes20",
-    ENTRY_HEADOFF_STARTS_IN_MINUTES_15: "entryHeadoffStartsInMinutes15",
-    ENTRY_HEADOFF_STARTS_IN_MINUTES_10: "entryHeadoffStartsInMinutes10",
-    ENTRY_HEADOFF_STARTS_IN_MINUTES_5: "entryHeadoffStartsInMinutes5",
-    ENTRY_HEADOFF_STARTS: "entryHeadoffStarts",
-    CALENDAR_ADDED: "calendarAdded",
-    CALENDAR_SHOW: "calendarShow",
-    CALENDAR_HIDE: "calendarHide"
-  } as const;
-
-  static ActionFunctionName = {
-    DELETE_ENTRY: "deleteEntry(string)",
-    CHANGE_ENTRY_ADDRESS: "changeEntryAddress(string,string)",
-    CHANGE_ENTRY_TIME_START: "changeEntryTimeStart(string,string)",
-    CHANGE_ENTRY_TIME_END: "changeEntryTimeEnd(string,string)",
-    CHANGE_ENTRY_NAME: "changeEntryName(string,string)",
-    CHANGE_ENTRY_KATEGORIE: "changeEntryKategorie(getEntryCategories,string)",
-    CHANGE_ENTRY_NOTIFICATION: "changeEntryNotification(string,bool)",
-    GET_ENTRY_CATEGORIES: "getEntryCategories"
-  } as const;
-
-  static BoolFunctionName = {
-    CALENDAR_VISIBLE: "calendarVisible(string)",
-    CALENDAR_HIDDEN: "calendarHidden(string)",
-    ENTRY_STARTED: "entryStarted(string)",
-    ENTRY_ENDED: "entryEnded(string)",
-    HAS_ENTRIES_TODAY: "hasEntriesToday(string)",
-    HAS_ENTRIES_TOMORROW: "hasEntriesTomorrow(string)",
-    HAS_ENTRIES_THIS_WEEK: "hasEntriesThisWeek(string)"
-  } as const;
-
-
   calendars: CalendarConfig[] = [];
   modules: CalendarSubModule[] = [];
 
@@ -140,84 +105,11 @@ export class DeviceCalendar extends Device {
     this.modules = [];
     this.id = DEFAULT_CALENDAR_DEVICE_ID;
     this.type = DeviceType.CALENDAR;
-    this.icon = "&#128197;";
-    this.typeLabel = "deviceType.calendar";
     this.moduleId = DEFAULT_CALENDAR_MODULE_ID;
-    this.initializeFunctionsBool();
-    this.initializeFunctionsAction();
-    this.initializeFunctionsTrigger();
   }
 
   updateValues(): Promise<void> {
     return Promise.resolve();
-  }
-
-  protected override initializeFunctionsBool() {
-    this.functionsBool = [
-      DeviceFunction.fromString(DeviceCalendar.BoolFunctionName.CALENDAR_VISIBLE, "bool"),
-      DeviceFunction.fromString(DeviceCalendar.BoolFunctionName.CALENDAR_HIDDEN, "bool"),
-      DeviceFunction.fromString(DeviceCalendar.BoolFunctionName.ENTRY_STARTED, "bool"),
-      DeviceFunction.fromString(DeviceCalendar.BoolFunctionName.ENTRY_ENDED, "bool"),
-      DeviceFunction.fromString(DeviceCalendar.BoolFunctionName.HAS_ENTRIES_TODAY, "bool"),
-      DeviceFunction.fromString(DeviceCalendar.BoolFunctionName.HAS_ENTRIES_TOMORROW, "bool"),
-      DeviceFunction.fromString(DeviceCalendar.BoolFunctionName.HAS_ENTRIES_THIS_WEEK, "bool")
-    ];
-  }
-
-  protected override initializeFunctionsAction() {
-    this.functionsAction = [
-      DeviceFunction.fromString(DeviceCalendar.ActionFunctionName.DELETE_ENTRY, "void"),
-      DeviceFunction.fromString(DeviceCalendar.ActionFunctionName.CHANGE_ENTRY_ADDRESS, "void"),
-      DeviceFunction.fromString(DeviceCalendar.ActionFunctionName.CHANGE_ENTRY_TIME_START, "void"),
-      DeviceFunction.fromString(DeviceCalendar.ActionFunctionName.CHANGE_ENTRY_TIME_END, "void"),
-      DeviceFunction.fromString(DeviceCalendar.ActionFunctionName.CHANGE_ENTRY_NAME, "void"),
-      DeviceFunction.create(
-        DeviceCalendar.ActionFunctionName.CHANGE_ENTRY_KATEGORIE,
-        [
-          FunctionParameter.fromString("string", DeviceCalendar.ActionFunctionName.GET_ENTRY_CATEGORIES),
-          FunctionParameter.fromString("string")
-        ],
-        "void"
-      ),
-      DeviceFunction.fromString(DeviceCalendar.ActionFunctionName.CHANGE_ENTRY_NOTIFICATION, "void"),
-      DeviceFunction.fromString(DeviceCalendar.ActionFunctionName.GET_ENTRY_CATEGORIES, "string[]")
-    ];
-  }
-
-  protected override initializeFunctionsTrigger() {
-    this.functionsTrigger = [
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_CHANGED, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_ADDED, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_DELETED, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_RESCHEDULED, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_ADDRESS_CHANGED, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_STARTED, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_STARTS_IN_MINUTES_20, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_STARTS_IN_MINUTES_15, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_STARTS_IN_MINUTES_10, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_STARTS_IN_MINUTES_5, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_HEADOFF_STARTS_IN_MINUTES_20, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_HEADOFF_STARTS_IN_MINUTES_15, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_HEADOFF_STARTS_IN_MINUTES_10, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_HEADOFF_STARTS_IN_MINUTES_5, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.ENTRY_HEADOFF_STARTS, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.CALENDAR_ADDED, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.CALENDAR_SHOW, "void"),
-      DeviceFunction.fromString(DeviceCalendar.TriggerFunctionName.CALENDAR_HIDE, "void")
-    ];
-  }
-
-  protected override checkListener(triggerName: string) {
-    super.checkListener(triggerName);
-    if (!triggerName) return;
-    const isValid = Object.values(DeviceCalendar.TriggerFunctionName).includes(
-      triggerName as (typeof DeviceCalendar.TriggerFunctionName)[keyof typeof DeviceCalendar.TriggerFunctionName]
-    );
-    if (!isValid) return;
-
-    const listeners = this.triggerListeners.get(triggerName) as DeviceListenerPair[] | undefined;
-    if (!listeners || listeners.length === 0) return;
-    listeners.forEach(listener => listener.run());
   }
 
   private getEntry(entryId: string): DeviceCalendarEntry | undefined {
@@ -231,7 +123,6 @@ export class DeviceCalendar extends Device {
   private getModule(moduleId: string): CalendarSubModule | undefined{
     const target = String(moduleId ?? "").trim();
     if (!target) return undefined;
-    console.log("getModule", target, this.modules);
     return this.modules.find(module => module.getModuleId() === target);
   }
 
@@ -300,7 +191,7 @@ export class DeviceCalendar extends Device {
     return this.calendars.flatMap(c => c.entries);
   }
 
-  async addEntry(entry: DeviceCalendarEntry, execute: boolean = true) {
+  async addEntry(entry: DeviceCalendarEntry, execute: boolean = true, trigger: boolean = true) {
     let module = this.getModule(entry.moduleId);
     if (!module) return;
     if( execute ){
@@ -311,10 +202,13 @@ export class DeviceCalendar extends Device {
       if (c.id !== entry.calendarId) return c;
       return { ...c, entries: [...c.entries, entry] };
     });
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_DELETED);
+
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryAdded(this.id, entry));
+    }
   }
 
-  async deleteEntry(entryId: string, execute: boolean = true) {
+  async deleteEntry(entryId: string, execute: boolean = true, trigger: boolean = true) {
     let entry = this.getEntry(entryId);
     if (!entry) return;
     let module = this.getModule(entry.moduleId);
@@ -323,72 +217,91 @@ export class DeviceCalendar extends Device {
     if( execute ){
       await module.executeDeleteEntry(entry);	
     }
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_DELETED);
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryDeleted(this.id, entry));
+    }
   }
 
-  async changeEntryAddress(entryId: string, newAddress: string, execute: boolean = true) {
+  async changeEntryAddress(entryId: string, newAddress: string, execute: boolean = true, trigger: boolean = true) {
     let entry = this.getEntry(entryId);
     if (!entry) return;
     let module = this.getModule(entry.moduleId);
     if (!module) return;
+    let entryBefore = { ...entry };
+
     entry.location = newAddress;
     entry.updatedAt = new Date().toISOString();
     if( execute ){
       const newEntry = await module.executeChangeEntry(entry);
-      entry.properties = newEntry.properties ?? {};
+      entry = newEntry;
     }
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_DELETED);
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_ADDRESS_CHANGED);
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_CHANGED);
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryChangedAddress(this.id, entryBefore, newAddress));
+      this.eventManager?.triggerEvent(new EventCalendarEntryChanged(this.id, entryBefore, entry));
+    }
   }
 
-  async changeEntryTimeStart(entryId: string, newStartIso: string, execute: boolean = true) {
+  async changeEntryTimeStart(entryId: string, newStartIso: string, execute: boolean = true, trigger: boolean = true) {
     let entry = this.getEntry(entryId);
     if (!entry) return;
     let module = this.getModule(entry.moduleId);
     if (!module) return;
+    let entryBefore = { ...entry };
+
     entry.start = newStartIso;
     entry.updatedAt = new Date().toISOString();
     if( execute ){
       const newEntry = await module.executeChangeEntry(entry);
       entry.properties = newEntry.properties ?? {};
     }
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_RESCHEDULED);
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_CHANGED);
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryChangedTimeStart(this.id, entryBefore, newStartIso));
+      this.eventManager?.triggerEvent(new EventCalendarEntryChanged(this.id, entryBefore, entry));
+    }
   }
 
-  async changeEntryTimeEnd(entryId: string, newEndIso: string, execute: boolean = true) {
+  async changeEntryTimeEnd(entryId: string, newEndIso: string, execute: boolean = true, trigger: boolean = true) {
     let entry = this.getEntry(entryId);
     if (!entry) return;
     let module = this.getModule(entry.moduleId);
     if (!module) return;
+    let entryBefore = { ...entry };
+
     entry.end = newEndIso;
     entry.updatedAt = new Date().toISOString();
     if( execute ){
       const newEntry = await module.executeChangeEntry(entry);
       entry.properties = newEntry.properties ?? {};
     }
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_RESCHEDULED);
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_CHANGED);
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryChangedTimeEnd(this.id, entryBefore, newEndIso));
+      this.eventManager?.triggerEvent(new EventCalendarEntryChanged(this.id, entryBefore, entry));
+    }
   }
 
-  async changeEntryName(entryId: string, newName: string, execute: boolean = true) {
+  async changeEntryName(entryId: string, newName: string, execute: boolean = true, trigger: boolean = true) {
     let entry = this.getEntry(entryId);
     if (!entry) return;
     let module = this.getModule(entry.moduleId);
     if (!module) return;
+    let entryBefore = { ...entry };
+
     entry.title = newName;
     entry.updatedAt = new Date().toISOString();
     if( execute ){
       const newEntry = await module.executeChangeEntry(entry);
       entry.properties = newEntry.properties ?? {};
     }
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_CHANGED);
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryChangedName(this.id, entryBefore, newName));
+      this.eventManager?.triggerEvent(new EventCalendarEntryChanged(this.id, entryBefore, entry));
+    }
   }
 
-  async changeEntryCalendar(entryId: string, calendarId: string, execute: boolean = true) {
+  async changeEntryCalendar(entryId: string, calendarId: string, execute: boolean = true, trigger: boolean = true) {
     const sourceEntry = this.getEntry(entryId);
     if (!sourceEntry) return;
+    const entryBefore = { ...sourceEntry };
     const oldCalendarId = sourceEntry.calendarId;
     const module_old = this.getModule(sourceEntry.moduleId);
     if (!module_old) return;
@@ -436,49 +349,67 @@ export class DeviceCalendar extends Device {
       }
       return c;
     });
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_CHANGED);
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryChangedCalendar(this.id, entryBefore, calendarId));
+      this.eventManager?.triggerEvent(new EventCalendarEntryChanged(this.id, entryBefore, movedEntry));
+    }
   }
 
-  async changeEntryNotification(entryId: string, enabled: boolean, execute: boolean = true) {
+  async changeEntryNotification(entryId: string, enabled: boolean, execute: boolean = true, trigger: boolean = true) {
     let entry = this.getEntry(entryId);
     if (!entry) return;
     let module = this.getModule(entry.moduleId);
     if (!module) return;
+    let entryBefore = { ...entry };
+
     entry.notificationEnabled = enabled;
     entry.updatedAt = new Date().toISOString();
     if( execute ){
       const result = await module.executeChangeEntry(entry);
       entry.properties = result.properties ?? {};
     }
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_CHANGED);
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryChangedNotification(this.id, entryBefore, enabled));
+      this.eventManager?.triggerEvent(new EventCalendarEntryChanged(this.id, entryBefore, entry));
+    }
   }
 
-  async changeEntryNotice(entryId: string, notice: string, execute: boolean = true) {
+  async changeEntryNotice(entryId: string, notice: string, execute: boolean = true, trigger: boolean = true) {
     let entry = this.getEntry(entryId);
     if (!entry) return;
     let module = this.getModule(entry.moduleId);
     if (!module) return;
+    let entryBefore = { ...entry };
+
     entry.description = notice;
     entry.updatedAt = new Date().toISOString();
     if( execute ){
       const result = await module.executeChangeEntry(entry);
       entry.properties = result.properties ?? {};
     }
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_CHANGED);
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryChangedNotice(this.id, entryBefore, notice));
+      this.eventManager?.triggerEvent(new EventCalendarEntryChanged(this.id, entryBefore, entry));
+    }
   }
 
-  async changeEntryAllDay(entryId: string, allDay: boolean, execute: boolean = true) {
+  async changeEntryAllDay(entryId: string, allDay: boolean, execute: boolean = true, trigger: boolean = true) {
     let entry = this.getEntry(entryId);
     if (!entry) return;
     let module = this.getModule(entry.moduleId);
     if (!module) return;
+    let entryBefore = { ...entry };
+
     entry.allDay = allDay;
     entry.updatedAt = new Date().toISOString();
     if( execute ){
       const newEntry = await module.executeChangeEntry(entry);
       entry.properties = newEntry.properties ?? {};
     }
-    this.checkListener(DeviceCalendar.TriggerFunctionName.ENTRY_CHANGED);
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCalendarEntryChangedAllDay(this.id, entryBefore, allDay));
+      this.eventManager?.triggerEvent(new EventCalendarEntryChanged(this.id, entryBefore, entry));
+    }
   }
 
   async changeCalendarConfig(calendarId: string, data: { show?: any; color?: any; name?: any; }) {

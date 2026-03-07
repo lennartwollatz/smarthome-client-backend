@@ -1,4 +1,4 @@
-import type { Point } from "./Point.js";
+import type { Position } from "../server/actions/action/Position.js";
 
 export class Room {
   id?: string;
@@ -10,7 +10,7 @@ export class Room {
   height?: number;
   color?: string;
   temperature?: number;
-  points?: Point[];
+  points?: Position[];
   index?: number;
 
   constructor(init?: Partial<Room>) {

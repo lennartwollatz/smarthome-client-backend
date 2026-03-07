@@ -1,5 +1,5 @@
 import type { DatabaseManager } from "../../../../db/database.js";
-import type { ActionManager } from "../../../../actions/actionManager.js";
+import type { ActionManager } from "../../../../actions/ActionManager.js";
 import { JsonRepository } from "../../../../db/jsonRepository.js";
 import { logger } from "../../../../../logger.js";
 import { HeosDeviceController } from "../heosDeviceController.js";
@@ -9,7 +9,7 @@ import { DeviceSpeaker } from "../../../../../model/devices/DeviceSpeaker.js";
 import { DenonSpeaker } from "./devices/denonSpeaker.js";
 import { Device } from "../../../../../model/index.js";
 import { HeosModuleManager } from "../heosModuleManager.js";
-import { EventStreamManager } from "../../../../events/eventStreamManager.js";
+import { EventManager } from "../../../../events/EventManager.js";
 import { HeosEventStreamManager } from "../heosEventStreamManager.js";
 import { DENONCONFIG } from "./denonModule.js";
 import { DeviceType } from "../../../../../model/devices/helper/DeviceType.js";
@@ -20,12 +20,12 @@ export class DenonModuleManager extends HeosModuleManager {
   constructor(
     databaseManager: DatabaseManager,
     actionManager: ActionManager,
-    eventStreamManager: EventStreamManager
+    eventManager: EventManager
   ) {
     const controller = new HeosDeviceController();
     const discoveredDeviceRepository = new JsonRepository<HeosDeviceDiscovered>(databaseManager, "HeosDeviceDiscovered");
     const discover = new DenonHeosSpeakerDeviceDiscover(databaseManager, discoveredDeviceRepository, controller);
-    super(databaseManager, actionManager, eventStreamManager, discover);
+    super(databaseManager, actionManager, eventManager, discover);
   }
 
   public getModuleId(): string {
@@ -198,7 +198,7 @@ export class DenonModuleManager extends HeosModuleManager {
     return speakers;
   }
 
-  convertDeviceFromDatabase(device: Device): Device | null {
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
     if (device.moduleId !== this.getModuleId()) {
       return null;
     }
@@ -210,11 +210,13 @@ export class DenonModuleManager extends HeosModuleManager {
       case DeviceType.SPEAKER:
         const denonSpeaker = new DenonSpeaker();
         Object.assign(denonSpeaker, device);
+        await denonSpeaker.updateValues();
         convertedDevice = denonSpeaker;
         break;
       case DeviceType.SPEAKER_RECEIVER:
         const denonReceiver = new DenonReceiver();
         Object.assign(denonReceiver, device);
+        await denonReceiver.updateValues();
         convertedDevice = denonReceiver;
         break;
     }

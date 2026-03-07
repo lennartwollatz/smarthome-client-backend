@@ -39,7 +39,9 @@ export class HueTemperatureSensor extends DeviceTemperature {
     // HueDeviceController in Node ist aktuell stubbed.
   }
 
-  protected executeSetTemperature(_temperature: number) {}
+  protected async executeSetTemperature(temperature: number): Promise<void> {
+    return;
+  }
 
   getBridgeId() {
     return this.bridgeId;

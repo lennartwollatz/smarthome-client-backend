@@ -1,6 +1,6 @@
 import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import { HueBridgeDiscover } from "./hueBridgeDiscover.js";
 import { HueDeviceDiscover } from "./hueDeviceDiscover.js";
 import { HueDeviceController } from "./hueDeviceController.js";
@@ -24,10 +24,9 @@ import { HueDeviceDiscovered } from "./hueDeviceDiscovered.js";
 import { HueEvent } from "./hueEvent.js";
 import { ModuleManagerBridged } from "../moduleManagerBridged.js";
 import { HueBridgeController } from "./hueBridgeController.js";
-import { EventStreamManager } from "../../../events/eventStreamManager.js";
+import { EventManager } from "../../../events/EventManager.js";
 import { HUECONFIG } from "./hueModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
-import { HueCameraMotionSensor } from "./devices/hueCameraMotionSensor.js";
 import { HueSwitchDimmer } from "./devices/hueSwitchDimmer.js";
 
 export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager, HueBridgeController, HueDeviceController, HueEvent, Device, HueDeviceDiscover, HueDeviceDiscovered, HueBridgeController, HueBridgeDiscover, HueBridgeDiscovered> {
@@ -35,7 +34,7 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
   constructor(
     databaseManager: DatabaseManager,
     actionManager: ActionManager,
-    eventStreamManager: EventStreamManager
+    eventManager: EventManager
   ) {
     const deviceController = new HueDeviceController(databaseManager);
     const bridgeController = new HueBridgeController(databaseManager);
@@ -45,7 +44,7 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
     super(
       databaseManager,
       actionManager,
-      eventStreamManager,
+      eventManager,
       deviceController,
       deviceDiscover,
       bridgeController,
@@ -97,62 +96,61 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
   async discoverDevicesForBridge(bridgeId: string) {
     const devices = await this.deviceDiscover.discoverDevices(bridgeId);
     this.actionManager.saveDevices(devices);
-    console.log("devices", devices);
     return devices;
   }
 
-  setSensitivity(deviceId: string, sensitivity: number) {
+  async setSensitivity(deviceId: string, sensitivity: number): Promise<boolean> {
     if (sensitivity < 0 || sensitivity > 100) return false;
     const device = this.actionManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceMotion)) return false;
-    device.setSensibility(sensitivity, true);
+    await device.setSensibility(sensitivity, true);
     return this.actionManager.saveDevice(device);
   }
 
-  setOn(deviceId: string) {
+  async setOn(deviceId: string): Promise<boolean> {
     const device = this.actionManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLight)) return false;
-    device.setOn(true);
+    await device.setOn(true);
     return this.actionManager.saveDevice(device);
   }
 
-  setOff(deviceId: string) {
+  async setOff(deviceId: string): Promise<boolean> {
     const device = this.actionManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLight)) return false;
-    device.setOff(true);
+    await device.setOff(true);
     return this.actionManager.saveDevice(device);
   }
 
-  setBrightness(deviceId: string, brightness: number) {
+  async setBrightness(deviceId: string, brightness: number): Promise<boolean> {
     if (brightness < 0 || brightness > 100) return false;
     const device = this.actionManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLightDimmer)) return false;
-    device.setBrightness(brightness, true);
+    await device.setBrightness(brightness, true);
     return this.actionManager.saveDevice(device);
   }
 
-  setTemperature(deviceId: string, temperature: number) {
+  async setTemperature(deviceId: string, temperature: number): Promise<boolean> {
     const device = this.actionManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLightDimmerTemperature)) return false;
-    device.setTemperature(temperature, true);
+    await device.setTemperature(temperature, true);
     return this.actionManager.saveDevice(device);
   }
 
-  setColor(deviceId: string, x: number, y: number) {
+  async setColor(deviceId: string, x: number, y: number): Promise<boolean> {
     if (x < 0 || x > 1 || y < 0 || y > 1) return false;
     const device = this.actionManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLightDimmerTemperatureColor)) return false;
-    device.setColor(x, y, true);
+    await device.setColor(x, y, true);
     return this.actionManager.saveDevice(device);
   }
 
-  public convertDeviceFromDatabase(device: Device): Device | null {
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
     if (device.moduleId !== this.getModuleId()) {
       return null;
     }
@@ -164,53 +162,55 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
       case DeviceType.LIGHT:
         const hueLight = new HueLight();
         Object.assign(hueLight, device);
+        await hueLight.updateValues();
         convertedDevice = hueLight;
         break;
       case DeviceType.LIGHT_DIMMER:
         const hueLightDimmer = new HueLightDimmer();
         Object.assign(hueLightDimmer, device);
+        await hueLightDimmer.updateValues();
         convertedDevice = hueLightDimmer;
         break;
       case DeviceType.LIGHT_DIMMER_TEMPERATURE:
         const hueLightDimmerTemperature = new HueLightDimmerTemperature();
         Object.assign(hueLightDimmerTemperature, device);
+        await hueLightDimmerTemperature.updateValues();
         convertedDevice = hueLightDimmerTemperature;
         break;
       case DeviceType.LIGHT_DIMMER_TEMPERATURE_COLOR:
         const hueLightDimmerTemperatureColor = new HueLightDimmerTemperatureColor();
         Object.assign(hueLightDimmerTemperatureColor, device);
+        await hueLightDimmerTemperatureColor.updateValues();
         convertedDevice = hueLightDimmerTemperatureColor;
         break;
       case DeviceType.MOTION:
-        // Prüfe ob es ein Camera Motion Sensor ist (anhand des Icons)
-        if (device.icon === "&#128249;") {
-          const hueCameraMotionSensor = new HueCameraMotionSensor();
-          Object.assign(hueCameraMotionSensor, device);
-          convertedDevice = hueCameraMotionSensor;
-        } else {
-          const hueMotionSensor = new HueMotionSensor();
-          Object.assign(hueMotionSensor, device);
-          convertedDevice = hueMotionSensor;
-        }
+        const hueMotionSensor = new HueMotionSensor();
+        Object.assign(hueMotionSensor, device);
+        await hueMotionSensor.updateValues();
+        convertedDevice = hueMotionSensor;
         break;
       case DeviceType.TEMPERATURE:
         const hueTemperatureSensor = new HueTemperatureSensor();
         Object.assign(hueTemperatureSensor, device);
+        await hueTemperatureSensor.updateValues();
         convertedDevice = hueTemperatureSensor;
         break;
       case DeviceType.LIGHT_LEVEL:
         const hueLightLevelSensor = new HueLightLevelSensor();
         Object.assign(hueLightLevelSensor, device);
+        await hueLightLevelSensor.updateValues();
         convertedDevice = hueLightLevelSensor;
         break;
       case DeviceType.MOTION_LIGHT_LEVEL_TEMPERATURE:
         const hueLightLevelMotionTemperature = new HueLightLevelMotionTemperature();
         Object.assign(hueLightLevelMotionTemperature, device);
+        await hueLightLevelMotionTemperature.updateValues();
         convertedDevice = hueLightLevelMotionTemperature;
         break;
       case DeviceType.SWITCH_DIMMER:
         const hueSwitchDimmer = new HueSwitchDimmer();
         Object.assign(hueSwitchDimmer, device);
+        await hueSwitchDimmer.updateValues();
         convertedDevice = hueSwitchDimmer;
         break;
     }

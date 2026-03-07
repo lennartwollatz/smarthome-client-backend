@@ -1,8 +1,8 @@
-import { DeviceFanLight } from "../../../../../model/devices/DeviceFanLight.js";
 import { WACLightingDeviceController } from "../waclightingDeviceController.js";
 import { logger } from "../../../../../logger.js";
+import { DeviceFanLightDimmer } from "../../../../../model/devices/DeviceFanLightDimmer.js";
 
-export class WACFanLight extends DeviceFanLight {
+export class WACFanLight extends DeviceFanLightDimmer {
   private address?: string;
   private port?: number;
   private wacController?: WACLightingDeviceController;
@@ -45,25 +45,25 @@ export class WACFanLight extends DeviceFanLight {
       // Fan Status
       if (status.fanOn !== undefined) {
         if (status.fanOn) {
-          this.setOn(true);
+          this.setOn(false, false);
         } else {
-          this.setOff(true);
+          this.setOff(false, false);
         }
       }
       if (status.fanSpeed !== undefined) {
-        this.setSpeed(status.fanSpeed, false);
+        this.setSpeed(status.fanSpeed, false, false);
       }
 
       // Light Status
       if (status.lightOn !== undefined) {
         if (status.lightOn) {
-          this.setLightOn(false);
+          this.setLightOn(false, false);
         } else {
-          this.setLightOff(false);
+          this.setLightOff(false, false);
         }
       }
       if (status.lightBrightness !== undefined) {
-        this.setLightBrightness(status.lightBrightness, false);
+        this.setLightBrightness(status.lightBrightness, false, false);
       }
 
       logger.debug({ deviceId: this.id }, "WAC Fan Light Werte aktualisiert");
@@ -73,62 +73,62 @@ export class WACFanLight extends DeviceFanLight {
     }
   }
 
-  protected executeSetOn(): void | Promise<void> {
+  protected async executeSetOn(): Promise<void> {
     if (!this.wacController) {
       logger.warn({ deviceId: this.id }, "Keine Controller für setOn");
       return;
     }
-    this.wacController.setFanOn(this).catch(err => {
+    await this.wacController.setFanOn(this).catch(err => {
       logger.error({ err, deviceId: this.id }, "Fehler beim Einschalten des Fans");
     });
   }
 
-  protected executeSetOff(): void | Promise<void> {
+  protected async executeSetOff(): Promise<void> {
     if (!this.wacController) {
       logger.warn({ deviceId: this.id }, "Keine Controller für setOff");
       return;
     }
-    this.wacController.setFanOff(this).catch(err => {
+    await this.wacController.setFanOff(this).catch(err => {
       logger.error({ err, deviceId: this.id }, "Fehler beim Ausschalten des Fans");
     });
   }
 
-  protected executeSetSpeed(speed: number): void {
+  protected async executeSetSpeed(speed: number): Promise<void> {
     if (!this.wacController) {
       logger.warn({ deviceId: this.id }, "Keine Controller für setSpeed");
       return;
     }
-    this.wacController.setFanSpeed(this, speed).catch(err => {
+    await this.wacController.setFanSpeed(this, speed).catch(err => {
       logger.error({ err, deviceId: this.id }, "Fehler beim Setzen der Fan-Geschwindigkeit");
     });
   }
 
-  protected executeSetLightOn(): void | Promise<void> {
+  protected async executeSetLightOn(): Promise<void> {
     if (!this.wacController) {
       logger.warn({ deviceId: this.id }, "Keine Controller für executeSetLightOn");
       return;
     }
-    this.wacController.setLightOn(this).catch(err => {
+    await this.wacController.setLightOn(this).catch(err => {
       logger.error({ err, deviceId: this.id }, "Fehler beim Einschalten des Lichts");
     });
   }
 
-  protected executeSetLightOff(): void | Promise<void> {
+  protected async executeSetLightOff(): Promise<void> {
     if (!this.wacController) {
       logger.warn({ deviceId: this.id }, "Keine Controller für executeSetLightOff");
       return;
     }
-    this.wacController.setLightOff(this).catch(err => {
+    await this.wacController.setLightOff(this).catch(err => {
       logger.error({ err, deviceId: this.id }, "Fehler beim Ausschalten des Lichts");
     });
   }
 
-  protected executeSetLightBrightness(brightness: number): void | Promise<void> {
+  protected async executeSetLightBrightness(brightness: number): Promise<void> {
     if (!this.wacController) {
       logger.warn({ deviceId: this.id }, "Keine Controller für executeSetLightBrightness");
       return;
     }
-    this.wacController.setLightBrightness(this, brightness).catch(err => {
+    await this.wacController.setLightBrightness(this, brightness).catch(err => {
       logger.error({ err, deviceId: this.id }, "Fehler beim Setzen der Licht-Helligkeit");
     });
   }

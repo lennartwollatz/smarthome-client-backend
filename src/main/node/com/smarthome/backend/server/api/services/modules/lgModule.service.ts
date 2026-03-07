@@ -1,19 +1,11 @@
 import { Router } from "express";
-import type { DatabaseManager } from "../../../db/database.js";
-import type { EventStreamManager } from "../../../events/eventStreamManager.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
 import { LGModuleManager } from "../../modules/lg/lgModuleManager.js";
 import { logger } from "../../../../logger.js";
+import type { RouterDeps } from "../../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
-
-export function createLGModuleRouter(deps: Deps) {
+export function createLGModuleRouter(deps: RouterDeps) {
   const router = Router();
-  const lgModule = new LGModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  const lgModule = new LGModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
   deps.actionManager.registerModuleManager(lgModule);
 
   router.get("/devices/discover", async (_req, res) => {

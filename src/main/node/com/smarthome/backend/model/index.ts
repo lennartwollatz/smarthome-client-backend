@@ -1,40 +1,18 @@
-export * from './Action.js';
-export * from './ActionConfig.js';
-export * from './AutoUpdateSettings.js';
-export * from './ConditionConfig.js';
-export * from './DeviceFunction.js';
-export * from './DeviceToggleResponse.js';
-export * from './DeviceTrigger.js';
-export * from './DeviceValueRequest.js';
-export * from './DeviceValueResponse.js';
-export * from './FloorPlan.js';
-export * from './GeneralSettings.js';
-export * from './LoopConfig.js';
-export * from './Module.js';
-export * from './ModuleActiveRequest.js';
-export * from './ModuleSetting.js';
-export * from './ModuleSettingsRequest.js';
-export * from './ModuleVersion.js';
-export * from './Node.js';
-export * from './NotificationSettings.js';
-export * from './PairingRequest.js';
-export * from './PairingResponse.js';
-export * from './Point.js';
-export * from './Position.js';
-export * from './PrivacySettings.js';
-export * from './Room.js';
-export * from './Scene.js';
-export * from './SceneActivationResponse.js';
-export * from './Settings.js';
-export * from './SystemInfo.js';
-export * from './SystemSettings.js';
-export * from './TimeTrigger.js';
-export * from './TriggerConfig.js';
-export * from './UpdateComponentRequest.js';
-export * from './UpdateTimes.js';
-export * from './User.js';
-export * from './VersionInfo.js';
-export * from './WaitConfig.js';
-export * from './Workflow.js';
-export * from './devices/index.js';
-export * from './devices/helper/index.js';
+// Devices (includes Device, DeviceTV, Channel, App, DeviceCalendar, CalendarConfig, TemperatureSchedule, etc.)
+export * from "./devices/index.js";
+
+// Settings & System
+export { Settings } from "./Settings.js";
+export { GeneralSettings } from "./GeneralSettings.js";
+export { NotificationSettings } from "./NotificationSettings.js";
+export { PrivacySettings } from "./PrivacySettings.js";
+export { SystemSettings } from "./SystemSettings.js";
+export { VersionInfo } from "./VersionInfo.js";
+export { SystemInfo } from "./SystemInfo.js";
+export { UpdateComponentRequest } from "./UpdateComponentRequest.js";
+export { AutoUpdateSettings } from "./AutoUpdateSettings.js";
+
+// Other models
+export { FloorPlan } from "./FloorPlan.js";
+export { Room } from "./Room.js";
+export { User } from "./User.js";

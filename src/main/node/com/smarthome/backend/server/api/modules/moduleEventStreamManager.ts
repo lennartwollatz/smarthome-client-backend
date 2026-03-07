@@ -1,4 +1,4 @@
-import { ActionManager } from "../../actions/actionManager.js";
+import { ActionManager } from "../../actions/ActionManager.js";
 import { logger } from "../../../logger.js";
 import { ModuleEvent } from "./moduleEvent.js";
 import { ModuleEventController } from "./moduleEventController.js";
@@ -28,7 +28,7 @@ export abstract class ModuleEventStreamManager<C extends ModuleEventController, 
     }
     try {
       this.running = true;
-      const callback: (event: E) => void = event => this.handleEvent(event);
+      const callback: (event: E) => void = (event: E) => this.handleEvent(event);
       await this.startEventStream(callback);
       logger.info(this.managerId+" EventStream gestartet");
     } catch (err) {

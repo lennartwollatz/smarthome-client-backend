@@ -1,18 +1,10 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
-import type { DatabaseManager } from "../../db/database.js";
-import type { EventStreamManager } from "../../events/eventStreamManager.js";
-import type { ActionManager } from "../../actions/actionManager.js";
 import { JsonRepository } from "../../db/jsonRepository.js";
-import type { User } from "../../../model/index.js";
+import { User } from "../../../model/User.js";
+import type { RouterDeps } from "../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
-
-export function createUserRouter(deps: Deps) {
+export function createUserRouter(deps: RouterDeps) {
   const router = Router();
   const userRepository = new JsonRepository<User>(deps.databaseManager, "User");
 

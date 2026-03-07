@@ -1,20 +1,9 @@
 import { Router } from "express";
-import type { DatabaseManager } from "../../db/database.js";
-import type { EventStreamManager } from "../../events/eventStreamManager.js";
-import type { ActionManager } from "../../actions/actionManager.js";
-import { JsonRepository } from "../../db/jsonRepository.js";
+import type { RouterDeps } from "../router.js";
 
-type Device = Record<string, unknown>;
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
-
-export function createDeviceRouter(deps: Deps) {
+export function createDeviceRouter(deps: RouterDeps) {
   const router = Router();
-  const repo = new JsonRepository<Device>(deps.databaseManager, "Device");
 
   router.get("/", (_req, res) => {
     const devices = deps.actionManager.getDevices();
@@ -31,20 +20,37 @@ export function createDeviceRouter(deps: Deps) {
     }
 
     const patch = req.body as Record<string, unknown>;
-    const next = { ...existing };
+    const next = existing as any;
 
     if ("name" in patch && typeof patch.name === "string") next.name = patch.name;
     if ("room" in patch && (typeof patch.room === "string" || patch.room === undefined || patch.room === null)) next.room = patch.room ?? undefined;
     if ("icon" in patch && (typeof patch.icon === "string" || patch.icon === undefined)) next.icon = patch.icon;
     if ("typeLabel" in patch && (typeof patch.typeLabel === "string" || patch.typeLabel === undefined)) next.typeLabel = patch.typeLabel;
-    if ("moduleId" in patch && (typeof patch.moduleId === "string" || patch.moduleId === undefined)) next.moduleId = patch.moduleId;
-    if ("isConnected" in patch && typeof patch.isConnected === "boolean") next.isConnected = patch.isConnected;
-    if ("isConnecting" in patch && typeof patch.isConnecting === "boolean") next.isConnecting = patch.isConnecting;
     if ("quickAccess" in patch && typeof patch.quickAccess === "boolean") next.quickAccess = patch.quickAccess;
-    if ("buttons" in patch && typeof patch.buttons === "object" && patch.buttons !== null) (next as any).buttons = patch.buttons;
+    if ("temperatureGoal" in patch && typeof patch.temperatureGoal === "number" && Number.isFinite(patch.temperatureGoal)) {
+      next.temperatureGoal = Math.max(5, Math.min(35, patch.temperatureGoal));
+    }
+    if ("buttons" in patch && typeof patch.buttons === "object" && patch.buttons !== null) {
+      const incomingButtons = patch.buttons as Record<string, unknown>;
+      const existingButtons = next.buttons as Record<string, Record<string, unknown>> | undefined;
 
-    repo.save(deviceId, next);
-    // Aktualisiere auch den ActionManager
+      if (existingButtons && typeof existingButtons === "object") {
+        for (const [buttonId, rawButtonPatch] of Object.entries(incomingButtons)) {
+          const existingButton = existingButtons[buttonId];
+          if (!existingButton || typeof existingButton !== "object") continue;
+          if (!rawButtonPatch || typeof rawButtonPatch !== "object") continue;
+
+          const buttonPatch = rawButtonPatch as Record<string, unknown>;
+          if ("name" in buttonPatch && typeof buttonPatch.name === "string") {
+            existingButton.name = buttonPatch.name;
+          }
+          if ("connectedToLight" in buttonPatch && typeof buttonPatch.connectedToLight === "boolean") {
+            existingButton.connectedToLight = buttonPatch.connectedToLight;
+          }
+        }
+      }
+    }
+
     deps.actionManager.saveDevice(next as any);
     res.status(200).json(next);
   });

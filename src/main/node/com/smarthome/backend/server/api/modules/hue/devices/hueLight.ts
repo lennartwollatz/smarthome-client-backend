@@ -33,28 +33,26 @@ export class HueLight extends DeviceLight {
     // HueDeviceController in Node ist aktuell stubbed.
   }
 
-  protected async executeSetOn() {
+  protected async executeSetOn(): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Lampe nicht einschalten fuer {}", this.id);
       return;
     }
     try {
       await this.hueDeviceController.setOn(this.id, true);
-      this.on = true;
     } catch (error) {
       logger.error({ error, deviceId: this.id }, "Fehler beim Einschalten des Hue Light");
       // Fehler wird geloggt, aber nicht weitergeworfen, um Server-Absturz zu vermeiden
     }
   }
 
-  protected async executeSetOff() {
+  protected async executeSetOff(): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Lampe nicht ausschalten fuer {}", this.id);
       return;
     }
     try {
       await this.hueDeviceController.setOn(this.id, false);
-      this.on = false;
     } catch (error) {
       logger.error({ error, deviceId: this.id }, "Fehler beim Ausschalten des Hue Light");
       // Fehler wird geloggt, aber nicht weitergeworfen, um Server-Absturz zu vermeiden

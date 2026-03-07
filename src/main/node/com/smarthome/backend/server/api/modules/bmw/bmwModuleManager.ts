@@ -1,5 +1,5 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import { logger } from "../../../../logger.js";
 import { ModuleManager } from "../moduleManager.js";
 import { BMWDeviceController } from "./bmwDeviceController.js";
@@ -7,7 +7,7 @@ import { BMWDeviceDiscovered } from "./bmwDeviceDiscovered.js";
 import { BMWDeviceDiscover } from "./bmwDeviceDiscover.js";
 import { BMWEvent } from "./bmwEvent.js";
 import { BMWEventStreamManager } from "./bmwEventStreamManager.js";
-import { EventStreamManager } from "../../../events/eventStreamManager.js";
+import { EventManager } from "../../../events/EventManager.js";
 import { BMWCONFIG } from "./bmwModule.js";
 import { BMWCar } from "./devices/bmwCar.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
@@ -31,7 +31,7 @@ export class BMWModuleManager extends ModuleManager<
   constructor(
     databaseManager: DatabaseManager,
     actionManager: ActionManager,
-    eventStreamManager: EventStreamManager
+    eventManager: EventManager
   ) {
     const tokenStore = new BMWTokenStore(databaseManager);
     const deviceController = new BMWDeviceController(tokenStore);
@@ -42,7 +42,7 @@ export class BMWModuleManager extends ModuleManager<
       return { username: credentials.username, password: credentials.password, captchaToken: credentials.captchaToken };
     });
 
-    super(databaseManager, actionManager, eventStreamManager, deviceController, deviceDiscover);
+    super(databaseManager, actionManager, eventManager, deviceController, deviceDiscover);
     this.credentialsStore = credentialsStore;
     this.tokenStore = tokenStore;
   }
@@ -218,7 +218,7 @@ export class BMWModuleManager extends ModuleManager<
     return car;
   }
 
-  convertDeviceFromDatabase(device: Device): Device | null {
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
     if (device.moduleId !== this.getModuleId()) {
       return null;
     }
@@ -228,6 +228,7 @@ export class BMWModuleManager extends ModuleManager<
       Object.assign(car, device);
       car.setBMWController(this.deviceController);
       car.setCredentialsProvider(() => this.getCredentialsForUse());
+      await car.updateValues();
       return car;
     }
     return null;

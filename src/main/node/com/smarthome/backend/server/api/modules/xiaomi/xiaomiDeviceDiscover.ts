@@ -2,7 +2,7 @@ import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { XiaomiDeviceDiscovered } from "./xiaomiDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
-import miio from "miio";
+import miio = require("miio");
 import { XIAOMICONFIG, XIAOMIMODULE } from "./xiaomiModule.js";
 
 export class XiaomiDeviceDiscover extends ModuleDeviceDiscover<XiaomiDeviceDiscovered> {

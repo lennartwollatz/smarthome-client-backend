@@ -1,5 +1,5 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { BMWDeviceController } from "./bmwDeviceController.js";
 import { BMWEvent } from "./bmwEvent.js";

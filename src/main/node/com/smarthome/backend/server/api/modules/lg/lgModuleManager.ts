@@ -1,5 +1,5 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import { logger } from "../../../../logger.js";
 import { LGDeviceDiscover } from "./lgDeviceDiscover.js";
 import { LGDeviceDiscovered } from "./lgDeviceDiscovered.js";
@@ -10,19 +10,20 @@ import { LGEvent } from "./lgEvent.js";
 import { LGEventStreamManager } from "./lgEventStreamManager.js";
 import { ModuleManager } from "../moduleManager.js";
 import { LGCONFIG, LGMODULE } from "./lgModule.js";
-import { EventStreamManager } from "../../../events/eventStreamManager.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { EventManager } from "../../../events/EventManager.js";
+
 
 export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDeviceController, LGDeviceController, LGEvent, DeviceTV, LGDeviceDiscover, LGDeviceDiscovered> {
   constructor(
     databaseManager: DatabaseManager,
     actionManager: ActionManager,
-    eventStreamManager: EventStreamManager
+    eventManager: EventManager
   ) {
     super(
       databaseManager,
       actionManager,
-      eventStreamManager,
+      eventManager,
       new LGDeviceController(),
       new LGDeviceDiscover(databaseManager)
     );
@@ -86,7 +87,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return false;
     }
     const tv = await this.toLGTV(device);
-    tv.setPower(true, true);
+    await tv.setPower(true, true);
     this.actionManager.saveDevice(tv);
     return true;
   }
@@ -99,7 +100,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return false;
     }
     const tv = await this.toLGTV(device);
-    tv.setPower(false, true);
+    await tv.setPower(false, true);
     this.actionManager.saveDevice(tv);
     return true;
   }
@@ -125,7 +126,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return false;
     }
     const tv = await this.toLGTV(device);
-    tv.setScreen(false, true);
+    await tv.setScreen(false, true);
     this.actionManager.saveDevice(tv);
     return true;
   }
@@ -138,7 +139,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return false;
     }
     const tv = await this.toLGTV(device);
-    tv.setChannel(channelId, true);
+    await tv.setChannel(channelId, true);
     this.actionManager.saveDevice(tv);
     return true;
   }
@@ -151,7 +152,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return false;
     }
     const tv = await this.toLGTV(device);
-    tv.startApp(appId, true);
+    await tv.startApp(appId, true);
     this.actionManager.saveDevice(tv);
     return true;
   }
@@ -177,7 +178,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return false;
     }
     const tv = await this.toLGTV(device);
-    tv.setVolume(volume, true);
+    await tv.setVolume(volume, true);
     this.actionManager.saveDevice(tv);
     return true;
   }
@@ -192,7 +193,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
     const tv = await this.toLGTV(device);
     await tv.updateChannels();
     this.actionManager.saveDevice(tv);
-    return tv.getChannels() ?? [];
+    return tv.channels ?? [];
   }
 
   async getApps(deviceId: string) {
@@ -205,7 +206,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
     const tv = await this.toLGTV(device);
     await tv.updateApps();
     this.actionManager.saveDevice(tv);
-    return tv.getApps() ?? null;
+    return tv.apps ?? null;
   }
 
   async getSelectedApp(deviceId: string) {
@@ -249,7 +250,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return false;
     }
     const tv = await this.toLGTV(device);
-    const apps = tv.getApps();
+    const apps = tv.apps;
     if (!apps || apps.length === 0) return false;
     const target = apps.find(app => appId && appId === app.getId());
     if (!target) return false;
@@ -284,7 +285,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return false;
     }
     const tv = await this.toLGTV(device);
-    const channels = tv.getChannels();
+    const channels = tv.channels;
     if (!channels || channels.length === 0) return false;
     const target = channels.find(channel => channelId && channelId === channel.getId());
     if (!target) return false;
@@ -334,7 +335,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
     return tv;
   }
 
-  convertDeviceFromDatabase(device: Device): Device | null {
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
     if (device.moduleId !== this.getModuleId()) {
       return null;
     }
@@ -346,6 +347,7 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       case DeviceType.TV:
         const lgTV = new LGTV();
         Object.assign(lgTV, device);
+        await lgTV.updateValues();
         convertedDevice = lgTV;
         break;
     }

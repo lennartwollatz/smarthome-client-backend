@@ -38,7 +38,7 @@ export class HueMotionSensor extends DeviceMotion {
     // HueDeviceController in Node ist aktuell stubbed.
   }
 
-  protected executeSetSensibility(sensitivity: number) {
+  protected async executeSetSensibility(sensitivity: number): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Empfindlichkeit nicht setzen fuer {}", this.id);
       return;
@@ -46,7 +46,7 @@ export class HueMotionSensor extends DeviceMotion {
     this.hueDeviceController.setSensitivity(this.id, sensitivity);
   }
 
-  protected executeSetMotion(_motion: boolean, _motion_last_detect: string) {}
+  protected async executeSetMotion(_motion: boolean, _motion_last_detect: string): Promise<void> {}
 
   getBridgeId() {
     return this.bridgeId;

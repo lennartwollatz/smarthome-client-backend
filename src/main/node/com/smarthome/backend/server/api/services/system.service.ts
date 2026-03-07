@@ -1,5 +1,4 @@
 import { Router } from "express";
-import type { DatabaseManager } from "../../db/database.js";
 import { JsonRepository } from "../../db/jsonRepository.js";
 import { loadOrCreateSettings, saveSettings } from "./settings.service.js";
 import type {
@@ -9,12 +8,9 @@ import type {
   UpdateComponentRequest,
   AutoUpdateSettings
 } from "../../../model/index.js";
+import type { RouterDeps } from "../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-};
-
-export function createSystemRouter(deps: Deps) {
+export function createSystemRouter(deps: RouterDeps) {
   const router = Router();
   const settingsRepository = new JsonRepository<Settings>(deps.databaseManager, "Settings");
 

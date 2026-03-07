@@ -1,11 +1,12 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { WACLightingDeviceController } from "./waclightingDeviceController.js";
 import { WACLightingEvent } from "./waclightingEvent.js";
 import { WACLIGHTINGMODULE } from "./waclightingModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { DeviceFanLight } from "../../../../model/devices/DeviceFanLight.js";
+import { DeviceFanLightDimmer } from "../../../../model/devices/DeviceFanLightDimmer.js";
 
 export class WACLightingEventStreamManager extends ModuleEventStreamManager<WACLightingDeviceController, WACLightingEvent> {
   private pollingInterval: NodeJS.Timeout | null = null;
@@ -55,11 +56,11 @@ export class WACLightingEventStreamManager extends ModuleEventStreamManager<WACL
       if (device.type !== DeviceType.FAN_LIGHT) continue;
       if (!(device instanceof DeviceFanLight)) continue;
 
-      await this.pollDevice(device, callback);
+      await this.pollDevice(device as DeviceFanLightDimmer, callback);
     }
   }
 
-  private async pollDevice(device: DeviceFanLight, callback: (event: WACLightingEvent) => void): Promise<void> {
+  private async pollDevice(device: DeviceFanLightDimmer, callback: (event: WACLightingEvent) => void): Promise<void> {
     try {
       const deviceId = device.id;
       if (!deviceId) return;
@@ -129,7 +130,7 @@ export class WACLightingEventStreamManager extends ModuleEventStreamManager<WACL
     logger.debug({ deviceId: event.deviceid, eventType: event.data.type }, "WAC Lighting Event empfangen");
 
     const device = this.actionManager.getDevice(event.deviceid);
-    if (!device || !(device instanceof DeviceFanLight)) {
+    if (!device || !(device instanceof DeviceFanLightDimmer)) {
       return;
     }
 

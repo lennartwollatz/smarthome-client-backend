@@ -1,9 +1,7 @@
-import miio from "miio";
+import miio = require("miio");
 import { logger } from "../../../../logger.js";
-import { ModuleDeviceController } from "../moduleDeviceController.js";
 import { XiaomiEvent } from "./xiaomiEvent.js";
 import { XiaomiVacuumCleaner } from "./devices/xiaomiVacuumCleaner.js";
-import { Device } from "../../../../model/devices/Device.js";
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
 
 type MiioDevice = {

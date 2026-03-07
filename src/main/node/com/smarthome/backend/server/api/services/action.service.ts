@@ -1,13 +1,9 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
-import type { ActionManager } from "../../actions/actionManager.js";
-import type { Action } from "../../../model/index.js";
+import type { Action } from "../../actions/action/Action.js";
+import type { RouterDeps } from "../router.js";
 
-type Deps = {
-  actionManager: ActionManager;
-};
-
-export function createActionRouter(deps: Deps) {
+export function createActionRouter(deps: RouterDeps) {
   const router = Router();
 
   router.get("/", (_req, res) => {

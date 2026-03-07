@@ -59,29 +59,29 @@ export class BMWCar extends DeviceCar {
     }
   }
 
-  protected executeStartClimateControl(): void {
+  protected async executeStartClimateControl(): Promise<void> {
     if (!this.bmwController || !this.credentialsProvider || !this.vin) return;
     const credentials = this.credentialsProvider();
     if (!credentials?.username || !credentials.password) return;
-    this.bmwController.startClimateControl(credentials, this.vin).catch(err => {
+    await this.bmwController.startClimateControl(credentials, this.vin).catch(err => {
       logger.error({ err, deviceId: this.id }, "Fehler beim Starten der BMW Klimatisierung");
     });
   }
 
-  protected executeStopClimateControl(): void {
+  protected async executeStopClimateControl(): Promise<void> {
     if (!this.bmwController || !this.credentialsProvider || !this.vin) return;
     const credentials = this.credentialsProvider();
     if (!credentials?.username || !credentials.password) return;
-    this.bmwController.stopClimateControl(credentials, this.vin).catch(err => {
+    await this.bmwController.stopClimateControl(credentials, this.vin).catch(err => {
       logger.error({ err, deviceId: this.id }, "Fehler beim Stoppen der BMW Klimatisierung");
     });
   }
 
-  protected executeSendAddress(subject: string, address: DeviceCarAddress): void {
+  protected async executeSendAddress(subject: string, address: DeviceCarAddress): Promise<void> {
     if (!this.bmwController || !this.credentialsProvider || !this.vin) return;
     const credentials = this.credentialsProvider();
     if (!credentials?.username || !credentials.password) return;
-    this.bmwController.sendAddress(credentials, this.vin, subject, address).catch(err => {
+    await this.bmwController.sendAddress(credentials, this.vin, subject, address).catch(err => {
       logger.error({ err, deviceId: this.id }, "Fehler beim Senden einer BMW Zieladresse");
     });
   }

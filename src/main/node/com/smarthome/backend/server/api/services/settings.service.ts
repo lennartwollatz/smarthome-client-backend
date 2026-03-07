@@ -2,23 +2,16 @@ import { Router } from "express";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import os from "node:os";
-import type { DatabaseManager } from "../../db/database.js";
 import { JsonRepository } from "../../db/jsonRepository.js";
-import type {
-  Settings,
-  GeneralSettings,
-  NotificationSettings,
-  PrivacySettings,
-  SystemSettings,
-  UpdateTimes,
-  VersionInfo
-} from "../../../model/index.js";
+import { Settings } from "../../../model/Settings.js";
+import { GeneralSettings } from "../../../model/GeneralSettings.js";
+import { NotificationSettings } from "../../../model/NotificationSettings.js";
+import { PrivacySettings } from "../../../model/PrivacySettings.js";
+import { SystemSettings } from "../../../model/SystemSettings.js";
+import { VersionInfo } from "../../../model/VersionInfo.js";
+import type { RouterDeps } from "../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-};
-
-export function createSettingsRouter(deps: Deps) {
+export function createSettingsRouter(deps: RouterDeps) {
   const router = Router();
   const settingsRepository = new JsonRepository<Settings>(deps.databaseManager, "Settings");
 

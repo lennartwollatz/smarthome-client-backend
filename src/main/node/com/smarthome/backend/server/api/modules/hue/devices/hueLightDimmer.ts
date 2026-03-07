@@ -36,42 +36,39 @@ export class HueLightDimmer extends DeviceLightDimmer {
     // HueDeviceController in Node ist aktuell stubbed.
   }
 
-  protected async executeSetOn() {
+  protected async executeSetOn(): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Lampe nicht einschalten fuer {}", this.id);
       return;
     }
     try {
       await this.hueDeviceController.setOn(this.id, true);
-      this.on = true;
     } catch (error) {
       logger.error({ error, deviceId: this.id }, "Fehler beim Einschalten des Hue Light");
       // Fehler wird geloggt, aber nicht weitergeworfen, um Server-Absturz zu vermeiden
     }
   }
 
-  protected async executeSetOff() {
+  protected async executeSetOff(): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Lampe nicht ausschalten fuer {}", this.id);
       return;
     }
     try {
       await this.hueDeviceController.setOn(this.id, false);
-      this.on = false;
     } catch (error) {
       logger.error({ error, deviceId: this.id }, "Fehler beim Ausschalten des Hue Light");
       // Fehler wird geloggt, aber nicht weitergeworfen, um Server-Absturz zu vermeiden
     }
   }
 
-  protected async executeSetBrightness(brightness: number) {
+  protected async executeSetBrightness(brightness: number): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Helligkeit nicht setzen fuer {}", this.id);
       return;
     }
     try {
       await this.hueDeviceController.setBrightness(this.id, brightness);
-      this.brightness = brightness;
     } catch (error) {
       logger.error({ error, deviceId: this.id }, "Fehler beim Setzen der Helligkeit des Hue Light");
       // Fehler wird geloggt, aber nicht weitergeworfen, um Server-Absturz zu vermeiden

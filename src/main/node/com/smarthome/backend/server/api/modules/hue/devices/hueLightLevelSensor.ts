@@ -64,6 +64,8 @@ export class HueLightLevelSensor extends DeviceLightLevel {
     this.hueDeviceController = hueDeviceController;
   }
 
-  protected executeSetLightLevel(_lightLevel: number) {}
+  protected async executeSetLightLevel(_lightLevel: number): Promise<void> {
+    return;
+  }
 }
 

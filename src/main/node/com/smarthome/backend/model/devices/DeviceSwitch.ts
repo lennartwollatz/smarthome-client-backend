@@ -1,30 +1,15 @@
 import { Device } from "./Device.js";
-import type { DeviceListenerPair } from "./helper/DeviceListenerPair.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import { DeviceFunction } from "../DeviceFunction.js";
+import { EventSwitchStatusChanged } from "../../server/events/events/EventSwitchStatusChanged.js";
+import { EventSwitchPressed } from "../../server/events/events/EventSwitchPressed.js";
+import { EventSwitchDoublePressed } from "../../server/events/events/EventSwitchDoublePressed.js";
+import { EventSwitchTriplePressed } from "../../server/events/events/EventSwitchTriplePressed.js";
+import { EventSwitchButtonOn } from "../../server/events/events/EventSwitchButtonOn.js";
+import { EventSwitchButtonOff } from "../../server/events/events/EventSwitchButtonOff.js";
+import { EventSwitchLongPressed } from "../../server/events/events/EventSwitchLongPressed.js";
 
 export abstract class DeviceSwitch extends Device {
-  static TriggerFunctionName = {
-    ON_PRESSED: "onPressed",
-    ON_PRESSED_INT: "onPressed(int)",
-    ON_DOUBLE_PRESSED: "onDoublePressed",
-    ON_DOUBLE_PRESSED_INT: "onDoublePressed(int)",
-    ON_TRIPLE_PRESSED: "onTriplePressed",
-    ON_TRIPLE_PRESSED_INT: "onTriplePressed(int)",
-    ON_BUTTON_ON_INT: "onButtonOn(int)",
-    ON_BUTTON_OFF_INT: "onButtonOff(int)"
-  } as const;
-
-  static ActionFunctionName = {
-    TOGGLE: "toggle(int)",
-    DOUBLE_PRESS: "doublePress(int)",
-    TRIPLE_PRESS: "triplePress(int)"
-  } as const;
-
-  static BoolFunctionName = {
-    ON_INT: "on(int)",
-    OFF_INT: "off(int)"
-  } as const;
+  
 
   public static Button = class Button {
     on: boolean;
@@ -33,6 +18,8 @@ export abstract class DeviceSwitch extends Device {
     lastPressTime: number;
     firstPressTime: number;
     name?: string;
+    connectedToLight?: boolean;
+    intensity?: number;
 
     constructor(
       on = false,
@@ -40,7 +27,9 @@ export abstract class DeviceSwitch extends Device {
       initialPressTime = 0,
       lastPressTime = 0,
       firstPressTime = 0,
-      name?: string
+      name?: string,
+      connectedToLight?: boolean,
+      intensity?: number
     ) {
       this.on = on;
       this.pressCount = pressCount;
@@ -48,6 +37,8 @@ export abstract class DeviceSwitch extends Device {
       this.lastPressTime = lastPressTime;
       this.firstPressTime = firstPressTime;
       this.name = name;
+      this.connectedToLight = connectedToLight;
+      this.intensity = intensity;
     }
 
     isOn() {
@@ -89,6 +80,10 @@ export abstract class DeviceSwitch extends Device {
     setLastPressTime(lastPressTime: number) {
       this.lastPressTime = lastPressTime;
     }
+
+    setIntensity(intensity: number) {
+      this.intensity = intensity;
+    }
   };
 
   buttons: Record<string, InstanceType<typeof DeviceSwitch.Button>> = {};
@@ -97,144 +92,70 @@ export abstract class DeviceSwitch extends Device {
     super();
     this.assignInit(init as any);
     this.type = DeviceType.SWITCH;
-    this.icon = "🔌";
-    this.typeLabel = "deviceType.switch";
     this.buttons ??= {};
-    this.initializeFunctionsBool();
-    this.initializeFunctionsAction();
-    this.initializeFunctionsTrigger();
+    this.rehydrateButtons();
   }
 
   abstract updateValues(): Promise<void>;
+
 
   addButton(buttonId: string) {
     this.buttons ??= {};
     this.buttons[buttonId] = new DeviceSwitch.Button();
   }
 
-  getButton(buttonId: string): Button | undefined{
+  public rehydrateButtons() {
+    this.buttons ??= {};
+    const rehydratedButtons: Record<string, InstanceType<typeof DeviceSwitch.Button>> = {};
+    for (const [buttonId, rawButton] of Object.entries(this.buttons)) {
+      if (rawButton instanceof DeviceSwitch.Button) {
+        rehydratedButtons[buttonId] = rawButton;
+        continue;
+      }
+      const button = rawButton as Partial<Button> | undefined;
+      rehydratedButtons[buttonId] = new DeviceSwitch.Button(
+        button?.on ?? false,
+        button?.pressCount ?? 0,
+        button?.initialPressTime ?? 0,
+        button?.lastPressTime ?? 0,
+        button?.firstPressTime ?? 0,
+        button?.name,
+        button?.connectedToLight ?? false,
+        button?.intensity ?? button?.on ? 100 : 0
+      );
+    }
+    this.buttons = rehydratedButtons;
+  }
+
+  getButton(buttonId: string): Button | undefined {
     return this.buttons[buttonId];
   }
 
-  protected override initializeFunctionsBool() {
-    this.functionsBool = [
-      DeviceFunction.fromString(DeviceSwitch.BoolFunctionName.ON_INT, 'bool'),
-      DeviceFunction.fromString(DeviceSwitch.BoolFunctionName.OFF_INT, 'bool')
-    ];
-  }
-
-  protected override initializeFunctionsAction() {
-    this.functionsAction = [
-      DeviceFunction.fromString(DeviceSwitch.ActionFunctionName.TOGGLE, 'void'),
-      DeviceFunction.fromString(DeviceSwitch.ActionFunctionName.DOUBLE_PRESS, 'void'),
-      DeviceFunction.fromString(DeviceSwitch.ActionFunctionName.TRIPLE_PRESS, 'void')
-    ];
-  }
-
-  protected override initializeFunctionsTrigger() {
-    this.functionsTrigger = [
-      DeviceFunction.fromString(DeviceSwitch.TriggerFunctionName.ON_PRESSED, 'void'),
-      DeviceFunction.fromString(DeviceSwitch.TriggerFunctionName.ON_PRESSED_INT, 'void'),
-      DeviceFunction.fromString(DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED, 'void'),
-      DeviceFunction.fromString(DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED_INT, 'void'),
-      DeviceFunction.fromString(DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED, 'void'),
-      DeviceFunction.fromString(DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED_INT, 'void'),
-      DeviceFunction.fromString(DeviceSwitch.TriggerFunctionName.ON_BUTTON_ON_INT, 'void'),
-      DeviceFunction.fromString(DeviceSwitch.TriggerFunctionName.ON_BUTTON_OFF_INT, 'void')
-    ];
-  }
-
-  protected override checkListener(triggerName: string) {
-    super.checkListener(triggerName);
-    if (!triggerName) return;
-    const isValid = Object.values(DeviceSwitch.TriggerFunctionName).includes(
-      triggerName as (typeof DeviceSwitch.TriggerFunctionName)[keyof typeof DeviceSwitch.TriggerFunctionName]
-    );
-    if (!isValid) return;
-    const listeners = this.triggerListeners.get(triggerName) as DeviceListenerPair[] | undefined;
-    if (!listeners || listeners.length === 0) return;
-
-    if (triggerName === DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED) {
-      const hasDoublePress = Object.values(this.buttons ?? {}).some(button => button.getPressCount() === 2);
-      if (!hasDoublePress) return;
-    } else if (triggerName === DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED) {
-      const hasTriplePress = Object.values(this.buttons ?? {}).some(button => button.getPressCount() === 3);
-      if (!hasTriplePress) return;
-    }
-
-    if (
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED ||
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED ||
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_PRESSED
-    ) {
-      listeners.forEach(listener => listener.run());
-    }
-  }
-
-  private checkListenerForButton(triggerName: string, buttonId: string) {
-    if (!triggerName) return;
-    const isValid = Object.values(DeviceSwitch.TriggerFunctionName).includes(
-      triggerName as (typeof DeviceSwitch.TriggerFunctionName)[keyof typeof DeviceSwitch.TriggerFunctionName]
-    );
-    if (!isValid) return;
-    const listeners = this.triggerListeners.get(triggerName) as DeviceListenerPair[] | undefined;
-    if (!listeners || listeners.length === 0) return;
-
-    const button = this.buttons?.[buttonId];
-    if (
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED_INT &&
-      (!button || button.getPressCount() !== 2)
-    ) {
-      return;
-    }
-    if (
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED_INT &&
-      (!button || button.getPressCount() !== 3)
-    ) {
-      return;
-    }
-    if (
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_BUTTON_ON_INT &&
-      (!button || !button.isOn())
-    ) {
-      return;
-    }
-    if (
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_BUTTON_OFF_INT &&
-      (!button || button.isOn())
-    ) {
-      return;
-    }
-
-    const shouldRun = (pair: DeviceListenerPair) => {
-      const listenerParam = pair.getParams()?.getParam1AsString();
-      return listenerParam != null && listenerParam === buttonId;
-    };
-
-    if (
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED_INT ||
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED_INT ||
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_PRESSED_INT ||
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_BUTTON_ON_INT ||
-      triggerName === DeviceSwitch.TriggerFunctionName.ON_BUTTON_OFF_INT
-    ) {
-      listeners.filter(shouldRun).forEach(listener => listener.run());
-    }
-  }
-
-  on(buttonId: string) {
-    const button = this.buttons?.[buttonId];
-    return button != null && button.isOn();
-  }
-
-  off(buttonId: string) {
-    return !this.on(buttonId);
-  }
-
-  toggle(buttonId: string, execute: boolean) {
+  private triggerSwitchEvents(buttonId: string, trigger: boolean, deviceBefore: DeviceSwitch) {
+    if (!trigger) return;
     const button = this.buttons?.[buttonId];
     if (!button) return;
 
+    this.eventManager?.triggerEvent(new EventSwitchStatusChanged(this.id, deviceBefore, { ...this }));
+    this.eventManager?.triggerEvent(new EventSwitchPressed(this.id, deviceBefore, buttonId, button.getPressCount()));
+
+    if (button.getPressCount() === 2) {
+      this.eventManager?.triggerEvent(new EventSwitchDoublePressed(this.id, deviceBefore, buttonId));
+    }
+    if (button.getPressCount() === 3) {
+      this.eventManager?.triggerEvent(new EventSwitchTriplePressed(this.id, deviceBefore, buttonId));
+    }
+    if (button.isOn()) {
+      this.eventManager?.triggerEvent(new EventSwitchButtonOn(this.id, deviceBefore, buttonId));
+    } else {
+      this.eventManager?.triggerEvent(new EventSwitchButtonOff(this.id, deviceBefore, buttonId));
+    }
+  }
+
+  async on(buttonId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    const button = this.buttons?.[buttonId];
+    if (!button) return;
     const currentTime = Date.now();
     if (button.getFirstPressTime() === 0 || currentTime - button.getFirstPressTime() > 2500) {
       button.setPressCount(1);
@@ -244,29 +165,61 @@ export abstract class DeviceSwitch extends Device {
       button.setPressCount(button.getPressCount() + 1);
       button.setLastPressTime(currentTime);
     }
-
-    button.setOn(!button.isOn());
-
+    button.setOn(true);
     if (execute) {
-      this.executeToggle(buttonId);
+      await this.executeSetOn(buttonId);
     }
-    this.checkListener(DeviceSwitch.TriggerFunctionName.ON_PRESSED);
-    this.checkListenerForButton(DeviceSwitch.TriggerFunctionName.ON_PRESSED_INT, buttonId);
-    this.checkListener(DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED);
-    this.checkListenerForButton(DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED_INT, buttonId);
-    this.checkListener(DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED);
-    this.checkListenerForButton(DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED_INT, buttonId);
+    this.triggerSwitchEvents(buttonId, trigger, deviceBefore);
+  }
 
-    if (button.isOn()) {
-      this.checkListenerForButton(DeviceSwitch.TriggerFunctionName.ON_BUTTON_ON_INT, buttonId);
+  protected abstract executeSetOn(buttonId: string): Promise<void>;
+
+  async off(buttonId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    const button = this.buttons?.[buttonId];
+    if (!button) return;
+    const currentTime = Date.now();
+    if (button.getFirstPressTime() === 0 || currentTime - button.getFirstPressTime() > 2500) {
+      button.setPressCount(1);
+      button.setFirstPressTime(currentTime);
+      button.setLastPressTime(currentTime);
     } else {
-      this.checkListenerForButton(DeviceSwitch.TriggerFunctionName.ON_BUTTON_OFF_INT, buttonId);
+      button.setPressCount(button.getPressCount() + 1);
+      button.setLastPressTime(currentTime);
     }
+    button.setOn(false);
+    if (execute) {
+      await this.executeSetOff(buttonId);
+    }
+    this.triggerSwitchEvents(buttonId, trigger, deviceBefore);
   }
 
-  protected abstract executeToggle(buttonId: string): void;
+  protected abstract executeSetOff(buttonId: string): Promise<void>;
 
-  doublePress(buttonId: string, execute: boolean) {
+  async toggle(buttonId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    const button = this.buttons?.[buttonId];
+    if (!button) return;
+    const currentTime = Date.now();
+    if (button.getFirstPressTime() === 0 || currentTime - button.getFirstPressTime() > 2500) {
+      button.setPressCount(1);
+      button.setFirstPressTime(currentTime);
+      button.setLastPressTime(currentTime);
+    } else {
+      button.setPressCount(button.getPressCount() + 1);
+      button.setLastPressTime(currentTime);
+    }
+    button.setOn(!button.isOn());
+    if (execute) {
+      await this.executeToggle(buttonId);
+    }
+    this.triggerSwitchEvents(buttonId, trigger, deviceBefore);
+  }
+
+  protected abstract executeToggle(buttonId: string): Promise<void>;
+
+  async doublePress(buttonId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     const button = this.buttons?.[buttonId];
     if (!button) return;
 
@@ -276,39 +229,45 @@ export abstract class DeviceSwitch extends Device {
     button.lastPressTime = currentTime;
 
     if (execute) {
-      this.executeDoublePress(buttonId);
+      await this.executeDoublePress(buttonId);
     }
-    this.checkListener(DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED);
-    this.checkListenerForButton(DeviceSwitch.TriggerFunctionName.ON_DOUBLE_PRESSED_INT, buttonId);
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSwitchStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventSwitchDoublePressed(this.id, deviceBefore, buttonId));
+    }
   }
 
-  protected abstract executeDoublePress(buttonId: string): void;
+  protected abstract executeDoublePress(buttonId: string): Promise<void>;
 
-  triplePress(buttonId: string, execute: boolean) {
+  async triplePress(buttonId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     const button = this.buttons?.[buttonId];
     if (!button) return;
 
     const currentTime = Date.now();
-    button.pressCount = 2;
+    button.pressCount = 3;
     button.firstPressTime = currentTime - 2500;
     button.lastPressTime = currentTime;
 
     if (execute) {
-      this.executeTriplePress(buttonId);
+      await this.executeTriplePress(buttonId);
     }
-    this.checkListener(DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED);
-    this.checkListenerForButton(DeviceSwitch.TriggerFunctionName.ON_TRIPLE_PRESSED_INT, buttonId);
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSwitchStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventSwitchTriplePressed(this.id, deviceBefore, buttonId));
+    }
   }
 
-  protected abstract executeTriplePress(buttonId: string): void;
+  protected abstract executeTriplePress(buttonId: string): Promise<void>;
 
-  setInitialPressed(buttonId: string) {
+  async setInitialPressed(buttonId: string) {
     const button = this.buttons?.[buttonId];
     if (!button) return;
     button.setInitialPressTime(Date.now());
   }
 
-  setLongPressed(buttonId: string, execute: boolean) {
+  async setLongPressed(buttonId: string, execute: boolean, trigger: boolean) {
+    const deviceBefore = { ...this };
     const button = this.buttons?.[buttonId];
     if (!button) return;
 
@@ -323,11 +282,16 @@ export abstract class DeviceSwitch extends Device {
     button.setPressCount(0);
 
     if (execute) {
-      this.executeSetBrightness(buttonId, intensity);
+      await this.executeSetIntensity(buttonId, intensity);
+    }
+
+    if(trigger){
+      this.eventManager?.triggerEvent(new EventSwitchStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventSwitchLongPressed(this.id, deviceBefore, buttonId));
     }
   }
 
-  protected abstract executeSetBrightness(buttonId: string, intensity: number): void;
+  protected abstract executeSetIntensity(buttonId: string, intensity: number): Promise<void>;
 }
 
 export type Button = InstanceType<typeof DeviceSwitch.Button>;

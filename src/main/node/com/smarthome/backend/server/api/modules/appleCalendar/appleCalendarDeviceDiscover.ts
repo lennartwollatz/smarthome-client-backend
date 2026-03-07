@@ -4,7 +4,7 @@ import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
 import { APPLECALENDARCONFIG, APPLECALENDARMODULE } from "./appleCalendarModule.js";
 import { AppleCalendarDeviceDiscovered } from "./appleCalendarDeviceDiscovered.js";
 import { logger } from "../../../../logger.js";
-import dav from "dav";
+import * as dav from "dav";
 
 export const DEFAULT_CREDENTIALS_ID = "default";
 

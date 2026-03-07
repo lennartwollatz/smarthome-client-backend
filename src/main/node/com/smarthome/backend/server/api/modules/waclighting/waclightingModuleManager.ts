@@ -1,5 +1,4 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
 import { logger } from "../../../../logger.js";
 import { ModuleManager } from "../moduleManager.js";
 import { WACLightingDeviceController } from "./waclightingDeviceController.js";
@@ -9,27 +8,27 @@ import { DeviceFanLight } from "../../../../model/devices/DeviceFanLight.js";
 import { Device } from "../../../../model/devices/Device.js";
 import { WACLightingEvent } from "./waclightingEvent.js";
 import { WACLightingEventStreamManager } from "./waclightingEventStreamManager.js";
-import { EventStreamManager } from "../../../events/eventStreamManager.js";
 import { WACLIGHTINGCONFIG } from "./waclightingModule.js";
 import { WACFanLight } from "./devices/wacFanLight.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { ActionManager } from "../../../actions/ActionManager.js";
+import { EventManager } from "../../../events/EventManager.js";
 
 // HeosModuleManager ist abstrakt und wird von konkreten Implementierungen wie DenonModuleManager erweitert
-export abstract class WACLightingModuleManager extends ModuleManager<WACLightingEventStreamManager, WACLightingDeviceController, WACLightingDeviceController, WACLightingEvent, DeviceFanLight, WACLightingDeviceDiscover, WACLightingDeviceDiscovered> {
+export class WACLightingModuleManager extends ModuleManager<WACLightingEventStreamManager, WACLightingDeviceController, WACLightingDeviceController, WACLightingEvent, DeviceFanLight, WACLightingDeviceDiscover, WACLightingDeviceDiscovered> {
 
   constructor(
     databaseManager: DatabaseManager,
     actionManager: ActionManager,
-    eventStreamManager: EventStreamManager,
-    deviceDiscover: WACLightingDeviceDiscover
+    eventManager: EventManager
   ) {
     const controller = new WACLightingDeviceController();
     super(
       databaseManager,
       actionManager,
-      eventStreamManager,
+      eventManager,
       controller,
-      deviceDiscover
+      new WACLightingDeviceDiscover(databaseManager)
     );
   }
 
@@ -89,7 +88,7 @@ export abstract class WACLightingModuleManager extends ModuleManager<WACLighting
     const fanLight = await this.getFanLight(deviceId);
     if (!fanLight) return false;
     try {
-      fanLight.setOn(true);
+      fanLight.setOn(true, true);
       this.actionManager.saveDevice(fanLight);
       return true;
     } catch (err) {
@@ -103,7 +102,7 @@ export abstract class WACLightingModuleManager extends ModuleManager<WACLighting
     const fanLight = await this.getFanLight(deviceId);
     if (!fanLight) return false;
     try {
-      fanLight.setOff(true);
+      fanLight.setOff(true, true);
       this.actionManager.saveDevice(fanLight);
       return true;
     } catch (err) {
@@ -117,7 +116,7 @@ export abstract class WACLightingModuleManager extends ModuleManager<WACLighting
     const fanLight = await this.getFanLight(deviceId);
     if (!fanLight) return false;
     try {
-      fanLight.setSpeed(speed, true);
+      fanLight.setSpeed(speed, true, true);
       this.actionManager.saveDevice(fanLight);
       return true;
     } catch (err) {
@@ -131,7 +130,7 @@ export abstract class WACLightingModuleManager extends ModuleManager<WACLighting
     const fanLight = await this.getFanLight(deviceId);
     if (!fanLight) return false;
     try {
-      await fanLight.setLightOn(true);
+      await fanLight.setLightOn(true, true);
       this.actionManager.saveDevice(fanLight);
       return true;
     } catch (err) {
@@ -145,7 +144,7 @@ export abstract class WACLightingModuleManager extends ModuleManager<WACLighting
     const fanLight = await this.getFanLight(deviceId);
     if (!fanLight) return false;
     try {
-      await fanLight.setLightOff(true);
+      await fanLight.setLightOff(true, true);
       this.actionManager.saveDevice(fanLight);
       return true;
     } catch (err) {
@@ -159,7 +158,7 @@ export abstract class WACLightingModuleManager extends ModuleManager<WACLighting
     const fanLight = await this.getFanLight(deviceId);
     if (!fanLight) return false;
     try {
-      fanLight.setLightBrightness(brightness, true);
+      fanLight.setLightBrightness(brightness, true, true);
       this.actionManager.saveDevice(fanLight);
       return true;
     } catch (err) {
@@ -198,7 +197,7 @@ export abstract class WACLightingModuleManager extends ModuleManager<WACLighting
     return fanLight;
   }
 
-  convertDeviceFromDatabase(device: Device): Device | null {
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
     if (device.moduleId !== this.getModuleId()) {
       return null;
     }
@@ -210,6 +209,7 @@ export abstract class WACLightingModuleManager extends ModuleManager<WACLighting
       case DeviceType.FAN_LIGHT:
         const wacFanLight = new WACFanLight();
         Object.assign(wacFanLight, device);
+        await wacFanLight.updateValues();
         convertedDevice = wacFanLight;
         break;
     }

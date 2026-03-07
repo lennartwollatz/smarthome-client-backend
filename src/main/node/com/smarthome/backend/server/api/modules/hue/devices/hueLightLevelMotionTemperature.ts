@@ -42,23 +42,23 @@ export class HueLightLevelMotionTemperature extends DeviceLightLevelMotionTemper
     // HueDeviceController in Node ist aktuell stubbed.
   }
 
-  protected executeSetSensibility(sensitivity: number) {
+  protected async executeSetSensibility(sensitivity: number): Promise<void> {
     if (!this.hueDeviceController || !this.id || !this.motionRid) {
       logger.warn("HueDeviceController oder MotionRid ist null - kann Empfindlichkeit nicht setzen fuer {}", this.id);
       return;
     }
-    this.hueDeviceController.setSensitivity(this.id, sensitivity);
+    await this.hueDeviceController.setSensitivity(this.id, sensitivity);
   }
 
-  protected executeSetMotion(_motion: boolean, _motion_last_detect: string) {
+  protected async executeSetMotion(_motion: boolean, _motion_last_detect: string): Promise<void> {
     // Motion wird von der Bridge automatisch aktualisiert
   }
 
-  protected executeSetLightLevel(_lightLevel: number) {
+  protected async executeSetLightLevel(_lightLevel: number): Promise<void> {
     // Light Level wird von der Bridge automatisch aktualisiert
   }
 
-  protected executeSetTemperature(_temperature: number) {
+  protected async executeSetTemperature(_temperature: number): Promise<void> {
     // Temperature wird von der Bridge automatisch aktualisiert
   }
 

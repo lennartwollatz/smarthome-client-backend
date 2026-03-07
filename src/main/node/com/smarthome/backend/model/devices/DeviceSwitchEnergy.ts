@@ -1,7 +1,8 @@
 import { DeviceSwitch } from "./DeviceSwitch.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import type { DeviceListenerPair } from "./helper/DeviceListenerPair.js";
-import { DeviceFunction } from "../DeviceFunction.js";
+import { EventSwitchStatusChanged } from "../../server/events/events/EventSwitchStatusChanged.js";
+import { EventSwitchEnergyUsageChanged } from "../../server/events/events/EventSwitchEnergyUsageChanged.js";
+import { EventSwitchEnergyUsageHigher } from "../../server/events/events/EventSwitchEnergyUsageHigher.js";
 
 /**
  * Interface für EnergyUsage (historische Energieverbrauchsdaten)
@@ -31,14 +32,6 @@ export interface Energy {
 }
 
 export abstract class DeviceSwitchEnergy extends DeviceSwitch {
-  static EnergyBoolFunctionName = {
-    ENERGY_USAGE_HIGHER: "energyUsageHigher(int, string)"
-  } as const;
-
-  static EnergyTriggerFunctionName = {
-    ENERGY_USAGE_IS_HIGHER: "energyUsageIsHigher(int, string)"
-  } as const;
-
   energyUsage!: Energy;
   energyUsages!: EnergyUsage[];
 
@@ -46,9 +39,7 @@ export abstract class DeviceSwitchEnergy extends DeviceSwitch {
     super(init);
     this.assignInit(init as any);
     this.type = DeviceType.SWITCH_ENERGY;
-    this.icon = "⚡";
-    this.typeLabel = "deviceType.switch-energy";
-    
+
     // Initialisiere energyUsage mit Default-Werten falls nicht vorhanden
     if (!this.energyUsage) {
       this.energyUsage = {
@@ -72,64 +63,10 @@ export abstract class DeviceSwitchEnergy extends DeviceSwitch {
     if (!this.energyUsages) {
       this.energyUsages = [];
     }
-    
-    this.initializeFunctionsBool();
-    this.initializeFunctionsAction();
-    this.initializeFunctionsTrigger();
   }
 
   abstract updateValues(): Promise<void>;
 
-  protected override initializeFunctionsBool() {
-    super.initializeFunctionsBool();
-    // Füge Energy-Funktionen hinzu
-    this.functionsBool = [
-      ...(this.functionsBool ?? []),
-      DeviceFunction.fromString(DeviceSwitchEnergy.EnergyBoolFunctionName.ENERGY_USAGE_HIGHER, 'bool')
-    ];
-  }
-
-  protected override initializeFunctionsAction() {
-    super.initializeFunctionsAction();
-    // Keine zusätzlichen Action-Funktionen für Energy
-  }
-
-  protected override initializeFunctionsTrigger() {
-    super.initializeFunctionsTrigger();
-    // Füge Energy-Trigger hinzu
-    this.functionsTrigger = [
-      ...(this.functionsTrigger ?? []),
-      DeviceFunction.fromString(DeviceSwitchEnergy.EnergyTriggerFunctionName.ENERGY_USAGE_IS_HIGHER, 'void')
-    ];
-  }
-
-  protected override checkListener(triggerName: string) {
-    super.checkListener(triggerName);
-    if (!triggerName) return;
-    
-    // Prüfe Energy-Trigger
-    const isEnergyTrigger = Object.values(DeviceSwitchEnergy.EnergyTriggerFunctionName).includes(
-      triggerName as (typeof DeviceSwitchEnergy.EnergyTriggerFunctionName)[keyof typeof DeviceSwitchEnergy.EnergyTriggerFunctionName]
-    );
-    if (isEnergyTrigger) {
-      this.checkEnergyListener(triggerName);
-    }
-  }
-
-  private checkEnergyListener(triggerName: string) {
-    const listeners = this.triggerListeners.get(triggerName) as DeviceListenerPair[] | undefined;
-    if (!listeners || listeners.length === 0) return;
-
-    if (triggerName === DeviceSwitchEnergy.EnergyTriggerFunctionName.ENERGY_USAGE_IS_HIGHER) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          const timePeriod = pair.getParams()?.getParam2AsString();
-          return threshold != null && timePeriod != null && this.energyUsageHigher(threshold, timePeriod);
-        })
-        .forEach(pair => pair.run());
-    }
-  }
 
   /**
    * Gibt die verfügbaren Zeiträume für Energieverbrauch zurück
@@ -178,16 +115,22 @@ export abstract class DeviceSwitchEnergy extends DeviceSwitch {
    * Setzt den Energieverbrauch für einen bestimmten Zeitraum
    * @param energyUsage Die Energieverbrauchsdaten
    * @param execute Ob die Änderung ausgeführt werden soll
+   * @param trigger Ob Events ausgelöst werden sollen
    */
-  setEnergyUsage(energyUsage: Energy, execute: boolean) {
+  async setEnergyUsage(energyUsage: Energy, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.energyUsage = energyUsage;
     if (execute) {
-      this.executeSetEnergyUsage(energyUsage);
+      await this.executeSetEnergyUsage(energyUsage);
     }
-    this.checkListener(DeviceSwitchEnergy.EnergyTriggerFunctionName.ENERGY_USAGE_IS_HIGHER);
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSwitchStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventSwitchEnergyUsageChanged(this.id, deviceBefore, energyUsage));
+      this.eventManager?.triggerEvent(new EventSwitchEnergyUsageHigher(this.id, deviceBefore, energyUsage));
+    }
   }
 
-  protected abstract executeSetEnergyUsage(energyUsage: Energy): void;
+  protected abstract executeSetEnergyUsage(energyUsage: Energy): Promise<void>;
 
   /**
    * Setzt die historischen Energieverbrauchsdaten
@@ -197,12 +140,5 @@ export abstract class DeviceSwitchEnergy extends DeviceSwitch {
     this.energyUsages = energyUsages;
   }
 
-  /**
-   * Gibt zurück, ob das Gerät aktiv ist.
-   * Für Switch-Energy-Geräte: aktiv wenn mindestens ein Button `on === true` ist
-   */
-  isActive(): boolean {
-    return Object.values(this.buttons ?? {}).some(button => button.on);
-  }
 }
 

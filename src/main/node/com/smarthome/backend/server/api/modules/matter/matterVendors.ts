@@ -46,6 +46,7 @@ export class MatterVendors {
     this.addVendor(4897, "SONOFF");
     this.addProduct(4897, 2, "MINIR4M", "device.switch");
     this.addProduct(4897, 292, "MINIDIM", "device.switch-dimmer");
+    this.addProduct(4874, 79, "MINITHERMO", "device.thermostat");
   }
 
   private addVendor(vendorId: number, vendorName: string): void {

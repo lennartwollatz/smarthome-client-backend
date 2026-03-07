@@ -4,7 +4,7 @@ import { ModuleDeviceController } from "../moduleDeviceController.js";
 import type { AppleCalendarEvent } from "./appleCalendarEvent.js";
 import { buildVCalendarFromEntry, ParsedVEvent, parseVEventFromIcs } from "./icalParser.js";
 import { DEFAULT_CREDENTIALS_ID, type AppleCalendarDeviceDiscover } from "./appleCalendarDeviceDiscover.js";
-import dav from "dav";
+import * as dav from "dav";
 import crypto from "node:crypto";
 import { APPLECALENDARMODULE } from "./appleCalendarModule.js";
 
@@ -110,7 +110,7 @@ export class AppleCalendarDeviceController extends ModuleDeviceController<AppleC
     if (!url) {
       throw new Error("Loeschen fehlgeschlagen: entry.properties.url fehlt");
     }
-    await dav.deleteCalendarObject({ url, etag }, { xhr });
+    await dav.deleteCalendarObject({ url, etag } as dav.CalendarObject, { xhr });
   }
 
   async updateEntry(entry: DeviceCalendarEntry): Promise<DeviceCalendarEntry> {
@@ -124,7 +124,7 @@ export class AppleCalendarDeviceController extends ModuleDeviceController<AppleC
     if (!url) {
       throw new Error("Update fehlgeschlagen: entry.properties.url fehlt");
     }
-    const updateResult = await dav.updateCalendarObject({ url, calendarData, etag }, { xhr });
+    const updateResult = await dav.updateCalendarObject({ url, calendarData, etag } as dav.CalendarObject, { xhr });
     let newEtag = this.extractEtagFromDavResponse(updateResult);
     if (!newEtag) {
       newEtag = await this.readCurrentEtag(entry.calendarId, credentialId, url, xhr);
@@ -192,7 +192,7 @@ export class AppleCalendarDeviceController extends ModuleDeviceController<AppleC
     if (url) {
       const sourceXhr = this.discover.buildXhr(sourceCredentialId);
       try {
-        await dav.deleteCalendarObject({ url, etag }, { xhr: sourceXhr });
+        await dav.deleteCalendarObject({ url, etag } as dav.CalendarObject, { xhr: sourceXhr });
       } catch (error) {
         console.warn(
           `Kalenderwechsel: Loeschen im Quellkalender fehlgeschlagen (best effort): sourceCredential=${sourceCredentialId}, url=${url}, err=${this.toErrorMessage(error)}`

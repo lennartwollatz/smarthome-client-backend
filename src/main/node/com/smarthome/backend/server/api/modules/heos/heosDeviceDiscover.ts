@@ -1,6 +1,6 @@
 import os from "node:os";
 import crypto from "node:crypto";
-import mdns from "multicast-dns";
+import mdns = require("multicast-dns");
 import { logger } from "../../../../logger.js";
 import { HeosDeviceController } from "./heosDeviceController.js";
 import { HeosDeviceDiscovered } from "./heosDeviceDiscovered.js";
@@ -25,7 +25,6 @@ export abstract class HeosDeviceDiscover extends ModuleDeviceDiscover<HeosDevice
   private mdnsTimers: Array<NodeJS.Timeout> = [];
   private serviceCache = new Map<string, ServiceCache>();
   private currentRunId: string | null = null;
-  private currentRunStartMs = 0;
   private playerInfoSuccess = 0;
   private playerInfoFailure = 0;
 
@@ -254,7 +253,6 @@ export abstract class HeosDeviceDiscover extends ModuleDeviceDiscover<HeosDevice
   public async startDiscovery(timeoutSeconds: number): Promise<HeosDeviceDiscovered[]> {
     const searchDurationMs = timeoutSeconds * 1000;
     this.currentRunId = crypto.randomUUID().slice(0, 8);
-    this.currentRunStartMs = Date.now();
     this.playerInfoSuccess = 0;
     this.playerInfoFailure = 0;
 
@@ -277,7 +275,6 @@ export abstract class HeosDeviceDiscover extends ModuleDeviceDiscover<HeosDevice
     const devicesWithPlayers = await this.getPlayerInfo(snapshot);
     this.stopMdnsDiscovery();
     this.currentRunId = null;
-    this.currentRunStartMs = 0;
     return devicesWithPlayers;
   }
 

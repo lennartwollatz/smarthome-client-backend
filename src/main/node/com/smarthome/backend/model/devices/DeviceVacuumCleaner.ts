@@ -1,84 +1,44 @@
 import { Device } from "./Device.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import type { DeviceListenerPair } from "./helper/DeviceListenerPair.js";
-import { DeviceFunction } from "../DeviceFunction.js";
+import { EventPowerToggled } from "../../server/events/events/EventPowerToggled.js";
+import { EventVacuumStatusChanged } from "../../server/events/events/EventVacuumStatusChanged.js";
+import { EventVacuumCleaningStarted } from "../../server/events/events/EventVacuumCleaningStarted.js";
+import { EventVacuumCleaningStopped } from "../../server/events/events/EventVacuumCleaningStopped.js";
+import { EventVacuumCleaningPaused } from "../../server/events/events/EventVacuumCleaningPaused.js";
+import { EventVacuumCleaningResumed } from "../../server/events/events/EventVacuumCleaningResumed.js";
+import { EventVacuumDocked } from "../../server/events/events/EventVacuumDocked.js";
+import { EventVacuumUndocked } from "../../server/events/events/EventVacuumUndocked.js";
+import { EventVacuumRoomEntered } from "../../server/events/events/EventVacuumRoomEntered.js";
+import { EventVacuumRoomLeft } from "../../server/events/events/EventVacuumRoomLeft.js";
+import { EventVacuumRoomCleaned } from "../../server/events/events/EventVacuumRoomCleaned.js";
+import { EventVacuumZoneEntered } from "../../server/events/events/EventVacuumZoneEntered.js";
+import { EventVacuumZoneLeft } from "../../server/events/events/EventVacuumZoneLeft.js";
+import { EventVacuumZoneCleaned } from "../../server/events/events/EventVacuumZoneCleaned.js";
+import { EventVacuumWaterBoxFull } from "../../server/events/events/EventVacuumWaterBoxFull.js";
+import { EventVacuumWaterBoxEmpty } from "../../server/events/events/EventVacuumWaterBoxEmpty.js";
+import { EventVacuumWaterBoxLevelChanged } from "../../server/events/events/EventVacuumWaterBoxLevelChanged.js";
+import { EventVacuumWaterBoxLevelEquals } from "../../server/events/events/EventVacuumWaterBoxLevelEquals.js";
+import { EventVacuumWaterBoxLevelLess } from "../../server/events/events/EventVacuumWaterBoxLevelLess.js";
+import { EventVacuumWaterBoxLevelGreater } from "../../server/events/events/EventVacuumWaterBoxLevelGreater.js";
+import { EventVacuumDirtyWaterBoxFull } from "../../server/events/events/EventVacuumDirtyWaterBoxFull.js";
+import { EventVacuumDirtyWaterBoxEmpty } from "../../server/events/events/EventVacuumDirtyWaterBoxEmpty.js";
+import { EventVacuumDirtyWaterBoxLevelChanged } from "../../server/events/events/EventVacuumDirtyWaterBoxLevelChanged.js";
+import { EventVacuumDirtyWaterBoxLevelEquals } from "../../server/events/events/EventVacuumDirtyWaterBoxLevelEquals.js";
+import { EventVacuumDirtyWaterBoxLevelLess } from "../../server/events/events/EventVacuumDirtyWaterBoxLevelLess.js";
+import { EventVacuumDirtyWaterBoxLevelGreater } from "../../server/events/events/EventVacuumDirtyWaterBoxLevelGreater.js";
+import { EventVacuumBatteryChanged } from "../../server/events/events/EventVacuumBatteryChanged.js";
+import { EventVacuumBatteryEquals } from "../../server/events/events/EventVacuumBatteryEquals.js";
+import { EventVacuumBatteryLess } from "../../server/events/events/EventVacuumBatteryLess.js";
+import { EventVacuumBatteryGreater } from "../../server/events/events/EventVacuumBatteryGreater.js";
+import { EventVacuumModeChanged } from "../../server/events/events/EventVacuumModeChanged.js";
+import { EventVacuumModeEquals } from "../../server/events/events/EventVacuumModeEquals.js";
+import { EventFanSpeedChanged } from "../../server/events/events/EventFanSpeedChanged.js";
+import { EventFanSpeedEquals } from "../../server/events/events/EventFanSpeedEquals.js";
+import { EventFanSpeedLess } from "../../server/events/events/EventFanSpeedLess.js";
+import { EventFanSpeedGreater } from "../../server/events/events/EventFanSpeedGreater.js";
+import { EventError } from "../../server/events/events/EventError.js";
 
 export abstract class DeviceVacuumCleaner extends Device {
-  static TriggerFunctionName = {
-    CLEANING_STARTED: "cleaningStarted",
-    CLEANING_STOPPED: "cleaningStopped",
-    CLEANING_PAUSED: "cleaningPaused",
-    CLEANING_RESUMED: "cleaningResumed",
-    CLEANING_DONE: "cleaningDone",
-    ROOM_CLEANED: "roomCleaned(string)",
-    ROOM_ENTERED: "inRoom(string)",
-    ROOM_LEFT: "roomLeft(string)",
-    ZONE_CLEANED: "zoneCleaned(string)",
-    ZONE_ENTERED: "zoneEntered(string)",
-    ZONE_LEFT: "zoneLeft(string)",
-    WATER_BOX_FULL: "waterBoxFull",
-    WATER_BOX_EMPTY: "waterBoxEmpty",
-    WATER_BOX_LEVEL_GREATER: "waterBoxLevelGreater(int)",
-    WATER_BOX_LEVEL_LESS: "waterBoxLevelLess(int)",
-    WATER_BOX_LEVEL_EQUALS: "waterBoxLevelEquals(int)",
-    DIRTY_WATER_BOX_FULL: "dirtyWaterBoxFull",
-    DIRTY_WATER_BOX_EMPTY: "dirtyWaterBoxEmpty",
-    DIRTY_WATER_BOX_LEVEL_GREATER: "dirtyWaterBoxLevelGreater(int)",
-    DIRTY_WATER_BOX_LEVEL_LESS: "dirtyWaterBoxLevelLess(int)",
-    DIRTY_WATER_BOX_LEVEL_EQUALS: "dirtyWaterBoxLevelEquals(int)",
-    FAN_SPEED_CHANGED: "fanSpeedChanged",
-    FAN_SPEED_GREATER: "fanSpeedGreater(int)",
-    FAN_SPEED_LESS: "fanSpeedLess(int)",
-    FAN_SPEED_EQUALS: "fanSpeedEquals(int)",
-    DOCKED: "docked",
-    UNDOCKED: "undocked",
-    BATTERY_GREATER: "batteryGreater(int)",
-    BATTERY_LESS: "batteryLess(int)",
-    BATTERY_EQUALS: "batteryEquals(int)",
-    MODE_CHANGED: "modeChanged",
-    MODE_EQUALS: "modeEquals(string)"
-  } as const;
-
-  static ActionFunctionName = {
-    START_CLEANING: "startCleaning",
-    STOP_CLEANING: "stopCleaning",
-    PAUSE_CLEANING: "pauseCleaning",
-    RESUME_CLEANING: "resumeCleaning",
-    DOCK: "dock",
-    SET_MODE: "setMode(string)",
-    CLEAN_ROOM: "cleanRoom(string)",
-    CLEAN_ZONE: "cleanZone(string)",
-    CHANGE_FAN_SPEED: "changeFanSpeed(int)",
-    CHANGE_MODE: "changeMode(string)"
-  } as const;
-
-  static BoolFunctionName = {
-    CLEANING: "cleaning",
-    DOCKED: "docked",
-    UNDOCKED: "undocked",
-    FAN_SPEED_GREATER: "fanSpeedGreater(int)",
-    FAN_SPEED_LESS: "fanSpeedLess(int)",
-    FAN_SPEED_EQUALS: "fanSpeedEquals(int)",
-    WATER_BOX_FULL: "waterBoxFull",
-    WATER_BOX_EMPTY: "waterBoxEmpty",
-    WATER_BOX_LEVEL_GREATER: "waterBoxLevelGreater(int)",
-    WATER_BOX_LEVEL_LESS: "waterBoxLevelLess(int)",
-    WATER_BOX_LEVEL_EQUALS: "waterBoxLevelEquals(int)",
-    DIRTY_WATER_BOX_FULL: "dirtyWaterBoxFull",
-    DIRTY_WATER_BOX_EMPTY: "dirtyWaterBoxEmpty",
-    DIRTY_WATER_BOX_LEVEL_GREATER: "dirtyWaterBoxLevelGreater(int)",
-    DIRTY_WATER_BOX_LEVEL_LESS: "dirtyWaterBoxLevelLess(int)",
-    DIRTY_WATER_BOX_LEVEL_EQUALS: "dirtyWaterBoxLevelEquals(int)",
-    BATTERY_GREATER: "batteryGreater(int)",
-    BATTERY_LESS: "batteryLess(int)",
-    BATTERY_EQUALS: "batteryEquals(int)",
-    MODE_EQUALS: "modeEquals(string)",
-    IN_ROOM: "inRoom(string)",
-    IN_ZONE: "inZone(string)",
-    OUT_ROOM: "outRoom(string)",
-    OUT_ZONE: "outZone(string)"
-  } as const;
-
   power?: boolean;
   cleaningState?: boolean;
   dockedState?: boolean;
@@ -97,567 +57,298 @@ export abstract class DeviceVacuumCleaner extends Device {
     super();
     this.assignInit(init as any);
     this.type = DeviceType.VACUUM;
-    this.icon = "&#129529;";
-    this.typeLabel = "deviceType.vacuum";
-    this.initializeFunctionsBool();
-    this.initializeFunctionsAction();
-    this.initializeFunctionsTrigger();
   }
 
   abstract updateValues(): Promise<void>;
 
-  protected override initializeFunctionsBool() {
-    this.functionsBool = [
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.CLEANING, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.DOCKED, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.UNDOCKED, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.FAN_SPEED_GREATER, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.FAN_SPEED_LESS, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.FAN_SPEED_EQUALS, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.WATER_BOX_FULL, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.WATER_BOX_EMPTY, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.WATER_BOX_LEVEL_GREATER, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.WATER_BOX_LEVEL_LESS, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.WATER_BOX_LEVEL_EQUALS, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.DIRTY_WATER_BOX_FULL, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.DIRTY_WATER_BOX_EMPTY, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.DIRTY_WATER_BOX_LEVEL_GREATER, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.DIRTY_WATER_BOX_LEVEL_LESS, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.DIRTY_WATER_BOX_LEVEL_EQUALS, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.BATTERY_GREATER, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.BATTERY_LESS, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.BATTERY_EQUALS, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.MODE_EQUALS, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.IN_ROOM, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.IN_ZONE, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.OUT_ROOM, 'bool'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.BoolFunctionName.OUT_ZONE, 'bool')
-    ];
-  }
 
-  protected override initializeFunctionsAction() {
-    this.functionsAction = [
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.START_CLEANING, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.STOP_CLEANING, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.PAUSE_CLEANING, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.RESUME_CLEANING, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.DOCK, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.SET_MODE, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.CLEAN_ROOM, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.CLEAN_ZONE, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.CHANGE_FAN_SPEED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.ActionFunctionName.CHANGE_MODE, 'void')
-    ];
-  }
-
-  protected override initializeFunctionsTrigger() {
-    this.functionsTrigger = [
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.CLEANING_STARTED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.CLEANING_STOPPED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.CLEANING_PAUSED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.CLEANING_RESUMED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.CLEANING_DONE, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.ROOM_CLEANED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.ROOM_ENTERED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.ROOM_LEFT, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.ZONE_CLEANED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.ZONE_ENTERED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.ZONE_LEFT, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_FULL, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_EMPTY, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_LEVEL_GREATER, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_LEVEL_LESS, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_LEVEL_EQUALS, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_FULL, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_EMPTY, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_LEVEL_GREATER, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_LEVEL_LESS, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_LEVEL_EQUALS, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.FAN_SPEED_CHANGED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.FAN_SPEED_GREATER, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.FAN_SPEED_LESS, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.FAN_SPEED_EQUALS, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.DOCKED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.UNDOCKED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.BATTERY_GREATER, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.BATTERY_LESS, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.BATTERY_EQUALS, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.MODE_CHANGED, 'void'),
-      DeviceFunction.fromString(DeviceVacuumCleaner.TriggerFunctionName.MODE_EQUALS, 'void')
-    ];
-  }
-
-  protected override checkListener(triggerName: string) {
-    super.checkListener(triggerName);
-    if (!triggerName) return;
-    const isValid = Object.values(DeviceVacuumCleaner.TriggerFunctionName).includes(
-      triggerName as (typeof DeviceVacuumCleaner.TriggerFunctionName)[keyof typeof DeviceVacuumCleaner.TriggerFunctionName]
-    );
-    if (!isValid) return;
-    const listeners = this.triggerListeners.get(triggerName) as DeviceListenerPair[] | undefined;
-    if (!listeners || listeners.length === 0) return;
-
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.CLEANING_STARTED && this.cleaning()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.CLEANING_STOPPED && !this.cleaning()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.CLEANING_PAUSED) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.CLEANING_RESUMED) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.CLEANING_DONE) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.ROOM_CLEANED) {
-      listeners
-        .filter(pair => {
-          const roomId = pair.getParams()?.getParam1AsString();
-          return roomId != null && this.inRoom(roomId);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.ROOM_ENTERED) {
-      listeners
-        .filter(pair => {
-          const roomId = pair.getParams()?.getParam1AsString();
-          return roomId != null && this.inRoom(roomId);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.ROOM_LEFT) {
-      listeners
-        .filter(pair => {
-          const roomId = pair.getParams()?.getParam1AsString();
-          return roomId != null && this.outRoom(roomId);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.ZONE_CLEANED) {
-      listeners
-        .filter(pair => {
-          const zoneId = pair.getParams()?.getParam1AsString();
-          return zoneId != null && this.inZone(zoneId);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.ZONE_ENTERED) {
-      listeners
-        .filter(pair => {
-          const zoneId = pair.getParams()?.getParam1AsString();
-          return zoneId != null && this.inZone(zoneId);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.ZONE_LEFT) {
-      listeners
-        .filter(pair => {
-          const zoneId = pair.getParams()?.getParam1AsString();
-          return zoneId != null && this.outZone(zoneId);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_FULL && this.waterBoxFull()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_EMPTY && this.waterBoxEmpty()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_LEVEL_GREATER) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.waterBoxLevelGreater(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_LEVEL_LESS) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.waterBoxLevelLess(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.WATER_BOX_LEVEL_EQUALS) {
-      listeners
-        .filter(pair => {
-          const target = pair.getParams()?.getParam1AsInt();
-          return target != null && this.waterBoxLevelEquals(target);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_FULL && this.dirtyWaterBoxFull()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_EMPTY && this.dirtyWaterBoxEmpty()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_LEVEL_GREATER) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.dirtyWaterBoxLevelGreater(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_LEVEL_LESS) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.dirtyWaterBoxLevelLess(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.DIRTY_WATER_BOX_LEVEL_EQUALS) {
-      listeners
-        .filter(pair => {
-          const target = pair.getParams()?.getParam1AsInt();
-          return target != null && this.dirtyWaterBoxLevelEquals(target);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.FAN_SPEED_CHANGED) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.FAN_SPEED_GREATER) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.fanSpeedGreater(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.FAN_SPEED_LESS) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.fanSpeedLess(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.FAN_SPEED_EQUALS) {
-      listeners
-        .filter(pair => {
-          const target = pair.getParams()?.getParam1AsInt();
-          return target != null && this.fanSpeedEquals(target);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.DOCKED && this.docked()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.UNDOCKED && !this.docked()) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.BATTERY_GREATER) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.batteryGreater(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.BATTERY_LESS) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.batteryLess(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.BATTERY_EQUALS) {
-      listeners
-        .filter(pair => {
-          const target = pair.getParams()?.getParam1AsInt();
-          return target != null && this.batteryEquals(target);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.MODE_CHANGED) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceVacuumCleaner.TriggerFunctionName.MODE_EQUALS) {
-      listeners
-        .filter(pair => {
-          const targetMode = pair.getParams()?.getParam1AsString();
-          return targetMode != null && this.modeEquals(targetMode);
-        })
-        .forEach(pair => pair.run());
-    }
-  }
-
-  setPower(power: boolean, execute: boolean) {
+  async setPower(power: boolean, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.power = power;
     if (execute) {
-      this.executeSetPower(power);
+      await this.executeSetPower(power);
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventPowerToggled(this.id, power));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeSetPower(power: boolean): void;
+  protected abstract executeSetPower(power: boolean): Promise<void>;
 
-  startCleaning(execute: boolean) {
+  async startCleaning(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.cleaningState = true;
     this.power = true;
     if (execute) {
-      this.executeStartCleaning();
+      await this.executeStartCleaning();
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumCleaningStarted(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeStartCleaning(): void;
+  protected abstract executeStartCleaning(): Promise<void>;
 
-  stopCleaning(execute: boolean) {
+  async stopCleaning(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.cleaningState = false;
     if (execute) {
-      this.executeStopCleaning();
+      await this.executeStopCleaning();
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumCleaningStopped(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeStopCleaning(): void;
+  protected abstract executeStopCleaning(): Promise<void>;
 
-  pauseCleaning(execute: boolean) {
+  async pauseCleaning(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.cleaningState = false;
     if (execute) {
-      this.executePauseCleaning();
+      await this.executePauseCleaning();
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumCleaningPaused(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executePauseCleaning(): void;
+  protected abstract executePauseCleaning(): Promise<void>;
 
-  resumeCleaning(execute: boolean) {
+  async resumeCleaning(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.cleaningState = true;
     this.dockedState = false;
     if (execute) {
-      this.executeResumeCleaning();
+      await this.executeResumeCleaning();
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumCleaningResumed(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeResumeCleaning(): void;
+  protected abstract executeResumeCleaning(): Promise<void>;
 
-  dock(execute: boolean) {
+  async dock(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     if (execute) {
-      this.executeDock();
+      await this.executeDock();
+    }
+    if (trigger && execute) {
+      await this.eventManager?.triggerEvent(new EventVacuumDocked(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
+  protected abstract executeDock(): Promise<void>;
 
-  protected abstract executeDock(): void;
-
-  setMode(mode: string, execute: boolean) {
+  async setMode(mode: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.mode = mode;
     this.power = true;
     if (execute) {
-      this.executeSetMode(mode);
+      await this.executeSetMode(mode);
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumModeChanged(this.id, deviceBefore, mode));
+      await this.eventManager?.triggerEvent(new EventVacuumModeEquals(this.id, deviceBefore, mode));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeSetMode(mode: string): void;
+  protected abstract executeSetMode(mode: string): Promise<void>;
 
-  cleanRoom(roomId: string, execute: boolean) {
+  async cleanRoom(roomId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.power = true;
     if (execute) {
-      this.executeCleanRoom(roomId);
+      await this.executeCleanRoom(roomId);
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeCleanRoom(roomId: string): void;
+  protected abstract executeCleanRoom(roomId: string): Promise<void>;
 
-  cleanZone(zoneId: string, execute: boolean) {
+  async cleanZone(zoneId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.power = true;
     if (execute) {
-      this.executeCleanZone(zoneId);
+      await this.executeCleanZone(zoneId);
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeCleanZone(zoneId: string): void;
+  protected abstract executeCleanZone(zoneId: string): Promise<void>;
 
-  changeFanSpeed(fanSpeed: number, execute: boolean) {
+  async changeFanSpeed(fanSpeed: number, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.fanSpeed = fanSpeed;
     if (execute) {
-      this.executeChangeFanSpeed(fanSpeed);
+      await this.executeChangeFanSpeed(fanSpeed);
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventFanSpeedChanged(this.id, deviceBefore, fanSpeed));
+      await this.eventManager?.triggerEvent(new EventFanSpeedEquals(this.id, deviceBefore, fanSpeed));
+      await this.eventManager?.triggerEvent(new EventFanSpeedLess(this.id, deviceBefore, fanSpeed));
+      await this.eventManager?.triggerEvent(new EventFanSpeedGreater(this.id, deviceBefore, fanSpeed));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeChangeFanSpeed(fanSpeed: number): void;
+  protected abstract executeChangeFanSpeed(fanSpeed: number): Promise<void>;
 
-  changeMode(mode: string, execute: boolean) {
+  async changeMode(mode: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.mode = mode;
     this.power = true;
     if (execute) {
-      this.executeChangeMode(mode);
+      await this.executeChangeMode(mode);
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumModeChanged(this.id, deviceBefore, mode));
+      await this.eventManager?.triggerEvent(new EventVacuumModeEquals(this.id, deviceBefore, mode));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeChangeMode(mode: string): void;
+  protected abstract executeChangeMode(mode: string): Promise<void> ;
 
-  setBattery(battery: number) {
+  async setBattery(battery: number, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.battery = battery;
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumBatteryChanged(this.id, deviceBefore, battery));
+      await this.eventManager?.triggerEvent(new EventVacuumBatteryEquals(this.id, deviceBefore, battery));
+      await this.eventManager?.triggerEvent(new EventVacuumBatteryLess(this.id, deviceBefore, battery));
+      await this.eventManager?.triggerEvent(new EventVacuumBatteryGreater(this.id, deviceBefore, battery));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setFanSpeed(fanSpeed: number) {
+  async setFanSpeed(fanSpeed: number, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.fanSpeed = fanSpeed;
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventFanSpeedChanged(this.id, deviceBefore, fanSpeed));
+      await this.eventManager?.triggerEvent(new EventFanSpeedEquals(this.id, deviceBefore, fanSpeed));
+      await this.eventManager?.triggerEvent(new EventFanSpeedLess(this.id, deviceBefore, fanSpeed));
+      await this.eventManager?.triggerEvent(new EventFanSpeedGreater(this.id, deviceBefore, fanSpeed));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setWaterBoxLevel(waterBoxLevel: number) {
+  async setWaterBoxLevel(waterBoxLevel: number, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.waterBoxLevel = waterBoxLevel;
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelChanged(this.id, deviceBefore, waterBoxLevel));
+      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelEquals(this.id, deviceBefore, waterBoxLevel));
+      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelLess(this.id, deviceBefore, waterBoxLevel));
+      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelGreater(this.id, deviceBefore, waterBoxLevel));
+      if (waterBoxLevel >= 100) await this.eventManager?.triggerEvent(new EventVacuumWaterBoxFull(this.id, deviceBefore));
+      if (waterBoxLevel <= 0) await this.eventManager?.triggerEvent(new EventVacuumWaterBoxEmpty(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setDirtyWaterBoxLevel(dirtyWaterBoxLevel: number) {
+  async setDirtyWaterBoxLevel(dirtyWaterBoxLevel: number, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.dirtyWaterBoxLevel = dirtyWaterBoxLevel;
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxLevelChanged(this.id, deviceBefore, dirtyWaterBoxLevel));
+      await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxLevelEquals(this.id, deviceBefore, dirtyWaterBoxLevel));
+      await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxLevelLess(this.id, deviceBefore, dirtyWaterBoxLevel));
+      await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxLevelGreater(this.id, deviceBefore, dirtyWaterBoxLevel));
+      if (dirtyWaterBoxLevel >= 100) await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxFull(this.id, deviceBefore));
+      if (dirtyWaterBoxLevel <= 0) await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxEmpty(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setCurrentRoom(currentRoom: string) {
+  async setCurrentRoom(currentRoom: string, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    const previousRoom = this.currentRoom;
     this.currentRoom = currentRoom;
+    if (trigger) {
+      if (previousRoom) await this.eventManager?.triggerEvent(new EventVacuumRoomLeft(this.id, deviceBefore, previousRoom));
+      if (currentRoom) await this.eventManager?.triggerEvent(new EventVacuumRoomEntered(this.id, deviceBefore, currentRoom));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setCurrentZone(currentZone: string) {
+  async setCurrentZone(currentZone: string, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    const previousZone = this.currentZone;
     this.currentZone = currentZone;
+    if (trigger) {
+      if (previousZone) await this.eventManager?.triggerEvent(new EventVacuumZoneLeft(this.id, deviceBefore, previousZone));
+      if (currentZone) await this.eventManager?.triggerEvent(new EventVacuumZoneEntered(this.id, deviceBefore, currentZone));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setWaterBoxFull(waterBoxFull: boolean) {
+  async setWaterBoxFull(waterBoxFull: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.waterBoxFullState = waterBoxFull;
+    if (trigger) {
+      if (waterBoxFull) await this.eventManager?.triggerEvent(new EventVacuumWaterBoxFull(this.id, deviceBefore));
+      else await this.eventManager?.triggerEvent(new EventVacuumWaterBoxEmpty(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setDirtyWaterBoxFull(dirtyWaterBoxFull: boolean) {
+  async setDirtyWaterBoxFull(dirtyWaterBoxFull: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.dirtyWaterBoxFullState = dirtyWaterBoxFull;
+    if (trigger) {
+      if (dirtyWaterBoxFull) await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxFull(this.id, deviceBefore));
+      else await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxEmpty(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setDocked(docked: boolean) {
+  async setDocked(docked: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.dockedState = docked;
+    if (trigger) {
+      if (docked) await this.eventManager?.triggerEvent(new EventVacuumDocked(this.id, deviceBefore));
+      else await this.eventManager?.triggerEvent(new EventVacuumUndocked(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setCleaning(cleaning: boolean) {
+  async setCleaning(cleaning: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.cleaningState = cleaning;
+    if (trigger) {
+      if (cleaning) await this.eventManager?.triggerEvent(new EventVacuumCleaningStarted(this.id, deviceBefore));
+      else await this.eventManager?.triggerEvent(new EventVacuumCleaningStopped(this.id, deviceBefore));
+      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
+    }
   }
 
-  setError(error: string) {
+  async setError(error: string, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.error = error;
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventError(this.id, deviceBefore, error));
+    }
   }
 
-  clearError(execute: boolean) {
+  async clearError(execute: boolean) {
     this.error = undefined;
     if (execute) {
-      this.executeClearError();
+      await this.executeClearError();
     }
   }
 
-  protected abstract executeClearError(): void;
-
-  powerOn() {
-    return this.power === true;
-  }
-
-  powerOff() {
-    return this.power === false;
-  }
-
-  cleaning() {
-    return this.cleaningState === true;
-  }
-
-  docked() {
-    return this.dockedState === true;
-  }
-
-  batteryGreater(threshold: number) {
-    return this.battery != null && this.battery > threshold;
-  }
-
-  batteryLess(threshold: number) {
-    return this.battery != null && this.battery < threshold;
-  }
-
-  batteryEquals(value: number) {
-    return this.battery != null && this.battery === value;
-  }
-
-  fanSpeedGreater(threshold: number) {
-    return this.fanSpeed != null && this.fanSpeed > threshold;
-  }
-
-  fanSpeedLess(threshold: number) {
-    return this.fanSpeed != null && this.fanSpeed < threshold;
-  }
-
-  fanSpeedEquals(value: number) {
-    return this.fanSpeed != null && this.fanSpeed === value;
-  }
-
-  waterBoxFull() {
-    if (this.waterBoxFullState != null) {
-      return this.waterBoxFullState === true;
-    }
-    return this.waterBoxLevel != null && this.waterBoxLevel >= 100;
-  }
-
-  waterBoxEmpty() {
-    if (this.waterBoxFullState != null) {
-      return this.waterBoxFullState === false;
-    }
-    return this.waterBoxLevel != null && this.waterBoxLevel <= 0;
-  }
-
-  waterBoxLevelGreater(threshold: number) {
-    return this.waterBoxLevel != null && this.waterBoxLevel > threshold;
-  }
-
-  waterBoxLevelLess(threshold: number) {
-    return this.waterBoxLevel != null && this.waterBoxLevel < threshold;
-  }
-
-  waterBoxLevelEquals(value: number) {
-    return this.waterBoxLevel != null && this.waterBoxLevel === value;
-  }
-
-  dirtyWaterBoxFull() {
-    if (this.dirtyWaterBoxFullState != null) {
-      return this.dirtyWaterBoxFullState === true;
-    }
-    return this.dirtyWaterBoxLevel != null && this.dirtyWaterBoxLevel >= 100;
-  }
-
-  dirtyWaterBoxEmpty() {
-    if (this.dirtyWaterBoxFullState != null) {
-      return this.dirtyWaterBoxFullState === false;
-    }
-    return this.dirtyWaterBoxLevel != null && this.dirtyWaterBoxLevel <= 0;
-  }
-
-  dirtyWaterBoxLevelGreater(threshold: number) {
-    return this.dirtyWaterBoxLevel != null && this.dirtyWaterBoxLevel > threshold;
-  }
-
-  dirtyWaterBoxLevelLess(threshold: number) {
-    return this.dirtyWaterBoxLevel != null && this.dirtyWaterBoxLevel < threshold;
-  }
-
-  dirtyWaterBoxLevelEquals(value: number) {
-    return this.dirtyWaterBoxLevel != null && this.dirtyWaterBoxLevel === value;
-  }
-
-  modeEquals(targetMode: string) {
-    return targetMode != null && targetMode === this.mode;
-  }
-
-  inRoom(roomId: string) {
-    return roomId != null && roomId === this.currentRoom;
-  }
-
-  inZone(zoneId: string) {
-    return zoneId != null && zoneId === this.currentZone;
-  }
-
-  outRoom(roomId: string) {
-    return roomId != null && roomId !== this.currentRoom;
-  }
-
-  outZone(zoneId: string) {
-    return zoneId != null && zoneId !== this.currentZone;
-  }
-
-  errorEquals(targetError: string) {
-    return targetError != null && targetError === this.error;
-  }
+  protected abstract executeClearError(): Promise<void>;
 }

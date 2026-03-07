@@ -24,6 +24,7 @@ export enum DeviceType {
   SENSOR = "sensor",
   FAN = "fan",
   FAN_LIGHT = "fan-light",
+  FAN_LIGHT_DIMMER = "fan-light-dimmer",
   
   // Klima & Komfort
   THERMOSTAT = "thermostat",
@@ -50,10 +51,3 @@ export enum DeviceType {
   // Kalender
   CALENDAR = "calendar",
 }
-
-export function deviceTypeFromString(value?: string | null) {
-  if (!value) return null;
-  const entries = Object.values(DeviceType) as string[];
-  return entries.includes(value) ? (value as DeviceType) : null;
-}
-

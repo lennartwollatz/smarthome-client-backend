@@ -1,6 +1,6 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
-import type { EventStreamManager } from "../../../events/eventStreamManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
+import type { EventManager } from "../../../events/EventManager.js";
 import crypto from "node:crypto";
 import { CALENDARCONFIG } from "./calendarModule.js";
 import { CalendarDeviceController } from "./calendarDeviceController.js";
@@ -24,10 +24,10 @@ export class CalendarModuleManager extends ModuleManager<
   CalendarDeviceDiscovered
 > implements CalendarSubModule {
 
-  constructor(databaseManager: DatabaseManager, actionManager: ActionManager, eventStreamManager: EventStreamManager) {
+  constructor(databaseManager: DatabaseManager, actionManager: ActionManager, eventManager: EventManager) {
     const deviceController = new CalendarDeviceController();
     const deviceDiscover = new CalendarDeviceDiscover(databaseManager);
-    super(databaseManager, actionManager, eventStreamManager, deviceController, deviceDiscover);
+    super(databaseManager, actionManager, eventManager, deviceController, deviceDiscover);
   }
 
   public getModuleId(): string {
@@ -42,8 +42,10 @@ export class CalendarModuleManager extends ModuleManager<
     return new CalendarEventStreamManager(this.getManagerId(), this.deviceController, this.actionManager, this.databaseManager);
   }
 
-  convertDeviceFromDatabase(device: Device): DeviceCalendar {
-    return new DeviceCalendar(device);
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
+    const calendar = new DeviceCalendar(device);
+    await calendar.updateValues();
+    return calendar;
   }
 
   async initializeDeviceControllers(): Promise<void> {
@@ -58,7 +60,7 @@ export class CalendarModuleManager extends ModuleManager<
     let calendars: CalendarConfig[] = [];
     if( devices ){
       for( const device of devices ){
-          calendars.push(...(device as DeviceCalendar).calendars.filter(c => c.moduleId === this.getModuleId()));
+          calendars.push(...(device as DeviceCalendar).calendars.filter((c: CalendarConfig) => c.moduleId === this.getModuleId()));
       }
     }
     return calendars;
@@ -68,7 +70,7 @@ export class CalendarModuleManager extends ModuleManager<
     let entries: DeviceCalendarEntry[] = [];
     if( devices ){
       for( const device of devices ){
-          entries.push(...(device as DeviceCalendar).calendars.filter(c => c.id === calendar.id).flatMap(c => c.entries));
+          entries.push(...(device as DeviceCalendar).calendars.filter((c: CalendarConfig) => c.id === calendar.id).flatMap((c: CalendarConfig) => c.entries));
       }
     }
     return entries;
@@ -98,7 +100,7 @@ export class CalendarModuleManager extends ModuleManager<
 
     const requestedId = String(data?.id ?? "").trim();
     let calendarId = requestedId || `calendar-${crypto.randomUUID()}`;
-    const existingIds = new Set(device.getCalendars().map(calendar => String(calendar.id ?? "").trim()));
+    const existingIds = new Set(device.getCalendars().map((calendar: CalendarConfig) => String(calendar.id ?? "").trim()));
 
     if (requestedId && existingIds.has(calendarId)) {
       throw new Error(`Kalender '${calendarId}' existiert bereits`);

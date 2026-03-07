@@ -1,7 +1,16 @@
 import { Device } from "./Device.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import type { DeviceListenerPair } from "./helper/DeviceListenerPair.js";
-import { DeviceFunction } from "../DeviceFunction.js";
+import { EventSpeakerStatusChanged } from "../../server/events/events/EventSpeakerStatusChanged.js";
+import { EventVolumeChanged } from "../../server/events/events/EventVolumeChanged.js";
+import { EventVolumeEquals } from "../../server/events/events/EventVolumeEquals.js";
+import { EventVolumeLess } from "../../server/events/events/EventVolumeLess.js";
+import { EventVolumeGreater } from "../../server/events/events/EventVolumeGreater.js";
+import { EventPlay } from "../../server/events/events/EventPlay.js";
+import { EventPause } from "../../server/events/events/EventPause.js";
+import { EventStop } from "../../server/events/events/EventStop.js";
+import { EventMute } from "../../server/events/events/EventMute.js";
+import { EventNext } from "../../server/events/events/EventNext.js";
+import { EventPrevious } from "../../server/events/events/EventPrevious.js";
 
 export abstract class DeviceSpeaker extends Device {
   static PlayState = {
@@ -52,11 +61,6 @@ export abstract class DeviceSpeaker extends Device {
     super();
     this.assignInit(init as any);
     this.type = DeviceType.SPEAKER;
-    this.icon = "&#128266;";
-    this.typeLabel = "deviceType.speaker";
-    this.initializeFunctionsBool();
-    this.initializeFunctionsAction();
-    this.initializeFunctionsTrigger();
   }
 
   static playStateFromString(value?: string | null) {
@@ -67,199 +71,118 @@ export abstract class DeviceSpeaker extends Device {
 
   abstract updateValues(): Promise<void>;
 
-  protected override initializeFunctionsBool() {
-    this.functionsBool = [
-      DeviceFunction.fromString(DeviceSpeaker.BoolFunctionName.IS_PLAYING, 'bool'),
-      DeviceFunction.fromString(DeviceSpeaker.BoolFunctionName.IS_PAUSING, 'bool'),
-      DeviceFunction.fromString(DeviceSpeaker.BoolFunctionName.IS_STOPPED, 'bool'),
-      DeviceFunction.fromString(DeviceSpeaker.BoolFunctionName.IS_VOLUME_GREATER, 'bool'),
-      DeviceFunction.fromString(DeviceSpeaker.BoolFunctionName.IS_VOLUME_LESS, 'bool'),
-      DeviceFunction.fromString(DeviceSpeaker.BoolFunctionName.IS_VOLUME, 'bool')
-    ];
-  }
 
-  protected override initializeFunctionsAction() {
-    this.functionsAction = [
-      DeviceFunction.fromString(DeviceSpeaker.ActionFunctionName.SET_VOLUME, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.ActionFunctionName.PLAY, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.ActionFunctionName.PAUSE, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.ActionFunctionName.STOPP, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.ActionFunctionName.SET_MUTE, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.ActionFunctionName.PLAY_NEXT, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.ActionFunctionName.PLAY_PREVIOUS, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.ActionFunctionName.PLAY_SOUND, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.ActionFunctionName.PLAY_TEXT_AS_SOUND, 'void')
-    ];
-  }
 
-  protected override initializeFunctionsTrigger() {
-    this.functionsTrigger = [
-      DeviceFunction.fromString(DeviceSpeaker.TriggerFunctionName.ON_VOLUME_CHANGED, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.TriggerFunctionName.ON_VOLUME_LESS, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.TriggerFunctionName.ON_VOLUME_GREATER, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.TriggerFunctionName.ON_PLAY, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.TriggerFunctionName.ON_STOP, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.TriggerFunctionName.ON_MUTE, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.TriggerFunctionName.ON_PAUSE, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.TriggerFunctionName.ON_NEXT, 'void'),
-      DeviceFunction.fromString(DeviceSpeaker.TriggerFunctionName.ON_PREVIOUS, 'void')
-    ];
-  }
-
-  isPlaying() {
-    return this.playState === DeviceSpeaker.PlayState.PLAY;
-  }
-
-  isPausing() {
-    return this.playState === DeviceSpeaker.PlayState.PAUSE;
-  }
-
-  isStopped() {
-    return this.playState === DeviceSpeaker.PlayState.STOP;
-  }
-
-  isVolumeGreater(volume: number) {
-    return this.volume != null && this.volume > volume;
-  }
-
-  isVolumeLess(volume: number) {
-    return this.volume != null && this.volume < volume;
-  }
-
-  isVolume(volume: number) {
-    return this.volume != null && this.volume === volume;
-  }
-
-  setVolume(volume: number, execute: boolean) {
+  async setVolume(volume: number, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.volume = volume;
     this.muted = volume === 0;
     if (execute) {
-      this.executeSetVolume(volume);
+      await this.executeSetVolume(volume);
     }
-    this.checkListener(DeviceSpeaker.TriggerFunctionName.ON_VOLUME_CHANGED);
-    this.checkListener(DeviceSpeaker.TriggerFunctionName.ON_VOLUME_LESS);
-    this.checkListener(DeviceSpeaker.TriggerFunctionName.ON_VOLUME_GREATER);
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventVolumeChanged(this.id, deviceBefore, volume));
+      this.eventManager?.triggerEvent(new EventVolumeEquals(this.id, deviceBefore, volume));
+      this.eventManager?.triggerEvent(new EventVolumeLess(this.id, deviceBefore, volume));
+      this.eventManager?.triggerEvent(new EventVolumeGreater(this.id, deviceBefore, volume));
+    }
   }
 
-  protected abstract executeSetVolume(volume: number): void;
+  protected abstract executeSetVolume(volume: number): Promise<void>;
 
-  play(execute: boolean) {
+  async play(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.playState = DeviceSpeaker.PlayState.PLAY;
     this.muted = false;
     if (execute) {
-      this.executePlay();
+      await this.executePlay();
     }
-    this.checkListener(DeviceSpeaker.TriggerFunctionName.ON_PLAY);
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventPlay(this.id, deviceBefore));
+    }
   }
 
-  protected abstract executePlay(): void;
+  protected abstract executePlay(): Promise<void>;
 
-  pause(execute: boolean) {
+  async pause(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.playState = DeviceSpeaker.PlayState.PAUSE;
     if (execute) {
-      this.executePause();
+      await this.executePause();
     }
-    this.checkListener(DeviceSpeaker.TriggerFunctionName.ON_PAUSE);
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventPause(this.id, deviceBefore));
+    }
   }
 
-  protected abstract executePause(): void;
+  protected abstract executePause(): Promise<void>;
 
-  stopp(execute: boolean) {
+  async stopp(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.playState = DeviceSpeaker.PlayState.STOP;
     if (execute) {
-      this.executeStopp();
+      await this.executeStopp();
     }
-    this.checkListener(DeviceSpeaker.TriggerFunctionName.ON_STOP);
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventStop(this.id, deviceBefore));
+    }
   }
 
-  protected abstract executeStopp(): void;
+  protected abstract executeStopp(): Promise<void>;
 
-  setMute(muted: boolean, execute: boolean) {
+  async setMute(muted: boolean, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.muted = muted;
     if (execute) {
-      this.executeSetMute(muted);
+      await this.executeSetMute(muted);
     }
-    this.checkListener(DeviceSpeaker.TriggerFunctionName.ON_MUTE);
-  }
-
-  protected abstract executeSetMute(muted: boolean): void;
-
-  playNext() {
-    this.play(true);
-    this.executePlayNext();
-    this.checkListener(DeviceSpeaker.TriggerFunctionName.ON_NEXT);
-  }
-
-  protected abstract executePlayNext(): void;
-
-  playPrevious() {
-    this.play(true);
-    this.executePlayPrevious();
-    this.checkListener(DeviceSpeaker.TriggerFunctionName.ON_PREVIOUS);
-  }
-
-  protected abstract executePlayPrevious(): void;
-
-  playSound(sound: string) {
-    this.play(true);
-    this.executePlaySound(sound);
-  }
-
-  protected abstract executePlaySound(sound: string): void;
-
-  playTextAsSound(text: string) {
-    this.play(true);
-    this.executePlayTextAsSound(text);
-  }
-
-  protected abstract executePlayTextAsSound(text: string): void;
-
-  protected override checkListener(triggerName: string) {
-    super.checkListener(triggerName);
-    if (!triggerName) return;
-    const isValid = Object.values(DeviceSpeaker.TriggerFunctionName).includes(
-      triggerName as (typeof DeviceSpeaker.TriggerFunctionName)[keyof typeof DeviceSpeaker.TriggerFunctionName]
-    );
-    if (!isValid) return;
-    const listeners = this.triggerListeners.get(triggerName) as DeviceListenerPair[] | undefined;
-    if (!listeners || listeners.length === 0) return;
-
-    if (triggerName === DeviceSpeaker.TriggerFunctionName.ON_VOLUME_CHANGED) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceSpeaker.TriggerFunctionName.ON_VOLUME_LESS) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.isVolumeLess(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceSpeaker.TriggerFunctionName.ON_VOLUME_GREATER) {
-      listeners
-        .filter(pair => {
-          const threshold = pair.getParams()?.getParam1AsInt();
-          return threshold != null && this.isVolumeGreater(threshold);
-        })
-        .forEach(pair => pair.run());
-    }
-    if (triggerName === DeviceSpeaker.TriggerFunctionName.ON_PLAY) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceSpeaker.TriggerFunctionName.ON_STOP) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceSpeaker.TriggerFunctionName.ON_MUTE) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceSpeaker.TriggerFunctionName.ON_PAUSE) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceSpeaker.TriggerFunctionName.ON_NEXT) {
-      listeners.forEach(listener => listener.run());
-    }
-    if (triggerName === DeviceSpeaker.TriggerFunctionName.ON_PREVIOUS) {
-      listeners.forEach(listener => listener.run());
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventMute(this.id, deviceBefore, muted));
     }
   }
+
+  protected abstract executeSetMute(muted: boolean): Promise<void>;
+
+  async playNext(trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    await this.play(true, false);
+    await this.executePlayNext();
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventNext(this.id, deviceBefore));
+    }
+  }
+
+  protected abstract executePlayNext(): Promise<void>;
+
+  async playPrevious(trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    await this.play(true, false);
+    await this.executePlayPrevious();
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventPrevious(this.id, deviceBefore));
+    }
+  }
+
+  protected abstract executePlayPrevious(): Promise<void>;
+
+  async playSound(sound: string) {
+    await this.play(true, false);
+    await this.executePlaySound(sound);
+  }
+
+  protected abstract executePlaySound(sound: string): Promise<void>;
+
+  async playTextAsSound(text: string) {
+    await this.play(true, false);
+    await this.executePlayTextAsSound(text);
+  }
+
+  protected abstract executePlayTextAsSound(text: string): Promise<void>;
 }

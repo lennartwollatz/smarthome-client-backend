@@ -1,17 +1,9 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
-import type { DatabaseManager } from "../../db/database.js";
-import type { EventStreamManager } from "../../events/eventStreamManager.js";
-import type { ActionManager } from "../../actions/actionManager.js";
-import type { Scene, SceneActivationResponse } from "../../../model/index.js";
+import type { Scene } from "../../actions/scene/Scene.js";
+import type { RouterDeps } from "../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
-
-export function createSceneRouter(deps: Deps) {
+export function createSceneRouter(deps: RouterDeps) {
   const router = Router();
 
   router.get("/", (_req, res) => {
@@ -70,7 +62,7 @@ export function createSceneRouter(deps: Deps) {
       return;
     }
     scene.active = true;
-    deps.actionManager.saveScene(scene);
+    deps.actionManager.addScene(scene);
     res.status(200).json({ id: scene.id, name: scene.name, active: true });
   });
 
@@ -81,7 +73,7 @@ export function createSceneRouter(deps: Deps) {
       return;
     }
     scene.active = false;
-    deps.actionManager.saveScene(scene);
+    deps.actionManager.addScene(scene);
     res.status(200).json({ id: scene.id, name: scene.name, active: false });
   });
 

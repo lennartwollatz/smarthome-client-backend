@@ -1,5 +1,5 @@
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import type { CalendarEvent } from "./calendarEvent.js";
 import { CALENDARCONFIG } from "./calendarModule.js";

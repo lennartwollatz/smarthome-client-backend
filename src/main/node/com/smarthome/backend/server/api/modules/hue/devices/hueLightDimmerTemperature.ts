@@ -36,60 +36,54 @@ export class HueLightDimmerTemperature extends DeviceLightDimmerTemperatureColor
     // HueDeviceController in Node ist aktuell stubbed.
   }
 
-  protected async executeSetOn() {
+  protected async executeSetOn(): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Lampe nicht einschalten fuer {}", this.id);
       return;
     }
     try {
       await this.hueDeviceController.setOn(this.id, true);
-      this.on = true;
     } catch (error) {
       logger.error({ error, deviceId: this.id }, "Fehler beim Einschalten des Hue Light");
       // Fehler wird geloggt, aber nicht weitergeworfen, um Server-Absturz zu vermeiden
     }
   }
 
-  protected async executeSetOff() {
+  protected async executeSetOff(): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Lampe nicht ausschalten fuer {}", this.id);
       return;
     }
     try {
       await this.hueDeviceController.setOn(this.id, false);
-      this.on = false;
     } catch (error) {
       logger.error({ error, deviceId: this.id }, "Fehler beim Ausschalten des Hue Light");
       // Fehler wird geloggt, aber nicht weitergeworfen, um Server-Absturz zu vermeiden
     }
   }
 
-  protected executeSetBrightness(brightness: number) {
+  protected async executeSetBrightness(brightness: number): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Helligkeit nicht setzen fuer {}", this.id);
       return;
     }
     this.hueDeviceController.setBrightness(this.id, brightness);
-    this.brightness = brightness;
   }
 
-  protected executeSetTemperature(temperature: number) {
+  protected async executeSetTemperature(temperature: number): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Farbtemperatur nicht setzen fuer {}", this.id);
       return;
     }
     this.hueDeviceController.setTemperature(this.id, temperature);
-    this.temperature = temperature;
   }
 
-  protected executeSetColor(x: number, y: number) {
+  protected async executeSetColor(x: number, y: number): Promise<void> {
     if (!this.hueDeviceController || !this.id) {
       logger.warn("HueDeviceController ist null - kann Farbe nicht setzen fuer {}", this.id);
       return;
     }
     this.hueDeviceController.setColor(this.id, x, y);
-    this.colorX = x;
-    this.colorY = y;
   }
 
   getBridgeId() {

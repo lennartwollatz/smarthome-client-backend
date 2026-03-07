@@ -1,31 +1,16 @@
 import { Router } from "express";
-import type { DatabaseManager } from "../../../db/database.js";
-import type { EventStreamManager } from "../../../events/eventStreamManager.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
 import { WACLightingModuleManager } from "../../modules/waclighting/waclightingModuleManager.js";
-import { WACLightingDeviceDiscover } from "../../modules/waclighting/waclightingDeviceDiscover.js";
 import { logger } from "../../../../logger.js";
+import type{ RouterDeps } from "../../router.js";
+import { WACLightingDeviceDiscover } from "../../modules/waclighting/waclightingDeviceDiscover.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
 
-// Konkrete Implementierung des abstrakten WACLightingModuleManager
-class WACLightingModuleManagerImpl extends WACLightingModuleManager {
-  constructor(databaseManager: DatabaseManager, actionManager: ActionManager, eventStreamManager: EventStreamManager) {
-    const deviceDiscover = new WACLightingDeviceDiscover(databaseManager);
-    super(databaseManager, actionManager, eventStreamManager, deviceDiscover);
-  }
-}
-
-export function createWACLightingModuleRouter(deps: Deps) {
+export function createWACLightingModuleRouter(deps: RouterDeps) {
   const router = Router();
-  const wacLightingModule = new WACLightingModuleManagerImpl(
+  const wacLightingModule = new WACLightingModuleManager(
     deps.databaseManager,
     deps.actionManager,
-    deps.eventStreamManager
+    deps.eventManager 
   );
   deps.actionManager.registerModuleManager(wacLightingModule);
 

@@ -1,7 +1,4 @@
 import { Router } from "express";
-import type { DatabaseManager } from "../../db/database.js";
-import type { EventStreamManager } from "../../events/eventStreamManager.js";
-import type { ActionManager } from "../../actions/actionManager.js";
 import { JsonRepository } from "../../db/jsonRepository.js";
 import { defaultModuleById, getDefaultModules, type ModuleModel } from "../modules/modules.js";
 import { createDenonModuleRouter } from "./modules/denonModule.service.js";
@@ -13,14 +10,9 @@ import { createWACLightingModuleRouter } from "./modules/waclightingModule.servi
 import { createBMWModuleRouter } from "./modules/bmwModule.service.js";
 import { createAppleCalendarModuleRouter } from "./modules/appleCalendarModule.service.js";
 import { createCalendarModuleRouter } from "./modules/calendarModule.service.js";
+import type { RouterDeps } from "../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
-
-export function createModuleRouter(deps: Deps) {
+export function createModuleRouter(deps: RouterDeps) {
   const router = Router();
   const moduleRepository = new JsonRepository<ModuleModel>(deps.databaseManager, "Module");
 
@@ -71,7 +63,7 @@ export function createModuleRouter(deps: Deps) {
     const module = getOrCreateModule(moduleRepository, req.params.moduleId);
     module.isInstalled = false;
     module.isActive = false;
-    deps.actionManager.removeDeviceForModule(req.params.moduleId);
+    deps.actionManager.removeDevicesForModule(req.params.moduleId);
     moduleRepository.save(req.params.moduleId, module);
     res.status(200).json(true);
   });
@@ -117,7 +109,7 @@ export function createModuleRouter(deps: Deps) {
     if (module.isActive) {
       deps.actionManager.addDevicesForModule(req.params.moduleId);
     } else {
-      deps.actionManager.removeDeviceForModule(req.params.moduleId);
+      deps.actionManager.removeDevicesForModule(req.params.moduleId);
     }
     moduleRepository.save(req.params.moduleId, module);
     res.status(200).json(module.isActive);

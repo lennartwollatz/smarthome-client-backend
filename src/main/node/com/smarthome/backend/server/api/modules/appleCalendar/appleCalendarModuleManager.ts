@@ -1,6 +1,6 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
-import type { EventStreamManager } from "../../../events/eventStreamManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
+import type { EventManager } from "../../../events/EventManager.js";
 import { APPLECALENDARCONFIG, APPLECALENDARMODULE } from "./appleCalendarModule.js";
 import { AppleCalendarEventStreamManager } from "./appleCalendarEventStreamManager.js";
 import { AppleCalendarCalendar, AppleCalendarCalendarEntry, AppleCalendarDeviceController } from "./appleCalendarDeviceController.js";
@@ -24,11 +24,11 @@ export class AppleCalendarModuleManager extends ModuleManager<
   constructor(
     databaseManager: DatabaseManager,
     actionManager: ActionManager,
-    eventStreamManager: EventStreamManager
+    eventManager: EventManager
   ) {
     const deviceDiscover = new AppleCalendarDeviceDiscover(databaseManager);
     const deviceController = new AppleCalendarDeviceController(databaseManager, deviceDiscover);
-    super(databaseManager, actionManager, eventStreamManager, deviceController, deviceDiscover);
+    super(databaseManager, actionManager, eventManager, deviceController, deviceDiscover);
   }
 
 
@@ -101,8 +101,10 @@ export class AppleCalendarModuleManager extends ModuleManager<
     return withEntries;
   }
 
-  convertDeviceFromDatabase(device: Device): DeviceCalendar {
-    return new DeviceCalendar(device);
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
+    const calendar = new DeviceCalendar(device);
+    await calendar.updateValues();
+    return calendar;
   }
 
   async initializeDeviceControllers(): Promise<void> {

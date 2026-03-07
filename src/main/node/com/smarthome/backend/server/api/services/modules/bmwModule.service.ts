@@ -1,19 +1,11 @@
 import { Router } from "express";
-import type { DatabaseManager } from "../../../db/database.js";
-import type { EventStreamManager } from "../../../events/eventStreamManager.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
 import { logger } from "../../../../logger.js";
 import { BMWModuleManager } from "../../modules/bmw/bmwModuleManager.js";
+import type { RouterDeps } from "../../router.js";
 
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
-
-export function createBMWModuleRouter(deps: Deps) {
+export function createBMWModuleRouter(deps: RouterDeps) {
   const router = Router();
-  const bmwModule = new BMWModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  const bmwModule = new BMWModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
   deps.actionManager.registerModuleManager(bmwModule);
 
   router.get("/credentials", (_req, res) => {

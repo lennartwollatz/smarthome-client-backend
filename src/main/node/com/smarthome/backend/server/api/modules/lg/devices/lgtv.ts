@@ -95,42 +95,56 @@ export class LGTV extends DeviceTV {
     return this.lg.register(this);
   }
 
-  protected executeSetPower(power: boolean) {
+  protected async executeSetPowerOn() {
+    if (!this.lg) return;
+    if (!this.power) {
+      await this.lg.powerOn(this);
+    } 
+  }
+
+  protected async executeSetPowerOff() {
+    if (!this.lg) return;
+    if (this.power) {
+      await this.lg.powerOff(this);
+    } 
+  }
+
+  protected async executeSetPower(power: boolean) {
     if (!this.lg) return;
     if (power) {
-      void this.lg.powerOn(this);
+      void await this.lg.powerOn(this);
     } else {
-      void this.lg.powerOff(this);
+      void await this.lg.powerOff(this);
     }
   }
 
-  protected executeSetScreen(screen: boolean) {
+  protected async executeSetScreen(screen: boolean): Promise<void> {
     if (!this.lg) return;
     if (screen) {
-      void this.lg.screenOn(this);
+      await this.lg.screenOn(this);
     } else {
-      void this.lg.screenOff(this);
+      await this.lg.screenOff(this);
     }
   }
 
-  protected executeSetChannel(channel: string) {
+  protected async executeSetChannel(channel: string): Promise<void> {
     if (!this.lg) return;
-    void this.lg.setChannel(this, channel);
+    await this.lg.setChannel(this, channel);
   }
 
-  protected executeStartApp(appId: string) {
+  protected async executeStartApp(appId: string): Promise<void> {
     if (!this.lg) return;
-    void this.lg.startApp(this, appId);
+    await this.lg.startApp(this, appId);
   }
 
-  protected executeNotify(message: string) {
+  protected async executeNotify(message: string): Promise<void> {
     if (!this.lg) return;
-    void this.lg.notify(this, message);
+    await this.lg.notify(this, message);
   }
 
-  protected executeSetVolume(volume: number) {
+  protected async executeSetVolume(volume: number): Promise<void> {
     if (!this.lg) return;
-    void this.lg.setVolume(this, volume);
+    await this.lg.setVolume(this, volume);
   }
 
   setHomeAppNumber(appId: string, newNumber: number) {

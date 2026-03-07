@@ -3,9 +3,11 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { logger } from "../../logger.js";
 
+type DatabaseInstance = InstanceType<typeof Database>;
+
 export class DatabaseManager {
   private dbPath: string;
-  private db: Database | null = null;
+  private db: DatabaseInstance | null = null;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -46,7 +48,7 @@ export class DatabaseManager {
     if (!this.db) {
       this.connect();
     }
-    return this.db as Database;
+    return this.db as DatabaseInstance;
   }
 
   createNewConnection() {
@@ -68,11 +70,7 @@ export class DatabaseManager {
   }
 
   isConnected() {
-    try {
-      return Boolean(this.db) && this.db?.open === true;
-    } catch {
-      return false;
-    }
+    return this.db !== null;
   }
 
   getAllTypes(): string[] {

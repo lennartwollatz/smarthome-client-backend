@@ -28,7 +28,6 @@ export class DenonSpeaker extends HeosSpeaker {
         controller
       );
       this.room = device.room;
-      this.icon = device.icon;
     } else {
       super();
     }

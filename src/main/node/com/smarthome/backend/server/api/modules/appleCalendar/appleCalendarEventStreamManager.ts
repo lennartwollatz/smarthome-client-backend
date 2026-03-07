@@ -1,5 +1,5 @@
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import type { AppleCalendarEvent } from "./appleCalendarEvent.js";
 import { AppleCalendarDeviceController } from "./appleCalendarDeviceController.js";
 import { DEFAULT_CALENDAR_MODULE_ID, DeviceCalendar } from "../../../../model/devices/DeviceCalendar.js";

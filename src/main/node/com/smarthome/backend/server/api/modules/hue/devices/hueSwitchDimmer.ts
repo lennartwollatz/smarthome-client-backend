@@ -41,25 +41,34 @@ export class HueSwitchDimmer extends DeviceSwitchDimmer {
     }
   }
 
-  protected executeToggle(buttonId: string) {
+  protected async executeToggle(buttonId: string): Promise<void> {
     logger.debug("executeToggle fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
   }
 
-  protected executeDoublePress(buttonId: string) {
+  protected async executeDoublePress(buttonId: string): Promise<void> {
     logger.debug("executeDoublePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
   }
 
-  protected executeTriplePress(buttonId: string) {
+  protected async executeTriplePress(buttonId: string): Promise<void> {
     logger.debug("executeTriplePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
   }
 
-  protected executeSetBrightness(buttonId: string, brightness: number) {
+  protected async executeSetIntensity(buttonId: string, intensity: number): Promise<void> {
     logger.debug(
-      "executeSetBrightness fuer Button {} - wird ueber Event-Stream verarbeitet",
+      "executeSetIntensity fuer Button {} - wird ueber Event-Stream verarbeitet",
       buttonId,
-      brightness
+      intensity
     );
   }
+
+  protected async executeSetOn(buttonId: string): Promise<void> {
+    logger.debug("executeSetOn fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
+  }
+
+  protected async executeSetOff(buttonId: string): Promise<void> {
+    logger.debug("executeSetOff fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
+  }
+
 
   getBridgeId() {
     return this.bridgeId;

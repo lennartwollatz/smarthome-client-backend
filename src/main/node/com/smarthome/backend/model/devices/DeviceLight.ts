@@ -1,148 +1,56 @@
 import { Device } from "./Device.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import type { DeviceListenerPair } from "./helper/DeviceListenerPair.js";
-import { DeviceFunction } from "../DeviceFunction.js";
+import { EventLightOn } from "../../server/events/events/EventLightOn.js";
+import { EventLightOff } from "../../server/events/events/EventLightOff.js";
+import { EventLightToggle } from "../../server/events/events/EventLightToggle.js";
+import { EventLightStatusChanged } from "../../server/events/events/EventLightStatusChanged.js";
 
 export abstract class DeviceLight extends Device {
-  static TriggerFunctionName = {
-    TOGGLED: "toggled",
-    ON_ON: "onOn",
-    ON_OFF: "onOff"
-  } as const;
-
-  static ActionFunctionName = {
-    SET_ON: "setOn",
-    SET_OFF: "setOff",
-    TOGGLE: "toggle"
-  } as const;
-
-  static BoolFunctionName = {
-    ON: "on",
-    OFF: "off"
-  } as const;
-
   on?: boolean;
 
   constructor(init?: Partial<DeviceLight>) {
     super();
     this.assignInit(init as any);
     this.type = DeviceType.LIGHT;
-    this.icon = "&#128161;";
-    this.typeLabel = "deviceType.light";
-    this.initializeFunctionsBool();
-    this.initializeFunctionsAction();
-    this.initializeFunctionsTrigger();
   }
 
   abstract updateValues(): Promise<void>;
 
-  protected override initializeFunctionsBool() {
-    this.functionsBool = [
-      DeviceFunction.fromString(DeviceLight.BoolFunctionName.ON, 'bool'),
-      DeviceFunction.fromString(DeviceLight.BoolFunctionName.OFF, 'bool')
-    ];
-  }
-
-  protected override initializeFunctionsAction() {
-    this.functionsAction = [
-      DeviceFunction.fromString(DeviceLight.ActionFunctionName.SET_ON, 'void'),
-      DeviceFunction.fromString(DeviceLight.ActionFunctionName.SET_OFF, 'void'),
-      DeviceFunction.fromString(DeviceLight.ActionFunctionName.TOGGLE, 'void')
-    ];
-  }
-
-  protected override initializeFunctionsTrigger() {
-    this.functionsTrigger = [
-      DeviceFunction.fromString(DeviceLight.TriggerFunctionName.TOGGLED, 'void'),
-      DeviceFunction.fromString(DeviceLight.TriggerFunctionName.ON_ON, 'void'),
-      DeviceFunction.fromString(DeviceLight.TriggerFunctionName.ON_OFF, 'void')
-    ];
-  }
-
-  protected override checkListener(triggerName: string) {
-    super.checkListener(triggerName);
-    if (!triggerName) return;
-    const isValid = Object.values(DeviceLight.TriggerFunctionName).includes(
-      triggerName as (typeof DeviceLight.TriggerFunctionName)[keyof typeof DeviceLight.TriggerFunctionName]
-    );
-    if (!isValid) return;
-    const listeners = this.triggerListeners.get(triggerName) as DeviceListenerPair[] | undefined;
-    if (!listeners || listeners.length === 0) return;
-    listeners.forEach(listener => listener.run());
-  }
-
-  isOn() {
-    return this.on === true;
-  }
-
-  isOff() {
-    return !this.isOn();
-  }
-
-  setOn(execute: boolean) {
-    const oldOn = this.on;
+  async setOn(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.on = true;
     if (execute) {
-      const result = this.executeSetOn();
-      // Wenn executeSetOn ein Promise zurückgibt, Fehler abfangen
-      if (result instanceof Promise) {
-        result.catch((error) => {
-          // Fehler wird bereits in der Implementierung geloggt
-        });
-      }
+      await this.executeSetOn();
     }
-    this.checkListener(DeviceLight.TriggerFunctionName.ON_ON);
-    const changed = oldOn == null || oldOn !== this.on;
-    if (changed) {
-      this.checkListener(DeviceLight.TriggerFunctionName.TOGGLED);
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventLightStatusChanged(this.id, deviceBefore, {...this}));
+      this.eventManager?.triggerEvent(new EventLightOn(this.id, deviceBefore));
+      this.eventManager?.triggerEvent(new EventLightToggle(this.id, deviceBefore, true));
     }
   }
 
-  protected abstract executeSetOn(): void | Promise<void>;
+  protected abstract executeSetOn(): Promise<void>;
 
-  setOff(execute: boolean) {
-    const oldOn = this.on;
+  async setOff(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
     this.on = false;
     if (execute) {
-      const result = this.executeSetOff();
-      // Wenn executeSetOff ein Promise zurückgibt, Fehler abfangen
-      if (result instanceof Promise) {
-        result.catch((error) => {
-          // Fehler wird bereits in der Implementierung geloggt
-        });
-      }
+      await this.executeSetOff();
     }
-    this.checkListener(DeviceLight.TriggerFunctionName.ON_OFF);
-    const changed = oldOn == null || oldOn !== this.on;
-    if (changed) {
-      this.checkListener(DeviceLight.TriggerFunctionName.TOGGLED);
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventLightStatusChanged(this.id, deviceBefore, {...this}));
+      this.eventManager?.triggerEvent(new EventLightOff(this.id, deviceBefore));
+      this.eventManager?.triggerEvent(new EventLightToggle(this.id, deviceBefore, false));
     }
   }
 
-  protected abstract executeSetOff(): void | Promise<void>;
+  protected abstract executeSetOff(): Promise<void>;
 
-  toggle() {
-    this.on = !this.on;
+  async toggle(execute: boolean, trigger: boolean = true) {
     if (this.on) {
-      const result = this.executeSetOn();
-      if (result instanceof Promise) {
-        result.catch((error) => {
-          // Fehler wird bereits in der Implementierung geloggt
-        });
-      }
+       await this.setOff(execute, trigger);
     } else {
-      const result = this.executeSetOff();
-      if (result instanceof Promise) {
-        result.catch((error) => {
-          // Fehler wird bereits in der Implementierung geloggt
-        });
-      }
-    }
-    this.checkListener(DeviceLight.TriggerFunctionName.TOGGLED);
-    if (this.on) {
-      this.checkListener(DeviceLight.TriggerFunctionName.ON_ON);
-    } else {
-      this.checkListener(DeviceLight.TriggerFunctionName.ON_OFF);
+       await this.setOn(execute, trigger);
     }
   }
 }

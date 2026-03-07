@@ -1,49 +1,30 @@
+import { logger } from "../../logger.js";
+import { Action } from "./action/Action.js";
+import { Scene } from "./scene/Scene.js";
+import type { ModuleManager } from "../api/modules/moduleManager.js";
 import type { DatabaseManager } from "../db/database.js";
 import { JsonRepository } from "../db/jsonRepository.js";
-import { ActionRunnable } from "./actionRunnable.js";
-import { TimeTriggerRunnable } from "./timeTriggerRunnable.js";
-import { logger } from "../../logger.js";
-import type {
-  Action,
-  DeviceTrigger,
-  Device
-} from "../../model/index.js";
-import { Scene } from "../../model/index.js";
-import { STANDARD_SCENE_DEFINITIONS } from "./sceneDefinitions.js";
-import type { ModuleManager } from "../api/modules/moduleManager.js";
+import { EventManager } from "../events/EventManager.js";
+import { STANDARD_SCENE_DEFINITIONS } from "./scene/sceneDefinitions.js";
+import { Device } from "../../model/devices/Device.js";
+
 
 export class ActionManager {
- 
   private actionRepository: JsonRepository<Action>;
   private sceneRepository: JsonRepository<Scene>;
   private deviceRepository: JsonRepository<Device>;
   private moduleManagers = new Map<string, ModuleManager<any, any, any, any, any, any, any>>();
-
+  private eventManager: EventManager;
   private devices = new Map<string, Device>();
   private actions = new Map<string, Action>();
   private scenes = new Map<string, Scene>();
-  private actionRunnables = new Map<string, ActionRunnable>();
-  private timeTriggerRunnables = new Map<string, TimeTriggerRunnable>();
 
-  constructor(databaseManager: DatabaseManager) {
+  constructor(databaseManager: DatabaseManager, eventManager: EventManager) {
     this.actionRepository = new JsonRepository<Action>(databaseManager, "Action");
     this.sceneRepository = new JsonRepository<Scene>(databaseManager, "Scene");
     this.deviceRepository = new JsonRepository<Device>(databaseManager, "Device");
+    this.eventManager = eventManager;
     this.initialize();
-  }
-
-  registerModuleManager(moduleManager: ModuleManager<any, any, any, any, any, any, any>): void {
-    const moduleId = moduleManager.getModuleId();
-    this.moduleManagers.set(moduleId, moduleManager);
-    this.getDevicesForModule(moduleId).forEach(device => {
-      const convertedDevice = moduleManager.convertDeviceFromDatabase(device);
-      if (convertedDevice) {
-        this.devices.set(device.id, convertedDevice);
-      }
-    });
-    moduleManager.initializeDeviceControllers().catch(err => {
-      logger.error({ err, moduleId }, "Fehler beim Initialisieren der Device-Controller");
-    });
   }
 
   initialize() {
@@ -63,16 +44,19 @@ export class ActionManager {
   }
 
   private loadActionsFromDatabase() {
-    const actions = this.actionRepository.findAll();
-    actions.forEach(action => {
-      if (action?.actionId) this.actions.set(action.actionId, action);
+    const actionDataList = this.actionRepository.findAll();
+    actionDataList.forEach(actionData => {
+      if (actionData?.actionId) {
+        const action = new Action(actionData);
+        this.actions.set(action.actionId, action);
+      }
     });
   }
 
   private loadScenesFromDatabase() {
     const scenes = this.sceneRepository.findAll();
     const existingSceneIds = new Set<string>();
-    
+
     // Lade vorhandene Scenen aus der Datenbank
     scenes.forEach(scene => {
       if (scene?.id) {
@@ -80,7 +64,7 @@ export class ActionManager {
         existingSceneIds.add(scene.id);
       }
     });
-    
+
     // Initialisiere Standard-Scenen, wenn sie nicht existieren
     this.initializeStandardScenes(existingSceneIds);
   }
@@ -98,7 +82,7 @@ export class ActionManager {
           showOnHome: def.showOnHome ?? true,
           isCustom: def.isCustom ?? false
         });
-        
+
         // Speichere im Memory und in der Datenbank
         this.scenes.set(def.id, standardScene);
         this.sceneRepository.save(def.id, standardScene);
@@ -109,97 +93,37 @@ export class ActionManager {
   private setupWorkflows() {
     this.actions.forEach(action => {
       if (!action.actionId) return;
-      const runnable = this.buildActionRunnable(action);
-      this.actionRunnables.set(action.actionId, runnable);
+      action.initActionRunnable(this.devices, this.scenes, this.eventManager);
     });
-    this.addRunnablesForScenes();
-    this.addRunnablesForActions();
   }
+  
 
-  private buildActionRunnable(action: Action) {
-    const runnable = new ActionRunnable(() => {
-      logger.debug({ actionId: action.actionId }, "Action ausgeführt");
-    });
-    return runnable;
-  }
-
-  private addRunnablesForScenes() {
-    this.scenes.forEach(scene => this.addRunnablesForScene(scene));
-  }
-
-  private addRunnablesForScene(scene: Scene) {
-    const actionIds = scene.actionIds ?? [];
-    actionIds.forEach(actionId => {
-      const runnable = this.actionRunnables.get(actionId);
-      if (runnable && typeof (scene as any).addListener === "function") {
-        (scene as any).addListener(actionId, () => runnable.run());
+  registerModuleManager(moduleManager: ModuleManager<any, any, any, any, any, any, any>): void {
+    const moduleId = moduleManager.getModuleId();
+    this.moduleManagers.set(moduleId, moduleManager);
+    this.getDevicesForModule(moduleId).forEach(async device => {
+      const convertedDevice = await moduleManager.convertDeviceFromDatabase(device);
+      if(!convertedDevice) return;
+      await convertedDevice.updateValues();
+      if (convertedDevice) {
+        this.devices.set(device.id, convertedDevice);
       }
     });
-  }
-
-  private addRunnablesForActions() {
-    this.actions.forEach(action => {
-      switch (action.triggerType) {
-        case "manual":
-          this.addRunnablesForActionsManual(action);
-          break;
-        case "device":
-          this.addRunnableForActionsDevice(action);
-          break;
-        case "time":
-          this.addRunnableForActionsTime(action);
-          break;
-      }
+    moduleManager.initializeDeviceControllers().catch(err => {
+      logger.error({ err, moduleId }, "Fehler beim Initialisieren der Device-Controller");
     });
   }
 
-  private addRunnablesForActionsManual(action: Action) {
-    this.scenes.forEach(scene => {
-      const runnable = this.actionRunnables.get(action.actionId ?? "");
-      if (runnable && typeof (scene as any).addListener === "function") {
-        (scene as any).addListener(action.actionId, () => runnable.run());
-      }
-    });
+  shutdown() {
+    this.eventManager.removeAllRunnables();
   }
 
-  private addRunnableForActionsDevice(action: Action) {
-    const triggerNode = (action.workflow as any)?.triggerNode;
-    const deviceTrigger = triggerNode?.triggerConfig?.deviceTrigger;
-    if (!deviceTrigger?.triggerDeviceId) return;
-    const device = this.devices.get(deviceTrigger.triggerDeviceId);
-    if (!device) return;
-    this.addTriggers(deviceTrigger, action, device);
+  getActions(): Action[] {
+    return Array.from(this.actions.values());
   }
 
-  private addTriggers(deviceTrigger: DeviceTrigger, action: Action, device: Device) {
-    const triggerEvent = deviceTrigger.triggerEvent;
-    const triggerValues = deviceTrigger.triggerValues ?? [];
-    if (!triggerEvent) return;
-    const runnable = this.actionRunnables.get(action.actionId ?? "");
-    if (!runnable) return;
-    const addListener = (device as any).addListener;
-    if (typeof addListener !== "function") return;
-
-    if (triggerValues.length === 0) {
-      addListener({ actionId: action.actionId, triggerEvent }, () => runnable.run());
-    } else if (triggerValues.length === 1) {
-      addListener({ actionId: action.actionId, triggerEvent, value1: triggerValues[0] }, () => runnable.run());
-    } else if (triggerValues.length === 2) {
-      addListener(
-        { actionId: action.actionId, triggerEvent, value1: triggerValues[0], value2: triggerValues[1] },
-        () => runnable.run()
-      );
-    }
-  }
-
-  private addRunnableForActionsTime(action: Action) {
-    const timeTrigger = (action.workflow as any)?.triggerNode?.triggerConfig?.timeTrigger;
-    if (!timeTrigger || !action.actionId) return;
-    const runnable = this.actionRunnables.get(action.actionId);
-    if (!runnable) return;
-    const timeRunnable = new TimeTriggerRunnable(timeTrigger, () => runnable.run());
-    this.timeTriggerRunnables.set(action.actionId, timeRunnable);
-    timeRunnable.start();
+  getAction(actionId: string): Action | null {
+    return this.actions.get(actionId) ?? null;
   }
 
   addAction(action: Action): boolean {
@@ -209,8 +133,7 @@ export class ActionManager {
     }
     this.actionRepository.save(action.actionId, action);
     this.actions.set(action.actionId, action);
-    this.actionRunnables.set(action.actionId, this.buildActionRunnable(action));
-    this.setupTriggersForAction(action);
+    action.initActionRunnable(this.devices, this.scenes, this.eventManager);
     return true;
   }
 
@@ -222,77 +145,10 @@ export class ActionManager {
 
   deleteAction(actionId: string): boolean {
     if (!this.actions.has(actionId)) return false;
-    this.removeTriggersForAction(actionId);
     this.actions.delete(actionId);
-    this.actionRunnables.delete(actionId);
+    this.eventManager.removeListenerForAction(actionId);
     this.actionRepository.deleteById(actionId);
     return true;
-  }
-
-  private setupTriggersForAction(action: Action) {
-    switch (action.triggerType) {
-      case "manual":
-        this.addRunnablesForActionsManual(action);
-        break;
-      case "device":
-        this.addRunnableForActionsDevice(action);
-        break;
-      case "time":
-        this.addRunnableForActionsTime(action);
-        break;
-    }
-  }
-
-  private removeTriggersForAction(actionId: string) {
-    const action = this.actions.get(actionId);
-    if (!action) return;
-    switch (action.triggerType) {
-      case "device":
-        this.removeDeviceTriggerForAction(action);
-        break;
-      case "time":
-        this.removeTimeTriggerForAction(actionId);
-        break;
-      case "manual":
-        this.removeSceneTriggerForAction(actionId);
-        break;
-    }
-  }
-
-  private removeDeviceTriggerForAction(action: Action) {
-    const deviceTrigger = (action.workflow as any)?.triggerNode?.triggerConfig?.deviceTrigger;
-    if (!deviceTrigger?.triggerDeviceId || !deviceTrigger.triggerEvent) return;
-    const device = this.devices.get(deviceTrigger.triggerDeviceId);
-    if (device && typeof (device as any).removeListener === "function") {
-      (device as any).removeListener(action.actionId, deviceTrigger.triggerEvent);
-    }
-  }
-
-  private removeTimeTriggerForAction(actionId: string) {
-    const runnable = this.timeTriggerRunnables.get(actionId);
-    runnable?.stop();
-    this.timeTriggerRunnables.delete(actionId);
-  }
-
-  private removeSceneTriggerForAction(actionId: string) {
-    this.scenes.forEach(scene => {
-      if (typeof (scene as any).removeListener === "function") {
-        (scene as any).removeListener(actionId);
-      }
-    });
-  }
-
-  shutdown() {
-    this.timeTriggerRunnables.forEach(runnable => runnable.stop());
-    this.timeTriggerRunnables.clear();
-  }
-
-  getAction(actionId: string): Action | null {
-    return this.actions.get(actionId) ?? null;
-  }
-
-  getActions(): Action[] {
-    return Array.from(this.actions.values());
   }
 
   getScenes(): Scene[] {
@@ -305,14 +161,6 @@ export class ActionManager {
 
   addScene(scene: Scene): boolean {
     if (!scene?.id) return false;
-    this.addRunnablesForScene(scene);
-    this.scenes.set(scene.id, scene);
-    this.sceneRepository.save(scene.id, scene);
-    return true;
-  }
-
-  saveScene(scene: Scene): boolean {
-    if (!scene?.id) return false;
     this.scenes.set(scene.id, scene);
     this.sceneRepository.save(scene.id, scene);
     return true;
@@ -320,10 +168,6 @@ export class ActionManager {
 
   updateScene(scene: Scene): boolean {
     if (!scene?.id) return false;
-    if (typeof (scene as any).removeAllListeners === "function") {
-      (scene as any).removeAllListeners();
-    }
-    this.addRunnablesForScene(scene);
     this.scenes.set(scene.id, scene);
     this.sceneRepository.save(scene.id, scene);
     return true;
@@ -332,9 +176,6 @@ export class ActionManager {
   deleteScene(sceneId: string): boolean {
     const scene = this.scenes.get(sceneId);
     if (!scene) return false;
-    if (typeof (scene as any).removeAllListeners === "function") {
-      (scene as any).removeAllListeners();
-    }
     this.scenes.delete(sceneId);
     this.sceneRepository.deleteById(sceneId);
     return true;
@@ -350,25 +191,26 @@ export class ActionManager {
     });
   }
 
-  removeDeviceForModule(moduleId: string) {
+  removeDevicesForModule(moduleId: string) {
     if (!moduleId) return;
-    this.devices.forEach(device => {
-      if (device.moduleId === moduleId && typeof (device as any).removeAllListeners === "function") {
-        (device as any).removeAllListeners();
-      }
-    });
+    const devicesToRemove = this.getDevicesForModule(moduleId);
+    for(const device of devicesToRemove) {
+      this.removeDevice(device.id);
+    }
   }
 
-  addDevicesForModule(moduleId: string) {
-    if (!moduleId) return;
-    this.actions.forEach(action => {
-      const deviceTrigger = (action.workflow as any)?.triggerNode?.triggerConfig?.deviceTrigger;
-      if (!deviceTrigger?.triggerDeviceId) return;
-      const device = this.devices.get(deviceTrigger.triggerDeviceId);
-      if (device?.moduleId === moduleId) {
-        this.addTriggers(deviceTrigger, action, device);
-      }
-    });
+  removeDevice(deviceId:string) {
+    if (!deviceId) return;
+    this.eventManager.removeListenerForDevice(deviceId);
+    this.devices.delete(deviceId);
+    this.deviceRepository.deleteById(deviceId);
+    // Hier müsste dann im Anschluss auch geprüft werden, ob irgendwelche Aktionen dann neu aufgebaut werden müssen, da das Gerät nun fehlt.
+    // Diese Info sollte als Popup ans Frontend gesendet werden.
+    return true;
+  }
+
+  saveDevices(devices: Device[]): boolean {
+    return devices.every(device => this.saveDevice(device));
   }
 
   saveDevice(device: Device): boolean {
@@ -376,10 +218,6 @@ export class ActionManager {
     this.devices.set(device.id, device);
     this.deviceRepository.save(device.id, device);
     return true;
-  }
-
-  saveDevices(devices: Device[]): boolean {
-    return devices.every(device => this.saveDevice(device));
   }
 
   getDevice(deviceId: string): Device | null {
@@ -394,5 +232,11 @@ export class ActionManager {
     return Array.from(this.getDevices()).filter(device => device.moduleId === moduleId);
   }
 
-}
+  addDevicesForModule(moduleId: string) {
+    const devices = this.getDevicesForModule(moduleId);
+    for(const device of devices) {
+      this.saveDevice(device);
+    }
+  }
 
+}

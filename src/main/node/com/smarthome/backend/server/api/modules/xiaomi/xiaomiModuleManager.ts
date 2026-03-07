@@ -1,5 +1,5 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import { logger } from "../../../../logger.js";
 import { ModuleManager } from "../moduleManager.js";
 import { XiaomiDeviceController } from "./xiaomiDeviceController.js";
@@ -10,7 +10,7 @@ import { XiaomiVacuumCleaner } from "./devices/xiaomiVacuumCleaner.js";
 import { XiaomiEvent } from "./xiaomiEvent.js";
 import { Device } from "../../../../model/index.js";
 import { XiaomiEventStreamManager } from "./xiaomiEventStreamManager.js";
-import { EventStreamManager } from "../../../events/eventStreamManager.js";
+import { EventManager } from "../../../events/EventManager.js";
 import { XIAOMICONFIG } from "./xiaomiModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 
@@ -19,12 +19,12 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
   constructor(
     databaseManager: DatabaseManager,
     actionManager: ActionManager,
-    eventStreamManager: EventStreamManager
+    eventManager: EventManager
   ) {
     super(
       databaseManager, 
       actionManager, 
-      eventStreamManager, 
+      eventManager, 
       new XiaomiDeviceController(), 
       new XiaomiDeviceDiscover(databaseManager));
   }
@@ -63,7 +63,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     const vacuum = await this.getVacuumCleaner(deviceId);
     if (!vacuum) return false;
     try {
-      vacuum.setPower(power, true);
+      await vacuum.setPower(power, true, true);
       this.actionManager.saveDevice(vacuum);
       return true;
     } catch (err) {
@@ -77,7 +77,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     const vacuum = await this.getVacuumCleaner(deviceId);
     if (!vacuum) return false;
     try {
-      vacuum.startCleaning(true);
+      await vacuum.startCleaning(true, true);
       this.actionManager.saveDevice(vacuum);
       return true;
     } catch (err) {
@@ -91,7 +91,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     const vacuum = await this.getVacuumCleaner(deviceId);
     if (!vacuum) return false;
     try {
-      vacuum.stopCleaning(true);
+      await vacuum.stopCleaning(true, true);
       this.actionManager.saveDevice(vacuum);
       return true;
     } catch (err) {
@@ -105,7 +105,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     const vacuum = await this.getVacuumCleaner(deviceId);
     if (!vacuum) return false;
     try {
-      vacuum.pauseCleaning(true);
+      await vacuum.pauseCleaning(true, true);
       this.actionManager.saveDevice(vacuum);
       return true;
     } catch (err) {
@@ -119,7 +119,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     const vacuum = await this.getVacuumCleaner(deviceId);
     if (!vacuum) return false;
     try {
-      vacuum.resumeCleaning(true);
+      await vacuum.resumeCleaning(true, true);
       this.actionManager.saveDevice(vacuum);
       return true;
     } catch (err) {
@@ -133,7 +133,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     const vacuum = await this.getVacuumCleaner(deviceId);
     if (!vacuum) return false;
     try {
-      vacuum.dock(true);
+      await vacuum.dock(true, true);
       this.actionManager.saveDevice(vacuum);
       return true;
     } catch (err) {
@@ -212,7 +212,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     return vacuumCleaners;
   }
 
-  convertDeviceFromDatabase(device: Device): Device | null {
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
     if (device.moduleId !== this.getModuleId()) {
       return null;
     }
@@ -224,6 +224,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
       case DeviceType.VACUUM:
         const xiaomiVacuumCleaner = new XiaomiVacuumCleaner();
         Object.assign(xiaomiVacuumCleaner, device);
+        await xiaomiVacuumCleaner.updateValues();
         convertedDevice = xiaomiVacuumCleaner;
         break;
     }

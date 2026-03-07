@@ -4,12 +4,12 @@ import pinoHttp from "pino-http";
 import { logger } from "./logger.js";
 import { createApiRouter } from "./server/api/router.js";
 import type { DatabaseManager } from "./server/db/database.js";
-import type { EventStreamManager } from "./server/events/eventStreamManager.js";
-import type { ActionManager } from "./server/actions/actionManager.js";
+import type { EventManager } from "./server/events/EventManager.js";
+import type { ActionManager } from "./server/actions/ActionManager.js";
 
 type ServerDeps = {
   databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
+  eventManager: EventManager;
   actionManager: ActionManager;
 };
 

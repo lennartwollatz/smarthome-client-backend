@@ -1,5 +1,6 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/actionManager.js";;
+import type { ActionManager } from "../../../actions/ActionManager.js";
+;
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { SonosSpeaker } from "./devices/sonosSpeaker.js";
 import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";

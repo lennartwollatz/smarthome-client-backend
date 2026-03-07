@@ -1,5 +1,5 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { JsonRepository } from "../../../db/jsonRepository.js";
 import { HueBridgeDiscovered } from "./hueBridgeDiscovered.js";
@@ -99,7 +99,7 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
       const dimming = (eventData as any).dimming as { brightness?: number } | undefined;
       if (dimming && typeof dimming.brightness === "number") {
         const brightness = Math.round(dimming.brightness);
-        if (!device.brightnessEquals(brightness)) {
+        if (device.brightness !== brightness) {
           device.setBrightness(brightness, false);
         }
       }
@@ -119,7 +119,7 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
       const temp = (eventData as any).color_temperature as { mirek?: number } | undefined;
       if (temp && typeof temp.mirek === "number") {
         const mirek = temp.mirek;
-        if (!device.temperatureEquals(mirek)) {
+        if (device.temperature !== mirek) {
           device.setTemperature(mirek, false);
         }
       }
@@ -166,7 +166,7 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
     const tempObj = (eventData as any).temperature as { temperature?: number } | undefined;
     if (tempObj && typeof tempObj.temperature === "number") {
       const temperature = Math.round(tempObj.temperature);
-      if (!device.temperatureEquals(temperature)) {
+      if (device.temperature !== temperature) {
         device.setTemperature(temperature, false);
       }
     }
@@ -182,7 +182,7 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
     const lightObj = (eventData as any).light as { light_level?: number } | undefined;
     if (lightObj && typeof lightObj.light_level === "number") {
       const lightLevel = lightObj.light_level;
-      if (!device.levelEquals(lightLevel)) {
+      if (device.lightLevel !== lightLevel) {
         device.setLightLevel(lightLevel, false);
       }
     }

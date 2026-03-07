@@ -1,20 +1,21 @@
 import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
-import { Device } from "../../../../model/index.js";
+import { Device, TemperatureSchedule } from "../../../../model/index.js";
 import { MatterDeviceDiscover } from "./matterDeviceDiscover.js";
 import { MatterDeviceDiscovered } from "./matterDeviceDiscovered.js";
 import { MatterDeviceController } from "./matterDeviceController.js";
 import { MatterEventStreamManager } from "./matterEventStreamManager.js";
 import { MatterEvent } from "./matterEvent.js";
 import { ModuleManager } from "../moduleManager.js";
-import { EventStreamManager } from "../../../events/eventStreamManager.js";
 import { MATTERCONFIG } from "./matterModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { MatterSwitchEnergy } from "./devices/matterSwitchEnergy.js";
 import { MatterSwitch } from "./devices/matterSwitch.js";
 import { MatterSwitchDimmer } from "./devices/matterSwitchDimmer.js";
 import { matterVendors } from "./matterVendors.js";
+import { MatterThermostat } from "./devices/matterThermostat.js";
+import { ActionManager } from "../../../actions/ActionManager.js";
+import { EventManager } from "../../../events/EventManager.js";
 
 export type PairingPayload = {
   pairingCode: string;
@@ -25,13 +26,13 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   constructor(
     databaseManager: DatabaseManager,
     actionManager: ActionManager,
-    eventStreamManager: EventStreamManager
+    eventManager: EventManager
   ) {
     const controller = new MatterDeviceController(databaseManager);
     super(
       databaseManager,
       actionManager,
-      eventStreamManager,
+      eventManager,
       controller,
       new MatterDeviceDiscover(databaseManager)
     );
@@ -64,7 +65,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     let device = this.deviceDiscover.getStored(deviceId);
 
     if (!device) {
-      return await this.pairDeviceByCode(payload.pairingCode);
+      return await this.pairDeviceByCode(payload);
     }
 
     if( device.isPaired ?? false){
@@ -84,7 +85,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     const matterDevice = await this.toMatterDevice(pairedDevice);
     const saved = this.actionManager.saveDevice(matterDevice);
     if (saved) {
-      this.initialiseEventStreamManager();
+      //this.initialiseEventStreamManager();
     }
     return { success: saved, nodeId: pairedDevice.nodeId ?? undefined, deviceId: matterDevice.id };
   }
@@ -100,30 +101,25 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
    * Speichert anschließend ein Device im ActionManager.
    */
   async pairDeviceByCode(
-    pairingCode: string
-  ): Promise<{ success: boolean; nodeId?: string | number; deviceId?: string }> {
+    payload: PairingPayload
+  ): Promise<{ success: boolean; nodeId?: string | number | bigint | boolean; deviceId?: string; error?:string }> {
     logger.info("Starte Matter Pairing by Code");
-    if (!pairingCode?.trim()) return { success: false };
+    if (!payload) return { success: false };
 
-    const result = await this.deviceController.pairDeviceByCode(pairingCode.trim());
-    if (!result) return { success: false };
-
-    const nodeId = this.extractNodeId(result);
-    const nodeIdStr = typeof nodeId === "number" ? String(nodeId) : String(nodeId ?? "");
-    const deviceId = nodeIdStr ? `matter-${nodeIdStr}` : undefined;
-
-    // Wir haben (noch) keine Vendor/Product Infos -> generisches Device
-    const saved = deviceId
-      ? this.actionManager.saveDevice(new Device({ id: deviceId, name: "Matter Device", moduleId: "matter", isConnected: true }))
-      : false;
-
-    if (saved && deviceId) {
-      // minimalen Discovered-Record anlegen, damit später Metadaten ergänzt werden können
-      this.deviceDiscover.upsertStored(deviceId, { id: deviceId, name: "Matter Device", address: "", port: 5540, isCommissionable: false, isOperational: true, lastSeenAt: Date.now(), nodeId: nodeIdStr || undefined, pairedAt: Date.now() } as any);
-      this.initialiseEventStreamManager();
+    let pairedDevice = await this.deviceController.pairDeviceByCode(payload);
+    if (!pairedDevice) {
+      return { success: false, error: "Pairing fehlgeschlagen (kein Node zurückgegeben)" };
     }
+    // Persistenz im Discovered Device: Pairing-/Verbindungsdaten sollen dort liegen (nicht im Device selbst)
+    this.deviceDiscover.setStored(pairedDevice.id, pairedDevice);
 
-    return { success: saved, nodeId: nodeId ?? undefined, deviceId };
+
+    const matterDevice = await this.toMatterDevice(pairedDevice);
+    const saved = this.actionManager.saveDevice(matterDevice);
+    if (saved) {
+      //this.initialiseEventStreamManager();
+    }
+    return { success: saved, nodeId: pairedDevice.nodeId ?? undefined, deviceId: matterDevice.id };
   }
 
   protected createEventStreamManager(): MatterEventStreamManager {
@@ -131,25 +127,11 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   }
 
 
-  private extractNodeId(value: unknown): string | number | null {
-    if (!value || typeof value !== "object") return null;
-    const record = value as Record<string, unknown>;
-    const nodeId = record.nodeId ?? record.nodeID ?? record.id;
-    if (typeof nodeId === "bigint") {
-      // Matter NodeId ist runtime meist ein bigint → stabil als 16-stellige HEX speichern (wie in mDNS)
-      return nodeId.toString(16).padStart(16, "0").toUpperCase();
-    }
-    if (typeof nodeId === "string" || typeof nodeId === "number") {
-      return nodeId;
-    }
-    return null;
-  }
-
   private async toMatterDevice(device: MatterDeviceDiscovered) {
     const id = device.id;
     const nodeId = device.nodeId ?? "0";
-    const vendorId = typeof device.vendorId === "number" ? device.vendorId : undefined;
-    const productId = typeof device.productId === "number" ? device.productId : undefined;
+    const vendorId = device.vendorId ?? undefined;
+    const productId = device.productId ?? undefined;
     const vendorInfo = vendorId != null && productId != null
       ? matterVendors.getVendorAndProductName(vendorId, productId)
       : null;
@@ -166,17 +148,33 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     if (typeFromVendor === DeviceType.SWITCH_DIMMER) {
       //get Buttons for Node
       const buttons = await this.deviceController.getButtonsForDevice(device);
-      return new MatterSwitchDimmer(derivedName, id, nodeId, buttons);
+      const dimmer = new MatterSwitchDimmer(derivedName, id, nodeId, buttons);
+      dimmer.setMatterController(this.deviceController);
+      await dimmer.updateValues();
+      return dimmer;
     }
     if (typeFromVendor === DeviceType.SWITCH) {
       //get Buttons for Node
       const buttons = await this.deviceController.getButtonsForDevice(device);
-      return new MatterSwitch(derivedName, id, nodeId, buttons);
+      const switchDevice = new MatterSwitch(derivedName, id, nodeId, buttons);
+      switchDevice.setMatterController(this.deviceController);
+      await switchDevice.updateValues();
+      return switchDevice;
     }
     if (typeFromVendor === DeviceType.SWITCH_ENERGY) {
       //get Buttons for Node
       const buttons = await this.deviceController.getButtonsForDevice(device);
-      return new MatterSwitchEnergy(derivedName, id, nodeId, buttons);
+      const switchEnergyDevice = new MatterSwitchEnergy(derivedName, id, nodeId, buttons);
+      switchEnergyDevice.setMatterController(this.deviceController);
+      await switchEnergyDevice.updateValues();
+      return switchEnergyDevice;
+    }
+
+    if (typeFromVendor === DeviceType.THERMOSTAT) {
+      const thermostatDevice = new MatterThermostat(derivedName, id, nodeId);
+      thermostatDevice.setMatterController(this.deviceController);
+      await thermostatDevice.updateValues();
+      return thermostatDevice;
     }
 
     // Fallback: wenn Vendor/Product unbekannt oder kein Mapping existiert, generisches Device speichern
@@ -188,7 +186,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     });
   }
 
-  convertDeviceFromDatabase(device: Device): Device | null {
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
     if (device.moduleId !== this.getModuleId()) {
       return null;
     }
@@ -200,17 +198,33 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       case DeviceType.SWITCH_ENERGY:
         const matterSwitchEnergy = new MatterSwitchEnergy();
         Object.assign(matterSwitchEnergy, device);
+        matterSwitchEnergy.rehydrateButtons();
+        matterSwitchEnergy.setMatterController(this.deviceController);
+        await matterSwitchEnergy.updateValues();
         convertedDevice = matterSwitchEnergy;
         break;
       case DeviceType.SWITCH:
         const matterSwitch = new MatterSwitch();
         Object.assign(matterSwitch, device);
+        matterSwitch.rehydrateButtons();
+        matterSwitch.setMatterController(this.deviceController);
+        await matterSwitch.updateValues();
         convertedDevice = matterSwitch;
         break;
       case DeviceType.SWITCH_DIMMER:
         const matterSwitchDimmer = new MatterSwitchDimmer();
         Object.assign(matterSwitchDimmer, device);
+        matterSwitchDimmer.rehydrateButtons();
+        matterSwitchDimmer.setMatterController(this.deviceController);
+        await matterSwitchDimmer.updateValues();
         convertedDevice = matterSwitchDimmer;
+        break;
+      case DeviceType.THERMOSTAT:
+        const matterThermostat = new MatterThermostat();
+        Object.assign(matterThermostat, device);
+        matterThermostat.setMatterController(this.deviceController);
+        await matterThermostat.updateValues();
+        convertedDevice = matterThermostat;
         break;
     }
 
@@ -232,7 +246,61 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
           await device.updateValues();
           this.actionManager.saveDevice(device);
       }
+      if (device instanceof MatterThermostat) {
+        await device.updateValues();
+        this.actionManager.saveDevice(device);
     }
+    }
+  }
+
+  async toggle(deviceId: string, buttonId:string): Promise<boolean> {
+    const device = this.actionManager.getDevice(deviceId);
+    if (!device) return false;
+    await ( device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer).toggle(buttonId, true, true);
+    this.actionManager.saveDevice(device);
+    return true;
+  }
+
+  async setOn(deviceId: string, buttonId:string): Promise<boolean> {
+    const device = this.actionManager.getDevice(deviceId);
+    if (!device) return false;
+    await ( device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer).on(buttonId, true, true);
+    this.actionManager.saveDevice(device);
+    return true;
+  }
+
+  async setOff(deviceId: string, buttonId:string): Promise<boolean> {
+    const device = this.actionManager.getDevice(deviceId);
+    if (!device) return false;
+    await ( device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer).off(buttonId, true, true);
+    this.actionManager.saveDevice(device);
+    return true;
+  }
+
+  async setIntensity(deviceId: string, buttonId:string, intensity:number): Promise<boolean> {
+    const device = this.actionManager.getDevice(deviceId);
+    if (!device) return false;
+    await (device as MatterSwitchDimmer).setIntensity(buttonId, intensity, true, true);
+    this.actionManager.saveDevice(device);
+    return true;
+  }
+
+  async setTemperatureGoal(deviceId: string, temperatureGoal:number): Promise<boolean> {
+    const bounded = Math.max(15, Math.min(30, temperatureGoal));
+    const constraintTemperature = Math.round(bounded * 100) / 100;
+    const device = this.actionManager.getDevice(deviceId);
+    if (!device) return false;
+    await ( device as MatterThermostat).setTemperatureGoal(constraintTemperature, true, true);
+    this.actionManager.saveDevice(device);
+    return true;
+  }
+
+  async setTemperatureSchedules(deviceId: string, temperatureSchedules:TemperatureSchedule[]): Promise<boolean> {
+    const device = this.actionManager.getDevice(deviceId);
+    if (!device) return false;
+    await ( device as MatterThermostat).setTemperatureSchedules(temperatureSchedules, true, true);
+    this.actionManager.saveDevice(device);
+    return true;
   }
 }
 
@@ -242,6 +310,7 @@ function toDeviceType(deviceTypeKey: string | null): DeviceType | null {
   if (deviceTypeKey === "device.switch") return DeviceType.SWITCH;
   if (deviceTypeKey === "device.switch-dimmer") return DeviceType.SWITCH_DIMMER;
   if (deviceTypeKey === "device.switch-energy") return DeviceType.SWITCH_ENERGY;
+  if (deviceTypeKey === "device.thermostat") return DeviceType.THERMOSTAT;
   return null;
 }
 

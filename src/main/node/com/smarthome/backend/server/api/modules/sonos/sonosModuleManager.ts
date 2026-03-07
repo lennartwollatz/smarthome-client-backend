@@ -1,5 +1,5 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import { logger } from "../../../../logger.js";
 import { ModuleManager } from "../moduleManager.js";
 import { SonosDeviceController } from "./sonosDeviceController.js";
@@ -10,7 +10,7 @@ import { SonosSpeaker } from "./devices/sonosSpeaker.js";
 import { SonosEvent } from "./sonosEvent.js";
 import { Device } from "../../../../model/index.js";
 import { SonosEventStreamManager } from "./sonosEventStreamManager.js";
-import { EventStreamManager } from "../../../events/eventStreamManager.js";
+import { EventManager } from "../../../events/EventManager.js";
 import { SONOSCONFIG } from "./sonosModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 
@@ -19,13 +19,13 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
   constructor(
     databaseManager: DatabaseManager,
     actionManager: ActionManager,
-    eventStreamManager: EventStreamManager
+    eventManager: EventManager
   ) {
     const controller = new SonosDeviceController();
     super(
       databaseManager, 
       actionManager, 
-      eventStreamManager, 
+      eventManager, 
       controller, 
       new SonosDeviceDiscover(databaseManager));
   }
@@ -63,7 +63,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
     const speaker = await this.getSpeaker(deviceId);
     if (!speaker) return false;
     try {
-      speaker.setVolume(volume, true);
+      speaker.setVolume(volume, true, true);
       this.actionManager.saveDevice(speaker);
       return true;
     } catch (err) {
@@ -91,34 +91,14 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
       // Setze den neuen Status im Device (ohne execute, damit wir erst prüfen können)
       switch (playState) {
         case DeviceSpeaker.PlayState.PLAY:
-          speaker.play(false);
+          await speaker.play(true, true);
           break;
         case DeviceSpeaker.PlayState.STOP:
-          speaker.stopp(false);
+          await speaker.stopp(true, true);
           break;
         case DeviceSpeaker.PlayState.PAUSE:
-          speaker.pause(false);
+          await speaker.pause(true, true);
           break;
-      }
-      
-      // Versuche den Status auf dem Gerät zu setzen
-      const sonosSpeaker = speaker instanceof SonosSpeaker ? speaker : null;
-      if (!sonosSpeaker) {
-        return { success: false, error: "Gerät ist kein Sonos-Speaker" };
-      }
-      const success = await this.deviceController.setPlayState(sonosSpeaker, state);
-      
-      if (!success) {
-        // Fehler beim Setzen auf dem Gerät - stelle den alten Status wieder her
-        if (oldPlayState === DeviceSpeaker.PlayState.PLAY) {
-          speaker.play(false);
-        } else if (oldPlayState === DeviceSpeaker.PlayState.PAUSE) {
-          speaker.pause(false);
-        } else {
-          speaker.stopp(false);
-        }
-        this.actionManager.saveDevice(speaker);
-        return { success: false, error: "Fehler beim Setzen des Wiedergabestatus auf dem Gerät" };
       }
       
       // Erfolgreich - speichere das Device mit dem neuen Status
@@ -128,11 +108,11 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
       // Unerwarteter Fehler - stelle den alten Status wieder her
       logger.error({ err, deviceId }, "Unerwarteter Fehler beim Setzen des Wiedergabestatus");
       if (oldPlayState === DeviceSpeaker.PlayState.PLAY) {
-        speaker.play(false);
+        await speaker.play(false, false);
       } else if (oldPlayState === DeviceSpeaker.PlayState.PAUSE) {
-        speaker.pause(false);
+        await speaker.pause(false, false);
       } else {
-        speaker.stopp(false);
+        await speaker.stopp(false, false);
       }
       this.actionManager.saveDevice(speaker);
       return { success: false, error: err instanceof Error ? err.message : "Unerwarteter Fehler" };
@@ -144,7 +124,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
     const speaker = await this.getSpeaker(deviceId);
     if (!speaker) return false;
     try {
-      speaker.setMute(mute, true);
+      speaker.setMute(mute, true, true);
       this.actionManager.saveDevice(speaker);
       return true;
     } catch (err) {
@@ -158,7 +138,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
     const speaker = await this.getSpeaker(deviceId);
     if (!speaker) return false;
     try {
-      speaker.playNext();
+      await speaker.playNext(true);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Abspielen des naechsten Titels");
@@ -171,7 +151,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
     const speaker = await this.getSpeaker(deviceId);
     if (!speaker) return false;
     try {
-      speaker.playPrevious();
+      await speaker.playPrevious(true);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Abspielen des vorherigen Titels");
@@ -242,7 +222,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
     return speakers;
   }
 
-  convertDeviceFromDatabase(device: Device): Device | null {
+  async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
     if (device.moduleId !== this.getModuleId()) {
       return null;
     }
@@ -254,6 +234,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
       case DeviceType.SPEAKER:
         const sonosSpeaker = new SonosSpeaker();
         Object.assign(sonosSpeaker, device);
+        await sonosSpeaker.updateValues();
         convertedDevice = sonosSpeaker;
         break;
     }

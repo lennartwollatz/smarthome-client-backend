@@ -1,19 +1,10 @@
 import { Router } from "express";
 import crypto from "node:crypto";
-import type { DatabaseManager } from "../../../db/database.js";
-import type { EventStreamManager } from "../../../events/eventStreamManager.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
 import { logger } from "../../../../logger.js";
 import { CalendarModuleManager } from "../../modules/calendar/calendarModuleManager.js";
-import { DEFAULT_CALENDAR_DEVICE_ID, DEFAULT_CALENDAR_MODULE_ID, DeviceCalendar, type DeviceCalendarEntry } from "../../../../model/devices/DeviceCalendar.js";
-import { CALENDARCONFIG } from "../../modules/calendar/calendarModule.js";
+import { DEFAULT_CALENDAR_DEVICE_ID, DeviceCalendar, type DeviceCalendarEntry } from "../../../../model/devices/DeviceCalendar.js";
 import { DEFAULT_CREDENTIALS_ID } from "../../modules/appleCalendar/appleCalendarDeviceDiscover.js";
-
-type Deps = {
-  databaseManager: DatabaseManager;
-  eventStreamManager: EventStreamManager;
-  actionManager: ActionManager;
-};
+import type { RouterDeps } from "../../router.js";
 
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message || "Unbekannter Fehler";
@@ -25,10 +16,10 @@ function toErrorMessage(err: unknown): string {
   }
 }
 
-export function createCalendarModuleRouter(deps: Deps): Router{
+export function createCalendarModuleRouter(deps: RouterDeps): Router{
   const router = Router();
 
-  const calendarModule = new CalendarModuleManager(deps.databaseManager, deps.actionManager, deps.eventStreamManager);
+  const calendarModule = new CalendarModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
   deps.actionManager.registerModuleManager(calendarModule);
 
   function getCalendarDevice(): DeviceCalendar | null {
@@ -101,7 +92,6 @@ export function createCalendarModuleRouter(deps: Deps): Router{
       return;
     }
 
-    const moduleId = DEFAULT_CALENDAR_MODULE_ID;
     const device = getCalendarDevice();
     if (!device) {
       res.status(404).json({ error: "Kalender nicht gefunden" });

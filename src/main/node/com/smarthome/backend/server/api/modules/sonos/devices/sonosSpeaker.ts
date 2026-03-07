@@ -75,73 +75,73 @@ export class SonosSpeaker extends DeviceSpeaker {
     this.sonos = sonosController;
   }
 
-  protected executeSetVolume(volume: number) {
+  protected async executeSetVolume(volume: number): Promise<void> {
     if (this.sonos) {
-      this.sonos.setVolume(this, volume).catch(err => {
+      await this.sonos.setVolume(this, volume).catch(err => {
         logger.error({ err, deviceId: this.id, volume }, "Fehler beim Setzen der Lautstärke");
       });
     }
   }
 
-  protected executePlay() {
+  protected async executePlay(): Promise<void> {
     if (this.sonos) {
-      this.sonos.setPlayState(this, "play").catch(err => {
+      await this.sonos.setPlayState(this, "play").catch(err => {
         logger.error({ err, deviceId: this.id }, "Fehler beim Abspielen");
       });
     }
   }
 
-  protected executePause() {
+  protected async executePause(): Promise<void> {
     if (this.sonos) {
-      this.sonos.setPlayState(this, "pause").catch(err => {
+      await this.sonos.setPlayState(this, "pause").catch(err => {
         logger.error({ err, deviceId: this.id }, "Fehler beim Pausieren");
       });
     }
   }
 
-  protected executeStopp() {
+  protected async executeStopp(): Promise<void> {
     if (this.sonos) {
-      this.sonos.setPlayState(this, "stop").catch(err => {
+      await this.sonos.setPlayState(this, "stop").catch(err => {
         logger.error({ err, deviceId: this.id }, "Fehler beim Stoppen");
       });
     }
   }
 
-  protected executeSetMute(muted: boolean) {
+  protected async executeSetMute(muted: boolean): Promise<void> {
     if (this.sonos) {
-      this.sonos.setMute(this, muted).catch(err => {
+      await this.sonos.setMute(this, muted).catch(err => {
         logger.error({ err, deviceId: this.id, muted }, "Fehler beim Setzen der Stummschaltung");
       });
     }
   }
 
-  protected executePlayNext() {
+  protected async executePlayNext(): Promise<void> {
     if (this.sonos) {
-      this.sonos.playNext(this).catch(err => {
+      await this.sonos.playNext(this).catch(err => {
         logger.error({ err, deviceId: this.id }, "Fehler beim Abspielen des nächsten Titels");
       });
     }
   }
 
-  protected executePlayPrevious() {
+  protected async executePlayPrevious(): Promise<void> {
     if (this.sonos) {
-      this.sonos.playPrevious(this).catch(err => {
+      await this.sonos.playPrevious(this).catch(err => {
         logger.error({ err, deviceId: this.id }, "Fehler beim Abspielen des vorherigen Titels");
       });
     }
   }
 
-  protected executePlaySound(sound: string) {
+  protected async executePlaySound(sound: string): Promise<void> {
     if (this.sonos) {
-      this.sonos.playSong(this, sound).catch(err => {
+      await this.sonos.playSong(this, sound).catch(err => {
         logger.error({ err, deviceId: this.id, sound }, "Fehler beim Abspielen eines Sounds");
       });
     }
   }
 
-  protected executePlayTextAsSound(text: string) {
+  protected async executePlayTextAsSound(text: string): Promise<void> {
     if (this.sonos) {
-      this.sonos.playTextAsSpeech(this, text).catch(err => {
+      await this.sonos.playTextAsSpeech(this, text).catch(err => {
         logger.error({ err, deviceId: this.id, text }, "Fehler beim Abspielen von Text als Sprache");
       });
     }

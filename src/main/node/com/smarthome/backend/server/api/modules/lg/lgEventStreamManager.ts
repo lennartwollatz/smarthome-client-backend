@@ -1,5 +1,5 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/actionManager.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { LGDeviceController } from "./lgDeviceController.js";
 import { LGEvent } from "./lgEvent.js";
@@ -54,14 +54,14 @@ export class LGEventStreamManager extends ModuleEventStreamManager<LGDeviceContr
     if (eventName === "app.current") {
       const appId = this.extractAppId(payload);
       if (appId) {
-        device.startApp(appId, false);
+        await device.startApp(appId, false, false);
         this.actionManager.saveDevice(device);
       }
     }
     if (eventName === "channel.current") {
       const channelId = this.extractChannelId(payload);
       if (channelId) {
-        device.setChannel(channelId, false);
+        await device.setChannel(channelId, false, false);
         this.actionManager.saveDevice(device);
       }
     }
