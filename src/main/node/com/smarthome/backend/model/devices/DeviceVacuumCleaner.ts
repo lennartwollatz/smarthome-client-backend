@@ -38,6 +38,9 @@ import { EventFanSpeedLess } from "../../server/events/events/EventFanSpeedLess.
 import { EventFanSpeedGreater } from "../../server/events/events/EventFanSpeedGreater.js";
 import { EventError } from "../../server/events/events/EventError.js";
 
+/** [x1, y1, x2, y2, repeat_count] – Koordinaten in mm, repeat_count = Durchläufe */
+export type ZoneDefinition = [number, number, number, number, number];
+
 export abstract class DeviceVacuumCleaner extends Device {
   power?: boolean;
   cleaningState?: boolean;
@@ -146,22 +149,6 @@ export abstract class DeviceVacuumCleaner extends Device {
   }
   protected abstract executeDock(): Promise<void>;
 
-  async setMode(mode: string, execute: boolean, trigger: boolean = true) {
-    const deviceBefore = { ...this };
-    this.mode = mode;
-    this.power = true;
-    if (execute) {
-      await this.executeSetMode(mode);
-    }
-    if (trigger) {
-      await this.eventManager?.triggerEvent(new EventVacuumModeChanged(this.id, deviceBefore, mode));
-      await this.eventManager?.triggerEvent(new EventVacuumModeEquals(this.id, deviceBefore, mode));
-      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
-    }
-  }
-
-  protected abstract executeSetMode(mode: string): Promise<void>;
-
   async cleanRoom(roomId: string, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.power = true;
@@ -175,18 +162,19 @@ export abstract class DeviceVacuumCleaner extends Device {
 
   protected abstract executeCleanRoom(roomId: string): Promise<void>;
 
-  async cleanZone(zoneId: string, execute: boolean, trigger: boolean = true) {
+  /** Zone: [x1, y1, x2, y2, repeat_count] in mm */
+  async cleanZones(zones: ZoneDefinition[], execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.power = true;
     if (execute) {
-      await this.executeCleanZone(zoneId);
+      await this.executeCleanZones(zones);
     }
     if (trigger) {
       await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeCleanZone(zoneId: string): Promise<void>;
+  protected abstract executeCleanZones(zones: ZoneDefinition[]): Promise<void>;
 
   async changeFanSpeed(fanSpeed: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
@@ -205,21 +193,24 @@ export abstract class DeviceVacuumCleaner extends Device {
 
   protected abstract executeChangeFanSpeed(fanSpeed: number): Promise<void>;
 
-  async changeMode(mode: string, execute: boolean, trigger: boolean = true) {
+  async changeWaterBoxLevel(waterBoxLevel: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
-    this.mode = mode;
-    this.power = true;
+    this.waterBoxLevel = waterBoxLevel;
     if (execute) {
-      await this.executeChangeMode(mode);
+      await this.executeChangeWaterBoxLevel(waterBoxLevel);
     }
     if (trigger) {
-      await this.eventManager?.triggerEvent(new EventVacuumModeChanged(this.id, deviceBefore, mode));
-      await this.eventManager?.triggerEvent(new EventVacuumModeEquals(this.id, deviceBefore, mode));
+      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelChanged(this.id, deviceBefore, waterBoxLevel));
+      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelEquals(this.id, deviceBefore, waterBoxLevel));
+      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelLess(this.id, deviceBefore, waterBoxLevel));
+      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelGreater(this.id, deviceBefore, waterBoxLevel));
+      if (waterBoxLevel >= 100) await this.eventManager?.triggerEvent(new EventVacuumWaterBoxFull(this.id, deviceBefore));
+      if (waterBoxLevel <= 0) await this.eventManager?.triggerEvent(new EventVacuumWaterBoxEmpty(this.id, deviceBefore));
       await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
 
-  protected abstract executeChangeMode(mode: string): Promise<void> ;
+  protected abstract executeChangeWaterBoxLevel(waterBoxLevel: number): Promise<void>;
 
   async setBattery(battery: number, trigger: boolean = true) {
     const deviceBefore = { ...this };

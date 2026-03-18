@@ -43,7 +43,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
   async discoverDevices(): Promise<Device[]> {
     logger.info("Suche nach Xiaomi-Geraeten");
     try {
-      const discoveredDevices = await this.deviceDiscover.discover(5, []);
+      const discoveredDevices = await this.deviceDiscover.discover(20, []);
       logger.info({ count: discoveredDevices.length }, "Geraete gefunden");
 
       // TODO: eventuell sollte die Konvertierung zu einem XiaomiVacuumCleaner und Speicherung
@@ -55,6 +55,67 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     } catch (err) {
       logger.error({ err }, "Fehler bei der Geraeteerkennung");
       return [];
+    }
+  }
+
+  /**
+   * Fügt ein Xiaomi-Gerät manuell per IP-Adresse und Token hinzu.
+   * Das Gerät wird nur hinzugefügt, wenn die Verbindung über miio erfolgreich ist
+   * und es sich um ein Staubsauger-Gerät handelt.
+   */
+  async addDeviceByIpAndToken(ipAddress: string, token: string): Promise<DeviceVacuumCleaner> {
+    const trimmedIp = ipAddress?.trim();
+    const trimmedToken = token?.trim();
+    if (!trimmedIp || !trimmedToken) {
+      throw new Error("IP-Adresse und Token sind erforderlich");
+    }
+
+    logger.info({ address: trimmedIp }, "Versuche Xiaomi-Geraet per IP und Token hinzuzufuegen");
+
+    const miioDevice = await this.deviceController.connect(trimmedIp, trimmedToken);
+    if (!miioDevice) {
+      throw new Error("Verbindung zum Geraet fehlgeschlagen. Bitte pruefe IP-Adresse und Token.");
+    }
+
+    const model = (miioDevice as any).miioModel ?? (miioDevice as any).model ?? "";
+    const rawId = (miioDevice as any).id ?? "";
+    const did = typeof rawId === "string" ? rawId.replace(/^miio:/, "") : String(rawId);
+
+    const isVacuum =
+      typeof model === "string" &&
+      (model.toLowerCase().includes("vacuum") || model.toLowerCase().includes("roborock"));
+
+    if (!isVacuum) {
+      await this.deviceController.destroy(trimmedIp, trimmedToken);
+      throw new Error(
+        `Das Geraet (Modell: ${model || "unbekannt"}) ist kein unterstuetztes Staubsauger-Modell. ` +
+          "Nur Xiaomi/Roborock Staubsauger werden unterstuetzt."
+      );
+    }
+
+    try {
+      const deviceId = did ? `xiaomi-${did}` : `xiaomi-${trimmedIp.replace(/\./g, "-")}`;
+      const deviceName = model || XIAOMICONFIG.defaultDeviceName;
+
+      const vacuum = new XiaomiVacuumCleaner(
+        deviceName,
+        deviceId,
+        trimmedIp,
+        trimmedToken,
+        model,
+        did || undefined,
+        this.deviceController
+      );
+      await vacuum.updateValues();
+      this.actionManager.saveDevice(vacuum);
+      this.initialiseEventStreamManager();
+
+      logger.info({ deviceId, address: trimmedIp }, "Xiaomi Staubsauger erfolgreich hinzugefuegt");
+      return vacuum;
+    } catch (err) {
+      await this.deviceController.destroy(trimmedIp, trimmedToken);
+      logger.error({ err, address: trimmedIp }, "Fehler beim Hinzufuegen des Xiaomi-Geraets");
+      throw err;
     }
   }
 
@@ -140,6 +201,22 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
       logger.error({ err, deviceId }, "Fehler beim Senden zur Docking-Station");
       return false;
     }
+  }
+
+  async getRoomMapping(deviceId: string): Promise<{ roomId: number; segmentId: string; attribute: number }[]> {
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum || !(vacuum instanceof XiaomiVacuumCleaner)) return [];
+    const entries = await (vacuum as XiaomiVacuumCleaner).getRoomMapping();
+    return entries.map(([roomId, segmentId, attribute]) => ({ roomId, segmentId, attribute }));
+  }
+
+  async navigateToRoom(deviceId: string, roomId: number): Promise<{ status: string }> {
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum || !(vacuum instanceof XiaomiVacuumCleaner)) {
+      return { status: "Geraet nicht gefunden" };
+    }
+    const result = await (vacuum as XiaomiVacuumCleaner).navigateToRoom(roomId);
+    return { status: result };
   }
 
   private async getVacuumCleaner(deviceId: string): Promise<DeviceVacuumCleaner | null> {
@@ -235,11 +312,9 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
   async initializeDeviceControllers(): Promise<void> {
     const devices = this.actionManager.getDevicesForModule(this.getModuleId());
     for (const device of devices) {
-      if (device instanceof XiaomiVacuumCleaner) {
-        device.setXiaomiController(this.deviceController);
-        await device.updateValues();
+        (device as XiaomiVacuumCleaner).setXiaomiController(this.deviceController);
+        await (device as XiaomiVacuumCleaner).updateValues();
         this.actionManager.saveDevice(device);
-      }
     }
   }
 }

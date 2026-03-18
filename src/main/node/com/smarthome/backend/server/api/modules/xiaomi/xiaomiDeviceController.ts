@@ -17,7 +17,7 @@ export class XiaomiDeviceController extends ModuleDeviceControllerEvent<XiaomiEv
   private deviceCache = new Map<string, MiioDevice>();
   private eventHandlers = new Map<string, Map<string, (...args: any[]) => void>>();
 
-  async connect(address: string, token?: string): Promise<MiioDevice | null> {
+  async connect(address: string, token?: string): Promise<any | null> {
     const cacheKey = `${address}:${token ?? ""}`;
     if (this.deviceCache.has(cacheKey)) {
       return this.deviceCache.get(cacheKey)!;
@@ -25,7 +25,8 @@ export class XiaomiDeviceController extends ModuleDeviceControllerEvent<XiaomiEv
     try {
       const device = await miio.device({ address, token });
       this.deviceCache.set(cacheKey, device as MiioDevice);
-      return device as MiioDevice;
+      console.log(JSON.stringify(device));
+      return device;
     } catch (err) {
       logger.warn({ err, address }, "Miio Verbindung fehlgeschlagen");
       return null;
@@ -45,20 +46,45 @@ export class XiaomiDeviceController extends ModuleDeviceControllerEvent<XiaomiEv
     this.deviceCache.delete(cacheKey);
   }
 
-  async callMethod(address: string, token: string | undefined, method: string, ...args: unknown[]): Promise<boolean> {
+  async callMethod(address: string, token: string | undefined, method: string, args: unknown[] = [], options: { retries?: number } = {}): Promise<boolean> {
     const device = await this.connect(address, token);
     if (!device) return false;
-    const fn = device[method] as ((...innerArgs: unknown[]) => Promise<unknown>) | undefined;
-    if (typeof fn !== "function") {
-      logger.warn({ method, address }, "Miio Methode nicht verfügbar");
+    const callFn = (device as any).call;
+    if (typeof callFn !== "function") {
+      logger.warn({ method, address }, "Miio call nicht verfügbar");
       return false;
     }
     try {
-      await fn.apply(device, args);
-      return true;
+      return await callFn.call(device, method, args, options);
     } catch (err) {
-      logger.warn({ err, method, address }, "Miio Methode fehlgeschlagen");
+      logger.warn({ err, method, address }, "Miio call fehlgeschlagen");
       return false;
+    }
+  }
+
+  /**
+   * Ruft eine MiIO-Methode auf und gibt das Ergebnis zurück (z.B. für get_status).
+   * @param options z.B. { retries: 10 } für längere Timeouts bei beschäftigten Geräten
+   */
+  async callMiioAndGetResult(
+    address: string,
+    token: string | undefined,
+    method: string,
+    args: unknown[] = [],
+    options: { retries?: number } = {}
+  ): Promise<unknown> {
+    const device = await this.connect(address, token);
+    if (!device) return null;
+    const callFn = (device as any).call;
+    if (typeof callFn !== "function") {
+      logger.warn({ method, address }, "Miio call nicht verfügbar");
+      return null;
+    }
+    try {
+      return await callFn.call(device, method, args, options);
+    } catch (err) {
+      logger.warn({ err, method, address }, "Miio call fehlgeschlagen");
+      return null;
     }
   }
 

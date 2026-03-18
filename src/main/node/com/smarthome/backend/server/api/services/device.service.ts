@@ -42,6 +42,9 @@ export function createDeviceRouter(deps: RouterDeps) {
     if ("longitude" in patch && typeof patch.longitude === "number" && Number.isFinite(patch.longitude)) {
       next.longitude = patch.longitude;
     }
+    if ("roomMapping" in patch && typeof patch.roomMapping === "object" && patch.roomMapping !== null) {
+      next.roomMapping = patch.roomMapping as Record<string, string>;
+    }
     if ("buttons" in patch && typeof patch.buttons === "object" && patch.buttons !== null) {
       const incomingButtons = patch.buttons as Record<string, unknown>;
       const existingButtons = next.buttons as Record<string, Record<string, unknown>> | undefined;
