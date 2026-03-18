@@ -14,25 +14,21 @@ export class LGEventStreamManager extends ModuleEventStreamManager<LGDeviceContr
   }
 
   protected async startEventStream(callback: (event: LGEvent) => void): Promise<void> {
-    let devices = this.actionManager.getDevicesForModule(LGMODULE.id);
+    const devices = this.actionManager.getDevicesForModule(LGMODULE.id);
     for (const device of devices) {
       if (device.type === DeviceType.TV) {
-        if (device instanceof LGTV) {
-          await this.controller.startEventStream(device as DeviceTV, callback);
-        }
+        const tv = device as DeviceTV;
+        setImmediate(() => this.controller.startEventStream(tv, callback));
       }
     }
   }
 
   protected async stopEventStream(): Promise<void> {
-    let devices = this.actionManager.getDevicesForModule(LGMODULE.id);
-    for (const device of devices) {
-      if (device.type === DeviceType.TV) {
-        if (device instanceof LGTV) {
-          await this.controller.stopEventStream(device as DeviceTV);
-        }
-      }
-    }
+    const devices = this.actionManager.getDevicesForModule(LGMODULE.id);
+    const stops = devices
+      .filter(d => d.type === DeviceType.TV)
+      .map(d => this.controller.stopEventStream(d as DeviceTV));
+    await Promise.all(stops);
   }
 
   protected async handleEvent(event: LGEvent): Promise<void> {

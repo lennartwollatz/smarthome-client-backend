@@ -10,7 +10,11 @@ import { EventCarLockedStateChanged } from "../../server/events/events/EventCarL
 import { EventCarFuelLevelChanged } from "../../server/events/events/EventCarFuelLevelChanged.js";
 import { EventCarLocationChanged } from "../../server/events/events/EventCarLocationChanged.js";
 import { EventCarWindowsChanged } from "../../server/events/events/EventCarWindowsChanged.js";
+import { EventCarWindowsOpened } from "../../server/events/events/EventCarWindowsOpened.js";
+import { EventCarWindowsClosed } from "../../server/events/events/EventCarWindowsClosed.js";
 import { EventCarDoorsChanged } from "../../server/events/events/EventCarDoorsChanged.js";
+import { EventCarDoorsOpened } from "../../server/events/events/EventCarDoorsOpened.js";
+import { EventCarDoorsClosed } from "../../server/events/events/EventCarDoorsClosed.js";
 
 export interface DeviceCarCoordinates {
   latitude: number;
@@ -134,6 +138,7 @@ export abstract class DeviceCar extends Device {
     if( trigger ){
       this.eventManager?.triggerEvent(new EventCarStatusChanged(this.id, carBefore, {...this}));
       this.eventManager?.triggerEvent(new EventCarWindowsChanged(this.id, carBefore, windows));
+      this.eventManager?.triggerEvent(windows.combinedState ? new EventCarWindowsOpened(this.id, carBefore, windows) : new EventCarWindowsClosed(this.id, carBefore, windows));
     }
   }
 
@@ -143,6 +148,7 @@ export abstract class DeviceCar extends Device {
     if( trigger ){
       this.eventManager?.triggerEvent(new EventCarStatusChanged(this.id, carBefore, {...this}));
       this.eventManager?.triggerEvent(new EventCarDoorsChanged(this.id, carBefore, doors));
+      this.eventManager?.triggerEvent(doors.combinedState ? new EventCarDoorsOpened(this.id, carBefore, doors) : new EventCarDoorsClosed(this.id, carBefore, doors));
     }
   }
 }

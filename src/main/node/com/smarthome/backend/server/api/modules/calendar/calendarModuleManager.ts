@@ -50,9 +50,11 @@ export class CalendarModuleManager extends ModuleManager<
 
   async initializeDeviceControllers(): Promise<void> {
     const devices = this.actionManager.getDevicesForModule(DEFAULT_CALENDAR_MODULE_ID);
-    for( const device of devices ){
-      (device as DeviceCalendar).addModule(this);
-    };
+    for (const device of devices) {
+      if (device instanceof DeviceCalendar) {
+        device.addModule(this);
+      }
+    }
   }
   
   async getCalendarsWithEntries(): Promise<CalendarConfig[]> {

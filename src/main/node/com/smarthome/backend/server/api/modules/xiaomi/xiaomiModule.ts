@@ -12,7 +12,7 @@ export const XIAOMIMODULE: ModuleModel = {
     name: "Xiaomi",
     shortDescription: "Verwaltung und Steuerung von Xiaomi Geräten",
     longDescription: "Integriere und steuere Xiaomi Smart Home Geräte wie Staubsaugerroboter über das MiIO-Protokoll. Verwalte Geräte, Status und Aktionen.",
-    categoryKey: "smartHome",
+    categoryKey: "household",
     icon: "&#129529;",
     price: 0.0,
     version: "1.0.0"

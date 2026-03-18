@@ -41,6 +41,10 @@ export abstract class ModuleManager<EM extends ModuleEventStreamManager<C, E>, C
     this.eventStreamManager.start();
   }
 
+  public restartEventStream(): void {
+    this.initialiseEventStreamManager();
+  }
+
   /**
    * Konvertiert ein Device-Objekt aus der Datenbank in die entsprechende Device-Klasse des Moduls.
    * @param device Das Device-Objekt aus der Datenbank

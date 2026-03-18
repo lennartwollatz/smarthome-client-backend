@@ -10,6 +10,12 @@ export function createDeviceRouter(deps: RouterDeps) {
     res.status(200).json(devices);
   });
 
+  router.delete("/:deviceId", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const success = deps.actionManager.removeDevice(deviceId);
+    res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Device not found" });
+  });
+
   router.put("/:deviceId", (req, res) => {
     const deviceId = req.params.deviceId;
     const existing = deps.actionManager.getDevice(deviceId);
@@ -29,6 +35,12 @@ export function createDeviceRouter(deps: RouterDeps) {
     if ("quickAccess" in patch && typeof patch.quickAccess === "boolean") next.quickAccess = patch.quickAccess;
     if ("temperatureGoal" in patch && typeof patch.temperatureGoal === "number" && Number.isFinite(patch.temperatureGoal)) {
       next.temperatureGoal = Math.max(5, Math.min(35, patch.temperatureGoal));
+    }
+    if ("latitude" in patch && typeof patch.latitude === "number" && Number.isFinite(patch.latitude)) {
+      next.latitude = patch.latitude;
+    }
+    if ("longitude" in patch && typeof patch.longitude === "number" && Number.isFinite(patch.longitude)) {
+      next.longitude = patch.longitude;
     }
     if ("buttons" in patch && typeof patch.buttons === "object" && patch.buttons !== null) {
       const incomingButtons = patch.buttons as Record<string, unknown>;

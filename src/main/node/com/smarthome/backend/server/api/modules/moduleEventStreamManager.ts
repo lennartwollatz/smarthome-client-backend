@@ -21,21 +21,20 @@ export abstract class ModuleEventStreamManager<C extends ModuleEventController, 
   protected abstract startEventStream(callback: (event: E) => void): Promise<void>;
   protected abstract stopEventStream(): Promise<void>;
 
-  public async start():Promise<void> {
+  public async start(): Promise<void> {
     if (this.running) {
-      logger.warn(this.managerId+" EventStream laeuft bereits");
+      logger.warn(this.managerId + " EventStream laeuft bereits");
       return;
     }
-    try {
-      this.running = true;
-      const callback: (event: E) => void = (event: E) => this.handleEvent(event);
-      await this.startEventStream(callback);
-      logger.info(this.managerId+" EventStream gestartet");
-    } catch (err) {
-      this.running = false;
-      logger.error({ err, managerId: this.managerId }, "Fehler beim Starten des EventStreams");
-      // Server soll nicht abstürzen, nur loggen
-    }
+    this.running = true;
+    const callback: (event: E) => void = (event: E) => this.handleEvent(event);
+    // Start asynchronously, damit die Event-Loop nicht blockiert und z. B. HTTP-Anfragen weiter bedient werden
+    void this.startEventStream(callback)
+      .then(() => logger.info(this.managerId + " EventStream gestartet"))
+      .catch(err => {
+        this.running = false;
+        logger.error({ err, managerId: this.managerId }, "Fehler beim Starten des EventStreams");
+      });
   }
 
   public async stop():Promise<void> {

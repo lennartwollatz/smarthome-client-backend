@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { createActionRouter } from "./services/action.service.js";
+import { createConfigRouter } from "./services/config.service.js";
 import { createDeviceRouter } from "./services/device.service.js";
 import { createFloorPlanRouter } from "./services/floorplan.service.js";
 import { createModuleRouter } from "./services/module.service.js";
@@ -20,6 +21,7 @@ export type RouterDeps = {
 export function createApiRouter(deps: RouterDeps) {
   const router = Router();
 
+  router.use("/config", createConfigRouter());
   router.use("/users", createUserRouter(deps));
   router.use("/settings/system", createSystemRouter(deps));
   router.use("/settings", createSettingsRouter(deps));

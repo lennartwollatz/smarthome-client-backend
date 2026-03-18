@@ -18,3 +18,4 @@ export * from './DeviceFanLight.js';
 export * from './DeviceFanLightDimmer.js';
 export * from './DeviceCar.js';
 export * from './DeviceCalendar.js';
+export * from './DeviceWeather.js';

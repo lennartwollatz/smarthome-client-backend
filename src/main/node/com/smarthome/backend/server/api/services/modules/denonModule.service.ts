@@ -153,6 +153,92 @@ export function createDenonModuleRouter(deps: RouterDeps) {
     }
   });
 
+  router.post("/devices/:deviceId/setVolumeStart", async (req, res) => {
+    try {
+      const deviceId = req.params.deviceId;
+      if (!deviceId) {
+        res.status(400).json({ error: "Ungültige Device ID" });
+        return;
+      }
+      const raw = (req.body ?? {}).volumeStart;
+      const volumeStart = typeof raw === "number" ? raw : (typeof raw === "string" ? Number(raw) : NaN);
+      if (Number.isNaN(volumeStart) || volumeStart < 0 || volumeStart > 100) {
+        res.status(400).json({ error: "Parameter volumeStart fehlt oder ungültig (0–100)" });
+        return;
+      }
+      const success = await denonModule.setVolumeStart(deviceId, volumeStart);
+      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
+    } catch (error) {
+      logger.error({ error }, "Fehler beim Setzen von Volume-Start");
+      res.status(500).json({ error: "Fehler beim Setzen von Volume-Start" });
+    }
+  });
+
+  router.post("/devices/:deviceId/setVolumeMax", async (req, res) => {
+    try {
+      const deviceId = req.params.deviceId;
+      if (!deviceId) {
+        res.status(400).json({ error: "Ungültige Device ID" });
+        return;
+      }
+      const raw = (req.body ?? {}).volumeMax;
+      const volumeMax = typeof raw === "number" ? raw : (typeof raw === "string" ? Number(raw) : NaN);
+      if (Number.isNaN(volumeMax) || volumeMax < 0 || volumeMax > 100) {
+        res.status(400).json({ error: "Parameter volumeMax fehlt oder ungültig (0–100)" });
+        return;
+      }
+      const success = await denonModule.setVolumeMax(deviceId, volumeMax);
+      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
+    } catch (error) {
+      logger.error({ error }, "Fehler beim Setzen von Volume-Max");
+      res.status(500).json({ error: "Fehler beim Setzen von Volume-Max" });
+    }
+  });
+
+  router.post("/devices/:deviceId/setSource", async (req, res) => {
+    try {
+      const deviceId = req.params.deviceId;
+      if (!deviceId) {
+        res.status(400).json({ error: "Ungültige Device ID" });
+        return;
+      }
+      const sourceIndex = String((req.body ?? {}).sourceIndex ?? "").trim();
+      const rawSelected = (req.body ?? {}).selected;
+      const selected = rawSelected === true || rawSelected === "true";
+      if (!sourceIndex) {
+        res.status(400).json({ error: "Parameter sourceIndex fehlt" });
+        return;
+      }
+      const success = await denonModule.setSource(deviceId, sourceIndex, selected);
+      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
+    } catch (error) {
+      logger.error({ error }, "Fehler beim Setzen der aktiven Quelle");
+      res.status(500).json({ error: "Fehler beim Setzen der aktiven Quelle" });
+    }
+  });
+
+  router.post("/devices/:deviceId/setZonePower", async (req, res) => {
+    try {
+      const deviceId = req.params.deviceId;
+      if (!deviceId) {
+        res.status(400).json({ error: "Ungültige Device ID" });
+        return;
+      }
+      const zoneName = String((req.body ?? {}).zoneName ?? "").trim();
+      const rawPower = (req.body ?? {}).power;
+      const power = rawPower === true || rawPower === "true";
+      if (!zoneName) {
+        res.status(400).json({ error: "Parameter zoneName fehlt" });
+        return;
+      }
+      const success = await denonModule.setZonePower(deviceId, zoneName, power);
+      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
+    } catch (error) {
+      logger.error({ error }, "Fehler beim Setzen der Zonen-Power");
+      res.status(500).json({ error: "Fehler beim Setzen der Zonen-Power" });
+    }
+  });
+
   return router;
 }
 

@@ -12,6 +12,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
     super();
     if (name) this.name = name;
     if (id) this.id = id;
+    this.isConnected = true;
     this.address = address;
     this.pid = pid;
     this.heos = heos;
@@ -54,6 +55,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       .getVolume(proxy)
       .then(currentVolume => {
         this.volume = currentVolume;
+        this.isConnected = true;
       })
       .catch(err => {
         this.isConnected = false;
@@ -64,6 +66,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       .getMute(proxy)
       .then(isMuted => {
         this.muted = isMuted;
+        this.isConnected = true;
       })
       .catch(err => {
         this.isConnected = false;
@@ -74,6 +77,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       .getPlayState(proxy)
       .then(currentPlayState => {
         this.playState = currentPlayState;
+        this.isConnected = true;
       })
       .catch(err => {
         this.isConnected = false;
@@ -84,6 +88,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       .getDenonZones(this)
       .then(zones => {
         this.zones = zones;
+        this.isConnected = true;
       })
       .catch(err => {
         this.isConnected = false;
@@ -94,6 +99,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       .getDenonSourcesList(this)
       .then(sources => {
         this.sources = sources;
+        this.isConnected = true;
       })
       .catch(err => {
         this.isConnected = false;
@@ -104,6 +110,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       .getDenonSubwoofers(this)
       .then(subwoofers => {
         this.subwoofers = subwoofers;
+        this.isConnected = true;
       })
       .catch(err => {
         this.isConnected = false;
@@ -115,6 +122,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       .then(([volumeStart, volumeMax]) => {
         this.volumeStart = volumeStart;
         this.volumeMax = volumeMax;
+        this.isConnected = true;
       })
       .catch(err => {
         this.isConnected = false;

@@ -59,8 +59,15 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
 
   async connectDevice(deviceId: string): Promise<boolean> {
     logger.info({ deviceId }, "Verbinde mit LG TV");
-    const discoveredDevices = await this.deviceDiscover.discover(5, []);
-    const device = discoveredDevices.find((d: LGDeviceDiscovered) => d.id === deviceId);
+    let device = this.deviceDiscover.getStored(deviceId);
+    if( !device ) {
+      const discoveredDevices = await this.deviceDiscover.discover(5, []);
+      device = discoveredDevices.find((d: LGDeviceDiscovered) => d.id === deviceId) ?? null;
+      if( device ) {
+        this.deviceDiscover.setStored(deviceId, device);
+      }
+    }
+    
     if (!device) {
       logger.warn({ deviceId }, "LG TV nicht gefunden");
       return false;

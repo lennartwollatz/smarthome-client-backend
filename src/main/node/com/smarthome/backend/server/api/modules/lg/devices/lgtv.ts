@@ -25,7 +25,6 @@ export class LGTV extends DeviceTV {
     this.clientKey = clientKey ?? null;
     this.macAddress = macAddress ?? null;
     this.lg = lg;
-    this.isConnected = Boolean(clientKey);
     this.moduleId = LGMODULE.id;
     if (clientKey && lg) {
       this.isConnected = true;
@@ -44,29 +43,30 @@ export class LGTV extends DeviceTV {
       if (this.clientKey) {
         const selectedApp = await this.lg.getSelectedApp(this);
         this.selectedApp = selectedApp ?? undefined;
-        if (selectedApp) {
+        if (!selectedApp) {
           const selectedChannel = await this.lg.getSelectedChannel(this);
           this.selectedChannel = selectedChannel ?? undefined;
-          const vol = await this.lg.getVolume(this);
-          if (typeof vol === "number") {
-            this.volume = vol;
-          }
+        }
+        const vol = await this.lg.getVolume(this);
+        if (typeof vol === "number") {
+          this.volume = vol;
         }
         this.power = Boolean(this.selectedChannel || this.selectedApp);
       }
     } catch {
-      this.isConnected = false;
     }
   }
 
   async updateChannels(): Promise<void> {
     if (!this.lg) return;
     this.channels = (await this.lg.getChannels(this)) as Channel[] | undefined;
+    return;
   }
 
   async updateApps(): Promise<void> {
     if (!this.lg) return;
     this.apps = (await this.lg.getApps(this)) as App[] | undefined;
+    return;
   }
 
   getClientKey() {
@@ -92,7 +92,7 @@ export class LGTV extends DeviceTV {
 
   async register(): Promise<boolean> {
     if (!this.lg) return false;
-    return this.lg.register(this);
+    return await this.lg.register(this);
   }
 
   protected async executeSetPowerOn() {

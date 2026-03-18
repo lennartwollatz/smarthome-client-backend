@@ -30,6 +30,7 @@ export class XiaomiDeviceDiscover extends ModuleDeviceDiscover<XiaomiDeviceDisco
       }, timeoutSeconds * 1000);
 
       discovery.on("available", (device: Record<string, unknown>) => {
+        console.log(JSON.stringify(device));
         try {
           const mapped = this.createDeviceFromMiio(device);
           devices.push(mapped);
@@ -44,6 +45,7 @@ export class XiaomiDeviceDiscover extends ModuleDeviceDiscover<XiaomiDeviceDisco
 
       discovery.on("unavailable", () => {
         // ignore
+        logger.warn("Miio Discovery unverfuegbar");
       });
     });
 

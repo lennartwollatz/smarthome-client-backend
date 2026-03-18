@@ -14,7 +14,7 @@ export const WACLIGHTINGMODULE: ModuleModel = {
     name: "WAC LIGHTING",
     shortDescription: "Modul, mit dem geräte der Firma WAC LIGHTING gesteuert werden können.",
     longDescription: "TODO",
-    categoryKey: "household",
+    categoryKey: "climate",
     icon: "&#127744;",
     price: 0.0,
     version: "1.0.0"

@@ -20,10 +20,14 @@ export function createLGModuleRouter(deps: RouterDeps) {
 
   router.post("/devices/:deviceId/pair", async (req, res) => {
     try {
-      const success = await lgModule.connectDevice(req.params.deviceId);
-      res.status(success ? 200 : 404).json(
-        success ? { success: true } : { error: "Gerät nicht gefunden oder nicht unterstützt" }
-      );
+      const deviceId = req.params.deviceId;
+      const success = await lgModule.connectDevice(deviceId);
+      if (!success) {
+        res.status(404).json({ error: "Gerät nicht gefunden oder nicht unterstützt" });
+        return;
+      }
+      const device = deps.actionManager.getDevice(deviceId);
+      res.status(200).json({ success: true, device: device ?? undefined });
     } catch (error) {
       logger.error({ error }, "Fehler beim Pairing des LG-Geraets");
       res.status(400).json({ error: "Invalid request" });

@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { createServer } from "./server.js";
+import { createServer } from "./createServer.js";
 import { DatabaseManager } from "./server/db/database.js";
 import { logger } from "./logger.js";
 import { EventManager } from "./server/events/EventManager.js";

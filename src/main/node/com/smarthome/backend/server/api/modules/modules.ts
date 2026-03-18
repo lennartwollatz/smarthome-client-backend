@@ -8,6 +8,7 @@ import { WACLIGHTINGMODULE } from "./waclighting/waclightingModule.js";
 import { BMWMODULE } from "./bmw/bmwModule.js";
 import { APPLECALENDARMODULE } from "./appleCalendar/appleCalendarModule.js";
 import { CALENDARMODULE } from "./calendar/calendarModule.js";
+import { WEATHERMODULE } from "./weather/weatherModule.js";
 
 export interface ModuleConfig {
   id: string;
@@ -40,6 +41,7 @@ export interface ModuleModel {
 
 const DEFAULTS: ModuleModel[] = [
   CALENDARMODULE,
+  WEATHERMODULE,
   DENONMODULE,
   MATTERMODULE,
   HUEMODULE,

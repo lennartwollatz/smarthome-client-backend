@@ -1,3 +1,4 @@
+import net from "node:net";
 import type { DatabaseManager } from "../../../../db/database.js";
 import type { ActionManager } from "../../../../actions/ActionManager.js";
 import { JsonRepository } from "../../../../db/jsonRepository.js";
@@ -43,9 +44,16 @@ export class DenonModuleManager extends HeosModuleManager {
     logger.info("Suche nach Denon HEOS-Geraeten");
     try {
       const searchDurationMs = 30;
-      const denonSpeakers = await this.deviceDiscover.discover(searchDurationMs, []);
-      logger.info({ count: denonSpeakers.length }, "Geraete gefunden");
-      const speakers = await this.convertDiscoveredDevicesToDenonSpeakers(denonSpeakers);
+      const discovered = await this.deviceDiscover.discover(searchDurationMs, []);
+      const byUniqueIp = this.mergeDevicesByUniqueIp(discovered);
+      if (byUniqueIp.length !== discovered.length) {
+        logger.info(
+          { total: discovered.length, uniqueByIp: byUniqueIp.length },
+          "Geraete mit gleicher IP zusammengefuehrt"
+        );
+      }
+      logger.info({ count: byUniqueIp.length }, "Geraete gefunden");
+      const speakers = await this.convertDiscoveredDevicesToDenonSpeakers(byUniqueIp);
       this.actionManager.saveDevices(speakers);
       this.initialiseEventStreamManager();
       return speakers;
@@ -53,6 +61,31 @@ export class DenonModuleManager extends HeosModuleManager {
       logger.error({ err }, "Fehler bei der Geraeteerkennung");
       return [];
     }
+  }
+
+  /**
+   * Filtert auf Geräte mit gültiger IP und fasst Geräte mit derselben IP zu einem zusammen.
+   * Es wird nur ein Gerät pro eindeutiger IP-Adresse zurückgegeben.
+   */
+  private mergeDevicesByUniqueIp(devices: HeosDeviceDiscovered[]): HeosDeviceDiscovered[] {
+    const withValidIp = devices.filter(d => {
+      const address = d.getBestConnectionAddress() ?? d.address ?? "";
+      return net.isIP(address) !== 0;
+    });
+    const byIp = new Map<string, HeosDeviceDiscovered>();
+    for (const device of withValidIp) {
+      const ip = device.getBestConnectionAddress() ?? device.address ?? "";
+      const existing = byIp.get(ip);
+      if (!existing) {
+        byIp.set(ip, device);
+        continue;
+      }
+      // Behalte das Gerät mit gesetzter pid/name (von getPlayerInfo)
+      const hasPlayerInfo = (d: HeosDeviceDiscovered) =>
+        (d.pid != null && d.pid > 0) || (d.name?.length ?? 0) > 0;
+      byIp.set(ip, hasPlayerInfo(existing) ? existing : device);
+    }
+    return Array.from(byIp.values());
   }
 
   async setVolume(deviceId: string, volume: number): Promise<boolean> {
@@ -135,6 +168,89 @@ export class DenonModuleManager extends HeosModuleManager {
     }
   }
 
+  private async getReceiver(deviceId: string): Promise<DenonReceiver | null> {
+    const device = this.actionManager.getDevice(deviceId);
+    if (!device) {
+      logger.warn({ deviceId }, "Geraet nicht gefunden");
+      return null;
+    }
+    if (device instanceof DenonReceiver) {
+      return device;
+    }
+    if (device.type === DeviceType.SPEAKER_RECEIVER) {
+      return this.toReceiver(device, deviceId);
+    }
+    logger.warn({ deviceId }, "Geraet ist kein Receiver");
+    return null;
+  }
+
+  private async toReceiver(device: Device, deviceId: string): Promise<DenonReceiver | null> {
+    const receiver = new DenonReceiver();
+    Object.assign(receiver, device);
+    receiver.moduleId = this.getModuleId();
+    if (typeof (receiver as any).setHeosController === "function") {
+      (receiver as any).setHeosController(this.deviceController);
+    }
+    await receiver.updateValues();
+    return receiver;
+  }
+
+  async setVolumeStart(deviceId: string, volumeStart: number): Promise<boolean> {
+    logger.info({ deviceId, volumeStart }, "Setze Volume-Start fuer Receiver");
+    const receiver = await this.getReceiver(deviceId);
+    if (!receiver) return false;
+    try {
+      await (receiver as any).setVolumeStart(volumeStart, true, true);
+      this.actionManager.saveDevice(receiver);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler beim Setzen von Volume-Start");
+      return false;
+    }
+  }
+
+  async setVolumeMax(deviceId: string, volumeMax: number): Promise<boolean> {
+    logger.info({ deviceId, volumeMax }, "Setze Volume-Max fuer Receiver");
+    const receiver = await this.getReceiver(deviceId);
+    if (!receiver) return false;
+    try {
+      await (receiver as any).setVolumeMax(volumeMax, true, true);
+      this.actionManager.saveDevice(receiver);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler beim Setzen von Volume-Max");
+      return false;
+    }
+  }
+
+  async setSource(deviceId: string, sourceIndex: string, selected: boolean): Promise<boolean> {
+    logger.info({ deviceId, sourceIndex, selected }, "Setze aktive Quelle fuer Receiver");
+    const receiver = await this.getReceiver(deviceId);
+    if (!receiver) return false;
+    try {
+      await (receiver as any).setSource(sourceIndex, selected, true, true);
+      this.actionManager.saveDevice(receiver);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler beim Setzen der aktiven Quelle");
+      return false;
+    }
+  }
+
+  async setZonePower(deviceId: string, zoneName: string, power: boolean): Promise<boolean> {
+    logger.info({ deviceId, zoneName, power }, "Setze Zonen-Power fuer Receiver");
+    const receiver = await this.getReceiver(deviceId);
+    if (!receiver) return false;
+    try {
+      await (receiver as any).setZonePower(zoneName, power, true, true);
+      this.actionManager.saveDevice(receiver);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler beim Setzen der Zonen-Power");
+      return false;
+    }
+  }
+
   private async getSpeaker(deviceId: string): Promise<DeviceSpeaker | null> {
     const device = this.actionManager.getDevice(deviceId);
     if (!device) {
@@ -165,7 +281,7 @@ export class DenonModuleManager extends HeosModuleManager {
     return speaker;
   }
 
-  private async convertDiscoveredDeviceToDenonSpeaker(device: HeosDeviceDiscovered): Promise<DenonSpeaker> {
+  private async convertDiscoveredDeviceToDenonSpeaker(device: HeosDeviceDiscovered): Promise<DenonSpeaker | DenonReceiver> {
     const deviceId = device.id;
     const speakerName = device.name ?? DENONCONFIG.defaultDeviceName;
     let address = device.address;
@@ -175,15 +291,19 @@ export class DenonModuleManager extends HeosModuleManager {
         { deviceId },
         "Keine gueltige Adresse fuer Gerät gefunden, verwende Fallback"
       );
-      address = device.address ?? "unknown";
     }
-    let speaker = new DenonSpeaker(speakerName, deviceId, address, pid, this.deviceController);
+    let speaker;
+    if( ! await this.deviceController.isDenonReceiver(address) ) {
+      speaker = new DenonSpeaker(speakerName, deviceId, address, pid, this.deviceController);
+    } else {
+      speaker = new DenonReceiver(speakerName, deviceId, address, pid, this.deviceController);
+    }
     await speaker.updateValues();
     return speaker;
   }
 
-  private async convertDiscoveredDevicesToDenonSpeakers(devices: HeosDeviceDiscovered[]): Promise<DenonSpeaker[]> {
-    const speakers: DenonSpeaker[] = [];
+  private async convertDiscoveredDevicesToDenonSpeakers(devices: HeosDeviceDiscovered[]): Promise<(DenonSpeaker | DenonReceiver)[]> {
+    const speakers: (DenonSpeaker | DenonReceiver)[] = [];
     for (const device of devices) {
       try {
         const speaker = await this.convertDiscoveredDeviceToDenonSpeaker(device);

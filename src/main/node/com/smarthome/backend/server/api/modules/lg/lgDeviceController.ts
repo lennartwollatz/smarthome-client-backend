@@ -134,6 +134,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return null;
     }
     const response = await this.callController(tv.address, tv.clientKey, "tv.channel_list", null);
+    console.log("getChannels() response: "+JSON.stringify(response));
     return this.parseChannels(response);
   }
 

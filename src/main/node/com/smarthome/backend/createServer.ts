@@ -31,4 +31,3 @@ export function createServer(deps: ServerDeps) {
 
  return app;
 }
-

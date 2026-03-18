@@ -3,7 +3,7 @@ import { Device } from "../../../../model/devices/Device.js";
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
 import { MatterDevice } from "./devices/matterDevice.js";
 
-import { Environment, Logger, StorageService } from "@matter/main";
+import { Environment, Logger, StorageService, serialize } from "@matter/main";
 import { OnOffClient } from "@matter/main/behaviors/on-off";
 import { GeneralCommissioning } from "@matter/main/clusters";
 import { ManualPairingCodeCodec, NodeId } from "@matter/main/types";
@@ -421,7 +421,19 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   public async startEventStream(device: Device, callback: (event: MatterEvent) => void): Promise<void> {
-    
+    const matterDevice = device as unknown as MatterDevice;
+    const node = await this.getNode(NodeId(matterDevice.getNodeId()));
+    if( !node) return;
+    node.events.eventTriggered.on(({ path: { nodeId, clusterId, endpointId, eventName }, events }) => {
+      console.log(
+          `eventTriggeredCallback ${nodeId}: Event ${eventName} triggered with ${serialize(
+              events,
+          )}`
+      );
+      for(const event of events) {
+        callback({ nodeId: String(nodeId), deviceId: device.id, event: eventName, name: eventName, payload: event })
+      }
+    });
   }
 
   public async stopEventStream(device: Device): Promise<void> {

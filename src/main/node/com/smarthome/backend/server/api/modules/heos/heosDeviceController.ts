@@ -231,6 +231,15 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     return this.sendDenonGet(_receiver.address, "/ajax/globals/get_config?type=7");
   }
 
+  async isDenonReceiver(address: string) {
+    try{
+      const xml = await this.sendDenonGet(address, "/ajax/globals/get_config?type=7");
+      return xml && xml.includes("SourceList");
+    } catch (err) {
+      return false;
+    }
+  }
+
   async getDenonSourcesList(_receiver: DenonReceiver) {
     const receiver = _receiver;
     let selectedIndex: string | null = null;

@@ -50,4 +50,7 @@ export enum DeviceType {
 
   // Kalender
   CALENDAR = "calendar",
+
+  // Wetter
+  WEATHER = "weather",
 }

@@ -101,17 +101,24 @@ export class ActionManager {
   registerModuleManager(moduleManager: ModuleManager<any, any, any, any, any, any, any>): void {
     const moduleId = moduleManager.getModuleId();
     this.moduleManagers.set(moduleId, moduleManager);
-    this.getDevicesForModule(moduleId).forEach(async device => {
+    const convertPromises = this.getDevicesForModule(moduleId).map(async device => {
       const convertedDevice = await moduleManager.convertDeviceFromDatabase(device);
-      if(!convertedDevice) return;
+      if (!convertedDevice) return;
       await convertedDevice.updateValues();
-      if (convertedDevice) {
-        this.devices.set(device.id, convertedDevice);
-      }
+      this.devices.set(device.id, convertedDevice);
     });
-    moduleManager.initializeDeviceControllers().catch(err => {
-      logger.error({ err, moduleId }, "Fehler beim Initialisieren der Device-Controller");
-    });
+    Promise.all(convertPromises)
+      .then(() => moduleManager.initializeDeviceControllers())
+      .catch(err => {
+        logger.error({ err, moduleId }, "Fehler beim Initialisieren der Device-Controller");
+      });
+  }
+
+  restartEventStreamForModule(moduleId: string): void {
+    const mgr = this.moduleManagers.get(moduleId);
+    if (mgr && typeof (mgr as { restartEventStream?: () => void }).restartEventStream === "function") {
+      (mgr as { restartEventStream: () => void }).restartEventStream();
+    }
   }
 
   shutdown() {
@@ -204,8 +211,6 @@ export class ActionManager {
     this.eventManager.removeListenerForDevice(deviceId);
     this.devices.delete(deviceId);
     this.deviceRepository.deleteById(deviceId);
-    // Hier müsste dann im Anschluss auch geprüft werden, ob irgendwelche Aktionen dann neu aufgebaut werden müssen, da das Gerät nun fehlt.
-    // Diese Info sollte als Popup ans Frontend gesendet werden.
     return true;
   }
 

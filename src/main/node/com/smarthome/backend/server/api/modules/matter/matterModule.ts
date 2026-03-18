@@ -13,7 +13,7 @@ export const MATTERMODULE: ModuleModel = {
     name: "Matter",
     shortDescription: "Matter-kompatible Geräte verbinden und steuern",
     longDescription: "Verbinde und steuere Geräte über den Matter-Standard. Matter ist ein einheitliches Protokoll für Smart-Home-Geräte verschiedener Hersteller.",
-    categoryKey: "services",
+    categoryKey: "lighting",
     icon: "&#128268;",
     price: 0.0,
     version: "1.0.0"
