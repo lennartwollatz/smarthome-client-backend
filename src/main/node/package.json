@@ -24,6 +24,7 @@
     "node-hue-api": "^4.0.8",
     "pino": "^9.0.0",
     "pino-http": "^9.0.0",
+    "socket.io": "^4.8.3",
     "sonos": "^1.14.2",
     "undici": "^6.21.0"
   },

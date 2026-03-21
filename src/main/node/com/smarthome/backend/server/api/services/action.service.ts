@@ -61,6 +61,33 @@ export function createActionRouter(deps: RouterDeps) {
     }
   });
 
+  router.post("/:actionId/activate", (req, res) => {
+    const action = deps.actionManager.activateAction(req.params.actionId);
+    if (action) {
+      res.status(200).json(action);
+    } else {
+      res.status(404).json({ error: "Action not found" });
+    }
+  });
+
+  router.post("/:actionId/deactivate", (req, res) => {
+    const action = deps.actionManager.deactivateAction(req.params.actionId);
+    if (action) {
+      res.status(200).json(action);
+    } else {
+      res.status(404).json({ error: "Action not found" });
+    }
+  });
+
+  router.post("/:actionId/reject", (req, res) => {
+    const rejected = deps.actionManager.rejectAiSuggestion(req.params.actionId);
+    if (rejected) {
+      res.status(200).json(true);
+    } else {
+      res.status(400).json({ error: "Action not found or not an AI suggestion" });
+    }
+  });
+
   return router;
 }
 

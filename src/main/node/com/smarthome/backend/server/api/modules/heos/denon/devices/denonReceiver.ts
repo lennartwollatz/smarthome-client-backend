@@ -51,83 +51,21 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
     const proxy = this.toHeosSpeaker();
     logger.debug({ id: this.id, heosSet: Boolean(this.heos) }, "Initialisiere Werte");
 
-    await this.heos
-      .getVolume(proxy)
-      .then(currentVolume => {
-        this.volume = currentVolume;
-        this.isConnected = true;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Lautstaerke");
-      });
-
-    await this.heos
-      .getMute(proxy)
-      .then(isMuted => {
-        this.muted = isMuted;
-        this.isConnected = true;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren des Muted Attributs");
-      });
-
-    await this.heos
-      .getPlayState(proxy)
-      .then(currentPlayState => {
-        this.playState = currentPlayState;
-        this.isConnected = true;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren des PlayState");
-      });
-
-    await this.heos
-      .getDenonZones(this)
-      .then(zones => {
-        this.zones = zones;
-        this.isConnected = true;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Zonen");
-      });
-
-    await this.heos
-      .getDenonSourcesList(this)
-      .then(sources => {
-        this.sources = sources;
-        this.isConnected = true;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Quellen");
-      });
-
-    await this.heos
-      .getDenonSubwoofers(this)
-      .then(subwoofers => {
-        this.subwoofers = subwoofers;
-        this.isConnected = true;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Subwoofer");
-      });
-
-    await this.heos
-      .getDenonVolumeConfig(this)
-      .then(([volumeStart, volumeMax]) => {
-        this.volumeStart = volumeStart;
-        this.volumeMax = volumeMax;
-        this.isConnected = true;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Lautstaerke-Konfiguration");
-      });
+    try {
+      this.volume = await this.heos.getVolume(proxy);
+      this.muted = await this.heos.getMute(proxy);
+      this.playState = await this.heos.getPlayState(proxy);
+      this.zones = await this.heos.getDenonZones(this);
+      this.sources = await this.heos.getDenonSourcesList(this);
+      this.subwoofers = await this.heos.getDenonSubwoofers(this);
+      const [volumeStart, volumeMax] = await this.heos.getDenonVolumeConfig(this);
+      this.volumeStart = volumeStart;
+      this.volumeMax = volumeMax;
+      this.isConnected = true;
+    } catch (err) {
+      this.isConnected = false;
+      logger.error({ err, id: this.id }, "Fehler beim Aktualisieren der Werte - Geraet nicht erreichbar");
+    }
   }
 
   protected async executeSetVolume(volume: number): Promise<void> {

@@ -174,8 +174,45 @@ function parseIcsDate(value: string, params: Record<string, string>): { date: Da
   const mm = Number(m[5]);
   const ss = Number(m[6]);
   const isUtc = Boolean(m[7]);
-  const date = isUtc ? new Date(Date.UTC(y, mo, d, hh, mm, ss)) : new Date(y, mo, d, hh, mm, ss);
+
+  let date: Date;
+  if (isUtc) {
+    date = new Date(Date.UTC(y, mo, d, hh, mm, ss));
+  } else {
+    const tzid = String(params?.TZID ?? "").trim();
+    date = tzid ? dateFromTimezone(y, mo, d, hh, mm, ss, tzid) : new Date(y, mo, d, hh, mm, ss);
+  }
   return { date, allDay: false };
+}
+
+function dateFromTimezone(y: number, mo: number, d: number, hh: number, mm: number, ss: number, timezone: string): Date {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      hour12: false
+    });
+
+    const utcGuess = new Date(Date.UTC(y, mo, d, hh, mm, ss));
+    const parts = formatter.formatToParts(utcGuess);
+    const get = (type: string) => {
+      let val = Number(parts.find(p => p.type === type)?.value ?? 0);
+      if (type === "hour" && val === 24) val = 0;
+      return val;
+    };
+
+    const inTzMs = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+    const wantedMs = Date.UTC(y, mo, d, hh, mm, ss);
+
+    return new Date(utcGuess.getTime() - (inTzMs - wantedMs));
+  } catch {
+    return new Date(y, mo, d, hh, mm, ss);
+  }
 }
 
 function parseIcsTimestamp(value?: string): Date | undefined {

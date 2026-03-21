@@ -7,6 +7,7 @@ import { DEFAULT_CREDENTIALS_ID, type AppleCalendarDeviceDiscover } from "./appl
 import * as dav from "dav";
 import crypto from "node:crypto";
 import { APPLECALENDARMODULE } from "./appleCalendarModule.js";
+import { logger } from "../../../../logger.js";
 
 export type AppleCalendarCalendar = {
   id: string;
@@ -54,8 +55,12 @@ export class AppleCalendarDeviceController extends ModuleDeviceController<AppleC
   async getCalendarsWithEntries(): Promise<Array<{ credentialId: string; calendar: AppleCalendarCalendar; entries: AppleCalendarCalendarEntry[] }>> {
     let calendars: Array<{ credentialId: string; calendar: AppleCalendarCalendar; entries: AppleCalendarCalendarEntry[] }> = [];
     for( const credentialId of this.discover.getCredentialInfos().map(c => c.id) ) {
-      const data = await this.getCalendarsWithEntriesForCredentialId(credentialId);
-      calendars.push(...data);
+      try {
+        const data = await this.getCalendarsWithEntriesForCredentialId(credentialId);
+        calendars.push(...data);
+      } catch (err) {
+        logger.warn({ err, credentialId }, "CalDAV Kalender-Abfrage fehlgeschlagen fuer Credential");
+      }
     }
     return calendars;
   } 
@@ -277,6 +282,7 @@ export class AppleCalendarDeviceController extends ModuleDeviceController<AppleC
       show: show,
       color: color,
       moduleId: APPLECALENDARMODULE.id,
+      assignedUserIds: existingCalendar?.assignedUserIds ?? [],
       entries: entries,
       properties: {
         ...calendar,

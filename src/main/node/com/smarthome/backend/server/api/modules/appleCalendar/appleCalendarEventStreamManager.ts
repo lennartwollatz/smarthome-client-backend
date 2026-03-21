@@ -3,6 +3,7 @@ import type { ActionManager } from "../../../actions/ActionManager.js";
 import type { AppleCalendarEvent } from "./appleCalendarEvent.js";
 import { AppleCalendarDeviceController } from "./appleCalendarDeviceController.js";
 import { DEFAULT_CALENDAR_MODULE_ID, DeviceCalendar } from "../../../../model/devices/DeviceCalendar.js";
+import { logger } from "../../../../logger.js";
 
 /**
  * CalDAV hat i.d.R. kein Push/EventStream in diesem Backend.
@@ -10,7 +11,7 @@ import { DEFAULT_CALENDAR_MODULE_ID, DeviceCalendar } from "../../../../model/de
  */
 export class AppleCalendarEventStreamManager extends ModuleEventStreamManager<AppleCalendarDeviceController, AppleCalendarEvent> {
   private pollingInterval: NodeJS.Timeout | null = null;
-  private readonly POLLING_INTERVAL_MS = 30_000;
+  private readonly POLLING_INTERVAL_MS = 300_000;
   private isTickRunning = false;
 
   constructor(managerId: string, moduleId: string, controller: AppleCalendarDeviceController, actionManager: ActionManager) {
@@ -79,6 +80,8 @@ export class AppleCalendarEventStreamManager extends ModuleEventStreamManager<Ap
         await this.controller.stopEventStream(device as DeviceCalendar);
         await this.controller.startEventStream(device as DeviceCalendar, callback);
       }
+    } catch (err) {
+      logger.warn({ err }, "CalDAV Polling-Tick fehlgeschlagen (wird beim naechsten Intervall erneut versucht)");
     } finally {
       this.isTickRunning = false;
     }

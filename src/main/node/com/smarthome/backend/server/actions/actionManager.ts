@@ -7,6 +7,7 @@ import { JsonRepository } from "../db/jsonRepository.js";
 import { EventManager } from "../events/EventManager.js";
 import { STANDARD_SCENE_DEFINITIONS } from "./scene/sceneDefinitions.js";
 import { Device } from "../../model/devices/Device.js";
+import type { LiveUpdateService } from "../live/LiveUpdateService.js";
 
 
 export class ActionManager {
@@ -15,6 +16,7 @@ export class ActionManager {
   private deviceRepository: JsonRepository<Device>;
   private moduleManagers = new Map<string, ModuleManager<any, any, any, any, any, any, any>>();
   private eventManager: EventManager;
+  private liveUpdateService?: LiveUpdateService;
   private devices = new Map<string, Device>();
   private actions = new Map<string, Action>();
   private scenes = new Map<string, Scene>();
@@ -26,12 +28,15 @@ export class ActionManager {
     this.eventManager = eventManager;
     this.initialize();
   }
-
   initialize() {
     this.loadDevicesFromDatabase();
     this.loadActionsFromDatabase();
     this.loadScenesFromDatabase();
     this.setupWorkflows();
+  }
+
+  setLiveUpdateService(service: LiveUpdateService): void {
+    this.liveUpdateService = service;
   }
 
   private loadDevicesFromDatabase() {
@@ -93,6 +98,7 @@ export class ActionManager {
   private setupWorkflows() {
     this.actions.forEach(action => {
       if (!action.actionId) return;
+      if (action.isActive === false) return;
       action.initActionRunnable(this.devices, this.scenes, this.eventManager);
     });
   }
@@ -141,20 +147,54 @@ export class ActionManager {
     this.actionRepository.save(action.actionId, action);
     this.actions.set(action.actionId, action);
     action.initActionRunnable(this.devices, this.scenes, this.eventManager);
+    this.liveUpdateService?.emit("action:updated", action);
     return true;
   }
 
   updateAction(action: Action): boolean {
     if (!action?.actionId) return false;
-    this.deleteAction(action.actionId);
+    this.deleteAction(action.actionId, true);
     return this.addAction(action);
   }
 
-  deleteAction(actionId: string): boolean {
+  deleteAction(actionId: string, silent = false): boolean {
     if (!this.actions.has(actionId)) return false;
     this.actions.delete(actionId);
     this.eventManager.removeListenerForAction(actionId);
     this.actionRepository.deleteById(actionId);
+    if (!silent) this.liveUpdateService?.emit("action:removed", { actionId });
+    return true;
+  }
+
+  activateAction(actionId: string): Action | null {
+    const action = this.actions.get(actionId);
+    if (!action) return null;
+    action.isActive = true;
+    action.updatedAt = new Date().toISOString();
+    this.actionRepository.save(actionId, action);
+    action.initActionRunnable(this.devices, this.scenes, this.eventManager);
+    this.liveUpdateService?.emit("action:updated", action);
+    return action;
+  }
+
+  deactivateAction(actionId: string): Action | null {
+    const action = this.actions.get(actionId);
+    if (!action) return null;
+    action.isActive = false;
+    action.updatedAt = new Date().toISOString();
+    this.eventManager.removeListenerForAction(actionId);
+    this.actionRepository.save(actionId, action);
+    this.liveUpdateService?.emit("action:updated", action);
+    return action;
+  }
+
+  rejectAiSuggestion(actionId: string): boolean {
+    const action = this.actions.get(actionId);
+    if (!action || !action.isAiSuggested) return false;
+    this.eventManager.removeListenerForAction(actionId);
+    this.actions.delete(actionId);
+    this.actionRepository.deleteById(actionId);
+    this.liveUpdateService?.emit("action:removed", { actionId });
     return true;
   }
 
@@ -170,6 +210,7 @@ export class ActionManager {
     if (!scene?.id) return false;
     this.scenes.set(scene.id, scene);
     this.sceneRepository.save(scene.id, scene);
+    this.liveUpdateService?.emit("scene:updated", scene);
     return true;
   }
 
@@ -177,6 +218,7 @@ export class ActionManager {
     if (!scene?.id) return false;
     this.scenes.set(scene.id, scene);
     this.sceneRepository.save(scene.id, scene);
+    this.liveUpdateService?.emit("scene:updated", scene);
     return true;
   }
 
@@ -185,6 +227,7 @@ export class ActionManager {
     if (!scene) return false;
     this.scenes.delete(sceneId);
     this.sceneRepository.deleteById(sceneId);
+    this.liveUpdateService?.emit("scene:removed", { sceneId });
     return true;
   }
 
@@ -193,7 +236,10 @@ export class ActionManager {
     this.devices.forEach(device => {
       if (device.room === roomId) {
         device.room = undefined;
-        if (device.id) this.deviceRepository.save(device.id, device);
+        if (device.id) {
+          this.deviceRepository.save(device.id, device);
+          this.liveUpdateService?.emit("device:updated", device);
+        }
       }
     });
   }
@@ -206,11 +252,12 @@ export class ActionManager {
     }
   }
 
-  removeDevice(deviceId:string) {
+  removeDevice(deviceId: string) {
     if (!deviceId) return;
     this.eventManager.removeListenerForDevice(deviceId);
     this.devices.delete(deviceId);
     this.deviceRepository.deleteById(deviceId);
+    this.liveUpdateService?.emit("device:removed", { deviceId });
     return true;
   }
 
@@ -222,6 +269,7 @@ export class ActionManager {
     if (!device?.id) return false;
     this.devices.set(device.id, device);
     this.deviceRepository.save(device.id, device);
+    this.liveUpdateService?.emit("device:updated", device);
     return true;
   }
 

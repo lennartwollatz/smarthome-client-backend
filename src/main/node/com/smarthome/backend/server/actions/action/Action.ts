@@ -28,6 +28,12 @@ export class Action {
   name!: string;
   triggerType!: TriggerType;
   workflow!: Workflow;
+  isActive: boolean = true;
+  isAiSuggested: boolean = false;
+  aiDescription?: string;
+  aiConfidence?: number;
+  aiPatternType?: string;
+  aiEvidenceCount?: number;
   createdAt!: string;
   updatedAt!: string;
 

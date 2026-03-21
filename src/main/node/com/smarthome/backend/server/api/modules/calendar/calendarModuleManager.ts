@@ -117,6 +117,7 @@ export class CalendarModuleManager extends ModuleManager<
       color,
       show: data.show === true,
       moduleId: this.getModuleId(),
+      assignedUserIds: [],
       entries: [],
       properties: {
         createdManually: true

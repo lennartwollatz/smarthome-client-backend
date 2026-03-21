@@ -70,6 +70,9 @@ export type CalendarConfig = {
   color: string;
 
   moduleId: string;
+
+  /** IDs der zugeordneten Benutzer (leer = keinem User zugeordnet) */
+  assignedUserIds: string[];
   
   entries: DeviceCalendarEntry[];
 
@@ -103,6 +106,7 @@ export class DeviceCalendar extends Device {
     super();
     this.assignInit(init as any);
     this.modules = [];
+    this.quickAccess = true;
     this.id = DEFAULT_CALENDAR_DEVICE_ID;
     this.type = DeviceType.CALENDAR;
     this.moduleId = DEFAULT_CALENDAR_MODULE_ID;
@@ -412,7 +416,7 @@ export class DeviceCalendar extends Device {
     }
   }
 
-  async changeCalendarConfig(calendarId: string, data: { show?: any; color?: any; name?: any; }) {
+  async changeCalendarConfig(calendarId: string, data: { show?: any; color?: any; name?: any; assignedUserIds?: any; }) {
     const calendar = this.getCalendar(calendarId);
     if (!calendar) return;
     if (data.show !== undefined) {
@@ -423,6 +427,9 @@ export class DeviceCalendar extends Device {
     }
     if (typeof data.name === "string" && data.name) {
       calendar.name = data.name;
+    }
+    if (Array.isArray(data.assignedUserIds)) {
+      calendar.assignedUserIds = data.assignedUserIds.filter((id: unknown) => typeof id === "string" && id.trim());
     }
   }
 

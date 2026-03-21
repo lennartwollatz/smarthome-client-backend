@@ -144,7 +144,7 @@ export class WeatherDeviceController extends ModuleDeviceController<WeatherEvent
         device.windDirectionDominant = this.num(daily.wind_direction_10m_dominant?.[0]);
       }
 
-      logger.info(
+      logger.debug(
         {
           deviceId: device.id,
           temperature: device.temperature,

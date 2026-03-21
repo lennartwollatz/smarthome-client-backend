@@ -35,6 +35,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
           "PyWebOSTV-Skript beendet mit Exit-Code fuer {}",
           tv.address
         );
+        tv.power = false;
       }
       return Boolean(tv.clientKey);
     } catch (err) {
@@ -85,7 +86,10 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return null;
     }
     const response = await this.callController(tv.address, tv.clientKey, "media.get_volume", null);
-    if (!response) return null;
+    if (!response){
+      tv.power = false;
+      return 0;
+    }
     if ((response as Record<string, unknown>)?.status === "error") {
       logger.warn({ response }, "getVolume() fehlgeschlagen");
       return null;
@@ -155,7 +159,10 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return null;
     }
     const response = await this.callController(tv.address, tv.clientKey, "application.get_current", null);
-    if (!response) return null;
+    if (!response){
+      tv.power = false;
+      return null;
+    }
     if ((response as Record<string, unknown>)?.status === "error") {
       logger.warn({ response }, "getSelectedApp() fehlgeschlagen");
       return null;
@@ -170,7 +177,10 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return null;
     }
     const response = await this.callController(tv.address, tv.clientKey, "tv.get_current_channel", null);
-    if (!response) return null;
+    if (!response){
+      tv.power = false;
+      return null;
+    }
     if ((response as Record<string, unknown>)?.status === "error") {
       logger.warn({ response }, "getSelectedChannel() fehlgeschlagen");
       return null;

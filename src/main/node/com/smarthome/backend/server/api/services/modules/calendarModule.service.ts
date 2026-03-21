@@ -29,8 +29,14 @@ export function createCalendarModuleRouter(deps: RouterDeps): Router{
 
   function ensureCalendarDevice(): DeviceCalendar {
     const existing = getCalendarDevice();
-    if (existing) return existing;
-    const device = new DeviceCalendar({});
+    if (existing) {
+      let changed = false;
+      if (!existing.isConnected) { existing.isConnected = true; changed = true; }
+      if (!existing.quickAccess) { existing.quickAccess = true; changed = true; }
+      if (changed) deps.actionManager.saveDevice(existing);
+      return existing;
+    }
+    const device = new DeviceCalendar({ isConnected: true, quickAccess: true });
     device.addModule(calendarModule);
     deps.actionManager.saveDevice(device);
     return device;
@@ -322,9 +328,10 @@ export function createCalendarModuleRouter(deps: RouterDeps): Router{
         show: req.body.show,
         color: req.body.color,
         name: req.body.name,
+        assignedUserIds: req.body.assignedUserIds,
       });
       deps.actionManager.saveDevice(device);
-      res.status(200).json({ id: calendarId, show: req.body.show, color: req.body.color, name: req.body.name });
+      res.status(200).json({ id: calendarId, show: req.body.show, color: req.body.color, name: req.body.name, assignedUserIds: req.body.assignedUserIds });
       return;
     }
     res.status(404).json({ error: "Kalender nicht gefunden" });

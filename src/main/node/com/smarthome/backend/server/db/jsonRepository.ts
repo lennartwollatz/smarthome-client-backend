@@ -12,7 +12,7 @@ export class JsonRepository<T> implements Repository<T> {
   }
 
   save(id: string, object: T): T {
-    logger.info({ type: this.typeName, id }, ">>> SPEICHERE");
+    logger.debug({ type: this.typeName, id }, ">>> SPEICHERE");
     const json = JSON.stringify(object);
     const jsonSize = json.length;
     const dataPreview = json.length > 200 ? `${json.slice(0, 200)}...` : json;

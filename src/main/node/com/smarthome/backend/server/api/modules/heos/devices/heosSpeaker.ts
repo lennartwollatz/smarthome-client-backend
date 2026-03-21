@@ -61,35 +61,14 @@ export class HeosSpeaker extends DeviceSpeaker {
 
     logger.debug({ id: this.id, heosSet: Boolean(this.heos) }, "Initialisiere Werte");
 
-    await this.heos
-      .getVolume(this)
-      .then(volume => {
-        this.volume = volume;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren der Lautstaerke");
-      });
-
-    await this.heos
-      .getMute(this)
-      .then(mute => {
-        this.muted = mute;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren des Muted Attributs");
-      });
-
-    await this.heos
-      .getPlayState(this)
-      .then(playState => {
-        this.playState = playState;
-      })
-      .catch(err => {
-        this.isConnected = false;
-        logger.error({ err, id: this.id }, "Fehler beim Initialisieren des PlayState");
-      });
+    try {
+      this.volume = await this.heos.getVolume(this);
+      this.muted = await this.heos.getMute(this);
+      this.playState = await this.heos.getPlayState(this);
+    } catch (err) {
+      this.isConnected = false;
+      logger.error({ err, id: this.id }, "Fehler beim Aktualisieren der Werte - Geraet nicht erreichbar");
+    }
   }
 
   setHeosController(heosController?: HeosDeviceController) {

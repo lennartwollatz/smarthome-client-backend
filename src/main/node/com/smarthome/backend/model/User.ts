@@ -12,6 +12,11 @@ export class User {
   smsNotificationsEnabled?: boolean;
   phoneNumber?: string;
 
+  presenceDevicePort?: number;
+  presencePairingCode?: string;
+  presencePasscode?: number;
+  presenceDiscriminator?: number;
+
   constructor(init?: Partial<User>) {
     Object.assign(this, init);
   }

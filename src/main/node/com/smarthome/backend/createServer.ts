@@ -1,20 +1,29 @@
 import express, { type RequestHandler } from "express";
+import { createServer as createHttpServer } from "http";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import { logger } from "./logger.js";
 import { createApiRouter } from "./server/api/router.js";
+import { LiveUpdateService } from "./server/live/LiveUpdateService.js";
 import type { DatabaseManager } from "./server/db/database.js";
 import type { EventManager } from "./server/events/EventManager.js";
 import type { ActionManager } from "./server/actions/ActionManager.js";
+import type { MatterPresenceDeviceManager } from "./server/presence/MatterPresenceDeviceManager.js";
 
 type ServerDeps = {
   databaseManager: DatabaseManager;
   eventManager: EventManager;
   actionManager: ActionManager;
+  presenceManager: MatterPresenceDeviceManager;
 };
 
 export function createServer(deps: ServerDeps) {
   const app = express();
+  const httpServer = createHttpServer(app);
+  const liveUpdateService = new LiveUpdateService(httpServer);
+
+  deps.actionManager.setLiveUpdateService(liveUpdateService);
+  deps.presenceManager.setLiveUpdateService(liveUpdateService);
 
   const httpLogger = (pinoHttp as unknown as (opts: { logger: typeof logger }) => RequestHandler)({
     logger
@@ -29,5 +38,5 @@ export function createServer(deps: ServerDeps) {
     res.status(404).json({ error: `Endpoint not found: ${req.path}` });
   });
 
- return app;
+  return httpServer;
 }

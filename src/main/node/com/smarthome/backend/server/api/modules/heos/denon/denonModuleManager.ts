@@ -330,12 +330,14 @@ export class DenonModuleManager extends HeosModuleManager {
       case DeviceType.SPEAKER:
         const denonSpeaker = new DenonSpeaker();
         Object.assign(denonSpeaker, device);
+        denonSpeaker.setHeosController(this.deviceController);
         await denonSpeaker.updateValues();
         convertedDevice = denonSpeaker;
         break;
       case DeviceType.SPEAKER_RECEIVER:
         const denonReceiver = new DenonReceiver();
         Object.assign(denonReceiver, device);
+        denonReceiver.setHeosController(this.deviceController);
         await denonReceiver.updateValues();
         convertedDevice = denonReceiver;
         break;
