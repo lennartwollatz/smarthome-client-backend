@@ -5,6 +5,7 @@ import { createDenonModuleRouter } from "./modules/denonModule.service.js";
 import { createHueModuleRouter } from "./modules/hueModule.service.js";
 import { createLGModuleRouter } from "./modules/lgModule.service.js";
 import { createMatterModuleRouter } from "./modules/matterModule.service.js";
+import { createPresenceModuleRouter } from "./modules/presenceModule.service.js";
 import { createSonosModuleRouter } from "./modules/sonosModule.service.js";
 import { createWACLightingModuleRouter } from "./modules/waclightingModule.service.js";
 import { createXiaomiModuleRouter } from "./modules/xiaomiModule.service.js";
@@ -124,6 +125,7 @@ export function createModuleRouter(deps: RouterDeps) {
   router.use("/calendar-apple", createAppleCalendarModuleRouter(deps));
   router.use("/denon", createDenonModuleRouter(deps));
   router.use("/matter", createMatterModuleRouter(deps));
+  router.use("/presence", createPresenceModuleRouter(deps));
   router.use("/hue", createHueModuleRouter(deps));
   router.use("/lg", createLGModuleRouter(deps));
   router.use("/sonos", createSonosModuleRouter(deps));

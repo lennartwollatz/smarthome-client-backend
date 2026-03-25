@@ -1,4 +1,4 @@
-import { Server as SocketIOServer } from "socket.io";
+import { Server as SocketIOServer, type Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { logger } from "../../logger.js";
 
@@ -29,10 +29,10 @@ export class LiveUpdateService {
       path: "/ws",
     });
 
-    this.io.on("connection", (socket) => {
+    this.io.on("connection", (socket: Socket) => {
       logger.info({ socketId: socket.id }, "WebSocket-Client verbunden");
 
-      socket.on("disconnect", (reason) => {
+      socket.on("disconnect", (reason: string) => {
         logger.info({ socketId: socket.id, reason }, "WebSocket-Client getrennt");
       });
     });
