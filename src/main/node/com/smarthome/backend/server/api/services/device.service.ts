@@ -6,7 +6,8 @@ export function createDeviceRouter(deps: RouterDeps) {
   const router = Router();
 
   router.get("/", (_req, res) => {
-    const devices = deps.actionManager.getDevices();
+    const devices = deps.actionManager.getDevices()
+      .filter(d => d.moduleId !== "voice-assistant");
     res.status(200).json(devices);
   });
 

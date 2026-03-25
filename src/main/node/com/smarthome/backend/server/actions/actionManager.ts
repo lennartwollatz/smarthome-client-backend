@@ -238,7 +238,9 @@ export class ActionManager {
         device.room = undefined;
         if (device.id) {
           this.deviceRepository.save(device.id, device);
-          this.liveUpdateService?.emit("device:updated", device);
+          if (device.moduleId !== "voice-assistant") {
+            this.liveUpdateService?.emit("device:updated", device);
+          }
         }
       }
     });
@@ -254,10 +256,14 @@ export class ActionManager {
 
   removeDevice(deviceId: string) {
     if (!deviceId) return;
+    const device = this.devices.get(deviceId);
+    const isVoiceAssistant = device?.moduleId === "voice-assistant";
     this.eventManager.removeListenerForDevice(deviceId);
     this.devices.delete(deviceId);
     this.deviceRepository.deleteById(deviceId);
-    this.liveUpdateService?.emit("device:removed", { deviceId });
+    if (!isVoiceAssistant) {
+      this.liveUpdateService?.emit("device:removed", { deviceId });
+    }
     return true;
   }
 
@@ -269,7 +275,9 @@ export class ActionManager {
     if (!device?.id) return false;
     this.devices.set(device.id, device);
     this.deviceRepository.save(device.id, device);
-    this.liveUpdateService?.emit("device:updated", device);
+    if (device.moduleId !== "voice-assistant") {
+      this.liveUpdateService?.emit("device:updated", device);
+    }
     return true;
   }
 

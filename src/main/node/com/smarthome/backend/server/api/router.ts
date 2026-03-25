@@ -11,13 +11,15 @@ import { createUserRouter } from "./services/user.service.js";
 import type { DatabaseManager } from "../db/database.js";
 import type { EventManager } from "../events/EventManager.js";
 import type { ActionManager } from "../actions/ActionManager.js";
-import type { MatterPresenceDeviceManager } from "../presence/MatterPresenceDeviceManager.js";
+import type { MatterPresenceDeviceManager } from "./modules/presence/MatterPresenceDeviceManager.js";
+import type { MatterVoiceAssistantManager } from "./modules/voiceassistant/MatterVoiceAssistantManager.js";
 
 export type RouterDeps = {
   databaseManager: DatabaseManager;
   eventManager: EventManager;
   actionManager: ActionManager;
   presenceManager: MatterPresenceDeviceManager;
+  voiceAssistantManager: MatterVoiceAssistantManager;
 };
 
 export function createApiRouter(deps: RouterDeps) {

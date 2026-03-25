@@ -151,4 +151,7 @@ export enum EventType {
     WEATHER_IS_FREEZING = "weatherIsFreezing",
     WEATHER_IS_SNOWING = "weatherIsSnowing",
     WEATHER_IS_FOGGY = "weatherIsFoggy",
+    PRESENCE_STATUS_CHANGED = "presenceStatusChanged",
+    PRESENCE_HOME = "presenceHome",
+    PRESENCE_AWAY = "presenceAway",
 }

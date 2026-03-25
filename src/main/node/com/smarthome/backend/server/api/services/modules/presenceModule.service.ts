@@ -11,50 +11,47 @@ export function createPresenceModuleRouter(deps: RouterDeps) {
     return deviceId.slice("presence-".length);
   };
 
-  router.post("/devices/:deviceId/:buttonId/setOn", async (req, res) => {
+  router.post("/devices/:deviceId/setPresent", async (req, res) => {
     try {
-      const { deviceId, buttonId } = req.params;
-      const userId = extractUserId(deviceId);
+      const userId = extractUserId(req.params.deviceId);
       if (!userId) {
         res.status(404).json({ success: false, error: "Device not found" });
         return;
       }
-      const result = presenceManager.setPresenceButtonState(userId, buttonId, true);
+      const result = presenceManager.setPresenceState(userId, true);
       res.status(result ? 200 : 400).json(result ? { success: true } : { success: false });
     } catch (error) {
-      logger.error({ error }, "Fehler beim Setzen des Presence-Buttons");
+      logger.error({ error }, "Fehler beim Setzen des Presence-Status");
       res.status(400).json({ success: false });
     }
   });
 
-  router.post("/devices/:deviceId/:buttonId/setOff", async (req, res) => {
+  router.post("/devices/:deviceId/setAbsent", async (req, res) => {
     try {
-      const { deviceId, buttonId } = req.params;
-      const userId = extractUserId(deviceId);
+      const userId = extractUserId(req.params.deviceId);
       if (!userId) {
         res.status(404).json({ success: false, error: "Device not found" });
         return;
       }
-      const result = presenceManager.setPresenceButtonState(userId, buttonId, false);
+      const result = presenceManager.setPresenceState(userId, false);
       res.status(result ? 200 : 400).json(result ? { success: true } : { success: false });
     } catch (error) {
-      logger.error({ error }, "Fehler beim Setzen des Presence-Buttons");
+      logger.error({ error }, "Fehler beim Setzen des Presence-Status");
       res.status(400).json({ success: false });
     }
   });
 
-  router.post("/devices/:deviceId/:buttonId/toggle", async (req, res) => {
+  router.post("/devices/:deviceId/togglePresence", async (req, res) => {
     try {
-      const { deviceId, buttonId } = req.params;
-      const userId = extractUserId(deviceId);
+      const userId = extractUserId(req.params.deviceId);
       if (!userId) {
         res.status(404).json({ success: false, error: "Device not found" });
         return;
       }
-      const result = presenceManager.togglePresenceButton(userId, buttonId);
+      const result = presenceManager.togglePresence(userId);
       res.status(result ? 200 : 400).json(result ? { success: true } : { success: false });
     } catch (error) {
-      logger.error({ error }, "Fehler beim Toggle des Presence-Buttons");
+      logger.error({ error }, "Fehler beim Toggle des Presence-Status");
       res.status(400).json({ success: false });
     }
   });

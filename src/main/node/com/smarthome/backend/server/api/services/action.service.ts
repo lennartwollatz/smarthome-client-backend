@@ -6,6 +6,32 @@ import type { RouterDeps } from "../router.js";
 export function createActionRouter(deps: RouterDeps) {
   const router = Router();
 
+  router.post("/:actionId/voice-assistant", async (req, res) => {
+    const { keyword } = req.body as { keyword: string };
+    if (!keyword || typeof keyword !== "string" || keyword.trim().length === 0 || keyword.trim().includes(" ")) {
+      res.status(400).json({ error: "Keyword muss ein einzelnes Wort sein" });
+      return;
+    }
+    try {
+      const result = await deps.voiceAssistantManager.createVoiceAssistantDevice(
+        req.params.actionId,
+        keyword.trim()
+      );
+      res.status(200).json(result);
+    } catch (err) {
+      res.status(500).json({ error: "Fehler beim Erstellen des Voice-Assistant-Device" });
+    }
+  });
+
+  router.delete("/:actionId/voice-assistant", async (req, res) => {
+    try {
+      await deps.voiceAssistantManager.removeVoiceAssistantDevice(req.params.actionId);
+      res.status(200).json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Fehler beim Loeschen des Voice-Assistant-Device" });
+    }
+  });
+
   router.get("/", (_req, res) => {
     const actions = deps.actionManager.getActions();
     res.status(200).json(actions);

@@ -53,4 +53,7 @@ export enum DeviceType {
 
   // Wetter
   WEATHER = "weather",
+
+  // Anwesenheit
+  PRESENCE = "presence",
 }

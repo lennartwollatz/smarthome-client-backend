@@ -8,13 +8,15 @@ import { LiveUpdateService } from "./server/live/LiveUpdateService.js";
 import type { DatabaseManager } from "./server/db/database.js";
 import type { EventManager } from "./server/events/EventManager.js";
 import type { ActionManager } from "./server/actions/ActionManager.js";
-import type { MatterPresenceDeviceManager } from "./server/presence/MatterPresenceDeviceManager.js";
+import type { MatterPresenceDeviceManager } from "./server/api/modules/presence/MatterPresenceDeviceManager.js";
+import type { MatterVoiceAssistantManager } from "./server/api/modules/voiceassistant/MatterVoiceAssistantManager.js";
 
 type ServerDeps = {
   databaseManager: DatabaseManager;
   eventManager: EventManager;
   actionManager: ActionManager;
   presenceManager: MatterPresenceDeviceManager;
+  voiceAssistantManager: MatterVoiceAssistantManager;
 };
 
 export function createServer(deps: ServerDeps) {
@@ -24,6 +26,7 @@ export function createServer(deps: ServerDeps) {
 
   deps.actionManager.setLiveUpdateService(liveUpdateService);
   deps.presenceManager.setLiveUpdateService(liveUpdateService);
+  deps.voiceAssistantManager.setLiveUpdateService(liveUpdateService);
 
   const httpLogger = (pinoHttp as unknown as (opts: { logger: typeof logger }) => RequestHandler)({
     logger

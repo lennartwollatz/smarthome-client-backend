@@ -1,19 +1,16 @@
 import { ServerNode, Endpoint, VendorId, DeviceTypeId } from "@matter/main";
 import { OnOffPlugInUnitDevice } from "@matter/main/devices";
 import { ManualPairingCodeCodec } from "@matter/main/types";
-import { logger } from "../../logger.js";
-import { Device } from "../../model/devices/Device.js";
-import { DeviceType } from "../../model/devices/helper/DeviceType.js";
-import type { ActionManager } from "../actions/ActionManager.js";
-import type { EventManager } from "../events/EventManager.js";
-import type { LiveUpdateService } from "../live/LiveUpdateService.js";
-import { JsonRepository } from "../db/jsonRepository.js";
-import { User } from "../../model/User.js";
-import type { DatabaseManager } from "../db/database.js";
+import { logger } from "../../../../logger.js";
+import { DevicePresence } from "../../../../model/devices/DevicePresence.js";
+import type { ActionManager } from "../../../actions/ActionManager.js";
+import type { EventManager } from "../../../events/EventManager.js";
+import type { LiveUpdateService } from "../../../live/LiveUpdateService.js";
+import { JsonRepository } from "../../../db/jsonRepository.js";
+import { User } from "../../../../model/User.js";
+import type { DatabaseManager } from "../../../db/database.js";
 
 const PRESENCE_MODULE_ID = "presence";
-const PRESENCE_BUTTON_ID = "1";
-const PRESENCE_BUTTON_NAME = "presence";
 const BASE_PORT = 5550;
 const VENDOR_ID = 0xFFF1;
 const PRODUCT_ID = 0x8001;
@@ -43,6 +40,8 @@ export class MatterPresenceDeviceManager {
   }
 
   async initialize(): Promise<void> {
+    this.convertExistingDevices();
+
     const users = this.userRepository.findAll();
     for (const user of users) {
       if (!user?.id) continue;
@@ -69,6 +68,40 @@ export class MatterPresenceDeviceManager {
     }
   }
 
+  /**
+   * Konvertiert bestehende Presence-Devices aus der Datenbank zu DevicePresence-Instanzen
+   * und setzt den EventManager.
+   */
+  private convertExistingDevices(): void {
+    const existingDevices = this.actionManager.getDevicesForModule(PRESENCE_MODULE_ID);
+    for (const rawDevice of existingDevices) {
+      if (rawDevice instanceof DevicePresence) {
+        rawDevice.setEventManager(this.eventManager);
+        continue;
+      }
+      const raw = rawDevice as unknown as Record<string, unknown>;
+      const device = new DevicePresence({
+        id: rawDevice.id,
+        name: rawDevice.name,
+        moduleId: PRESENCE_MODULE_ID,
+        isConnected: rawDevice.isConnected,
+        isPairingMode: rawDevice.isPairingMode,
+        quickAccess: rawDevice.quickAccess,
+        present: raw["present"] as boolean ?? raw["buttons"] != null ? this.extractOldButtonState(raw) : false,
+      });
+      (device as unknown as Record<string, unknown>).icon = raw["icon"] ?? "🏠";
+      (device as unknown as Record<string, unknown>).typeLabel = "deviceType.presence";
+      device.setEventManager(this.eventManager);
+      this.actionManager.saveDevice(device);
+    }
+  }
+
+  private extractOldButtonState(raw: Record<string, unknown>): boolean {
+    const buttons = raw["buttons"] as Record<string, { on?: boolean }> | undefined;
+    if (!buttons) return false;
+    return buttons["1"]?.on ?? buttons["0"]?.on ?? false;
+  }
+
   async createPresenceDevice(user: User): Promise<{
     manualPairingCode: string;
     port: number;
@@ -89,28 +122,18 @@ export class MatterPresenceDeviceManager {
     user.presencePasscode = passcode;
     user.presenceDiscriminator = discriminator;
 
-    const device = new Device({
+    const device = new DevicePresence({
       id: `presence-${user.id}`,
-      name: `Anwesenheit: ${user.name ?? "Unbekannt"}`,
+      name: user.name ?? "Unbekannt",
       moduleId: PRESENCE_MODULE_ID,
       isConnected: false,
       isPairingMode: true,
       quickAccess: false,
-      type: DeviceType.SWITCH,
-    }) as Device & { buttons?: Record<string, { on: boolean; pressCount: number; initialPressTime: number; lastPressTime: number; firstPressTime: number; connectedToLight: boolean }> };
-    device.buttons = {
-      [PRESENCE_BUTTON_ID]: {
-        on: false,
-        pressCount: 0,
-        initialPressTime: 0,
-        lastPressTime: 0,
-        firstPressTime: 0,
-        connectedToLight: false,
-        name: PRESENCE_BUTTON_NAME,
-      },
-    };
-    (device as Record<string, unknown>).icon = "🏠";
-    (device as Record<string, unknown>).typeLabel = "deviceType.switch";
+      present: false,
+    });
+    (device as unknown as Record<string, unknown>).icon = "🏠";
+    (device as unknown as Record<string, unknown>).typeLabel = "deviceType.presence";
+    device.setEventManager(this.eventManager);
     this.actionManager.saveDevice(device);
 
     this.startPresenceServer(user).catch(err => {
@@ -187,68 +210,31 @@ export class MatterPresenceDeviceManager {
 
   private onPresenceChanged(userId: string, isHome: boolean): void {
     logger.info({ userId, isHome }, "Anwesenheitsstatus geaendert");
-    this.updatePresenceButton(userId, isHome);
+    this.updatePresence(userId, isHome);
   }
 
-  /**
-   * Aktualisiert den Presence-Button im Device und speichert es.
-   * Wird von onPresenceChanged (Matter) und setPresenceButtonState (API) aufgerufen.
-   */
-  updatePresenceButton(userId: string, isHome: boolean): void {
-    const device = this.actionManager.getDevice(`presence-${userId}`) as (Device & {
-      buttons?: Record<string, { on: boolean; pressCount: number; initialPressTime: number; lastPressTime: number; firstPressTime: number; connectedToLight: boolean; name?: string }>;
-    }) | null;
-    if (device) {
+  updatePresence(userId: string, present: boolean): void {
+    const device = this.actionManager.getDevice(`presence-${userId}`);
+    if (device instanceof DevicePresence) {
       device.isConnected = true;
       device.isPairingMode = false;
-      // Migration: Alte Geräte mit Button "0" auf "1" migrieren
-      if (device.buttons?.["0"] && !device.buttons[PRESENCE_BUTTON_ID]) {
-        device.buttons[PRESENCE_BUTTON_ID] = {
-          ...device.buttons["0"],
-          name: PRESENCE_BUTTON_NAME,
-          on: isHome,
-        };
-        delete device.buttons["0"];
-      }
-      if (!device.buttons) {
-        device.buttons = {
-          [PRESENCE_BUTTON_ID]: {
-            on: isHome,
-            pressCount: 0,
-            initialPressTime: 0,
-            lastPressTime: 0,
-            firstPressTime: 0,
-            connectedToLight: false,
-            name: PRESENCE_BUTTON_NAME,
-          },
-        };
-      } else if (device.buttons[PRESENCE_BUTTON_ID]) {
-        device.buttons[PRESENCE_BUTTON_ID].on = isHome;
-      }
+      device.setPresent(present);
       this.actionManager.saveDevice(device);
     }
   }
 
-  /**
-   * Setzt den Presence-Status für einen Benutzer (aufgerufen von API bei Button-Betätigung).
-   */
-  setPresenceButtonState(userId: string, buttonId: string, on: boolean): boolean {
-    if (buttonId !== PRESENCE_BUTTON_ID) return false;
-    this.updatePresenceButton(userId, on);
+  setPresenceState(userId: string, present: boolean): boolean {
+    this.updatePresence(userId, present);
     return true;
   }
 
-  /**
-   * Toggle des Presence-Buttons (aufgerufen von API).
-   */
-  togglePresenceButton(userId: string, buttonId: string): boolean {
-    if (buttonId !== PRESENCE_BUTTON_ID) return false;
-    const device = this.actionManager.getDevice(`presence-${userId}`) as (Device & {
-      buttons?: Record<string, { on: boolean }>;
-    }) | null;
-    const currentOn = device?.buttons?.[PRESENCE_BUTTON_ID]?.on ?? false;
-    this.updatePresenceButton(userId, !currentOn);
-    return true;
+  togglePresence(userId: string): boolean {
+    const device = this.actionManager.getDevice(`presence-${userId}`);
+    if (device instanceof DevicePresence) {
+      this.updatePresence(userId, !device.present);
+      return true;
+    }
+    return false;
   }
 
   private generatePasscode(): number {

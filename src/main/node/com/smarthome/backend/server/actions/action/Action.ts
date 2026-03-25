@@ -14,12 +14,13 @@ import { ActionRunnableEnvironment } from "../runnable/ActionRunnableEnvironment
 import { ActionRunnableResponse } from "../runnable/ActionRunnableResponse.js";
 import { ActionRunnableManualBased } from "../runnable/ActionRunnableManualBased.js";
 import { EventManager } from "../../events/EventManager.js";
+import { EventType } from "../../events/event-types/EventType.js";
 
 type DeviceMap = Map<string, Device>;
 type SceneMap = Map<string, Scene>;
 type ActionRunnableMap = Map<string, ActionRunnable>;
 
-export type TriggerType = "manual" | "device" | "time";
+export type TriggerType = "manual" | "device" | "time" | "voice_assistant";
 
 export class Action {
   private isExecuting = false;
@@ -48,6 +49,11 @@ export class Action {
       eventManager.addRunnable(runnable);
     } else if( this.triggerType == "device"){
       const data:{eventTrigger:DeviceTrigger | null, runnable:ActionRunnableEventBasedRunnable} = this.createActionRunnableEventBasedRunnable(devices, scenes, eventManager);
+      if(!data.eventTrigger) return;
+      const runnable = new ActionRunnableEventBased(this.actionId, this.actionId, data.runnable, data.eventTrigger);
+      eventManager.addRunnable(runnable);
+    } else if( this.triggerType == "voice_assistant"){
+      const data:{eventTrigger:DeviceTrigger | null, runnable:ActionRunnableEventBasedRunnable} = this.createActionRunnableVoiceAssistantRunnable(devices, scenes, eventManager);
       if(!data.eventTrigger) return;
       const runnable = new ActionRunnableEventBased(this.actionId, this.actionId, data.runnable, data.eventTrigger);
       eventManager.addRunnable(runnable);
@@ -81,6 +87,28 @@ export class Action {
       return await this.executeWorkflow(devices, scenes, eventManager, environment);
     };
     return {timeTrigger, runnable};
+  }
+
+  private createActionRunnableVoiceAssistantRunnable(devices: DeviceMap, scenes: SceneMap, eventManager: EventManager):{eventTrigger:DeviceTrigger | null, runnable:ActionRunnableEventBasedRunnable} {
+    const eventTrigger = this.getVoiceAssistantTriggerAsDeviceTrigger();
+    const runnable = async (environment:ActionRunnableEnvironment) => {
+      return await this.executeWorkflow(devices, scenes, eventManager, environment);
+    };
+    return {eventTrigger, runnable};
+  }
+
+  private getVoiceAssistantTriggerAsDeviceTrigger():DeviceTrigger | null{
+    const startNode = this.resolveStartNode(this.workflow);
+    if( startNode.triggerConfig?.type == "voice_assistant"){
+      const va = startNode.triggerConfig?.voiceAssistant;
+      if(!va?.deviceId) return null;
+      return new DeviceTrigger({
+        triggerDeviceId: va.deviceId,
+        triggerModuleId: "voice-assistant",
+        triggerEvent: EventType.SWITCH_BUTTON_ON,
+      });
+    } 
+    return null;
   }
 
   private getTriggerEvent():DeviceTrigger | null{
