@@ -1,5 +1,3 @@
-import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { LGDeviceController } from "./lgDeviceController.js";
 import { LGEvent } from "./lgEvent.js";
@@ -7,14 +5,15 @@ import { DeviceTV } from "../../../../model/devices/DeviceTV.js";
 import { LGTV } from "./devices/lgtv.js";
 import { LGMODULE } from "./lgModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class LGEventStreamManager extends ModuleEventStreamManager<LGDeviceController, LGEvent> {
-  constructor(managerId: string, controller: LGDeviceController, actionManager: ActionManager) {
-    super(managerId, LGMODULE.id, controller, actionManager);
+  constructor(managerId: string, controller: LGDeviceController, deviceManager: DeviceManager) {
+    super(managerId, LGMODULE.id, controller, deviceManager);
   }
 
   protected async startEventStream(callback: (event: LGEvent) => void): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(LGMODULE.id);
+    const devices = this.deviceManager.getDevicesForModule(LGMODULE.id);
     for (const device of devices) {
       if (device.type === DeviceType.TV) {
         const tv = device as DeviceTV;
@@ -24,7 +23,7 @@ export class LGEventStreamManager extends ModuleEventStreamManager<LGDeviceContr
   }
 
   protected async stopEventStream(): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(LGMODULE.id);
+    const devices = this.deviceManager.getDevicesForModule(LGMODULE.id);
     const stops = devices
       .filter(d => d.type === DeviceType.TV)
       .map(d => this.controller.stopEventStream(d as DeviceTV));
@@ -36,29 +35,30 @@ export class LGEventStreamManager extends ModuleEventStreamManager<LGDeviceContr
       return;
     }
 
-    logger.debug("handleEvent: " + JSON.stringify(event.data));
-    
-    const device = this.actionManager.getDevice(event.deviceid);
-    if (!device || !(device instanceof LGTV) || device.moduleId !== LGMODULE.id) return;
-
     const eventData = event.data;
     const eventName = eventData.type as string | undefined;
     const payload = eventData.value as Record<string, unknown> | string | undefined;
-    
+
     if (!eventName || payload == null) return;
+    if (eventName !== "app.current" && eventName !== "channel.current") {
+      return;
+    }
+
+    const device = this.deviceManager.getDevice(event.deviceid);
+    if (!device || !(device instanceof LGTV) || device.moduleId !== LGMODULE.id) return;
 
     if (eventName === "app.current") {
       const appId = this.extractAppId(payload);
       if (appId) {
         await device.startApp(appId, false, false);
-        this.actionManager.saveDevice(device);
+        this.deviceManager.saveDevice(device);
       }
     }
     if (eventName === "channel.current") {
       const channelId = this.extractChannelId(payload);
       if (channelId) {
         await device.setChannel(channelId, false, false);
-        this.actionManager.saveDevice(device);
+        this.deviceManager.saveDevice(device);
       }
     }
   }

@@ -1,34 +1,33 @@
 import "dotenv/config";
-import { createServer } from "./createServer.js";
+import { createServer } from "./server/api/server.js";
 import { DatabaseManager } from "./server/db/database.js";
 import { logger } from "./logger.js";
 import { EventManager } from "./server/events/EventManager.js";
-import { ActionManager } from "./server/actions/ActionManager.js";
-import { MatterPresenceDeviceManager } from "./server/api/modules/presence/MatterPresenceDeviceManager.js";
-import { MatterVoiceAssistantManager } from "./server/api/modules/voiceassistant/MatterVoiceAssistantManager.js";
+import { ActionManager } from "./server/api/entities/actions/ActionManager.js";
+import { UserManager } from "./server/api/entities/users/userManager.js";
+import { SettingManager } from "./server/api/entities/settings/settingManager.js";
+import { FloorplanManager } from "./server/api/entities/floorplan/floorplanManager.js";
+import { SceneManager } from "./server/api/entities/scenes/sceneManager.js";
+import { DeviceManager } from "./server/api/entities/devices/deviceManager.js";
 
 const port = Number(process.env.PORT ?? 4040);
 const dbPath = process.env.DB_URL ?? "data/smarthomeNew.sqlite";
 
 const databaseManager = new DatabaseManager(dbPath);
 databaseManager.connect();
-
 const eventManager = new EventManager();
-const actionManager = new ActionManager(databaseManager, eventManager);
-const presenceManager = new MatterPresenceDeviceManager(actionManager, eventManager, databaseManager);
-const voiceAssistantManager = new MatterVoiceAssistantManager(actionManager, eventManager);
+const settingManager = new SettingManager(databaseManager);
+const sceneManager = new SceneManager(databaseManager, eventManager);
+const deviceManager = new DeviceManager(databaseManager, eventManager);
+const floorplanManager = new FloorplanManager(databaseManager, deviceManager);
+const userManager = new UserManager(databaseManager);
+const actionManager = new ActionManager(databaseManager, eventManager, floorplanManager, settingManager, sceneManager, deviceManager, userManager);
 
-const httpServer = createServer({ databaseManager, eventManager, actionManager, presenceManager, voiceAssistantManager });
-
-httpServer.listen(port, () => {
-  logger.info({ port }, "HTTP-Server gestartet");
-
-  presenceManager.initialize().catch(err => {
-    logger.error({ err }, "Fehler beim Initialisieren der Presence-Devices");
-  });
-
-  voiceAssistantManager.initialize().catch(err => {
-    logger.error({ err }, "Fehler beim Initialisieren der Voice-Assistant-Devices");
-  });
+const httpServer = createServer({
+  databaseManager, eventManager, floorplanManager, settingManager, sceneManager, deviceManager, userManager, actionManager
 });
 
+
+httpServer.listen(port, () => {
+  logger.info({ port }, "HTTP-Server vollständig gestartet.");
+});

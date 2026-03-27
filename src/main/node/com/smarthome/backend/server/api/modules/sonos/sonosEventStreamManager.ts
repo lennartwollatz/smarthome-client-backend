@@ -1,6 +1,4 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
-;
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { SonosSpeaker } from "./devices/sonosSpeaker.js";
 import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
@@ -8,15 +6,16 @@ import { SonosDeviceController } from "./sonosDeviceController.js";
 import { SonosEvent } from "./sonosEvent.js";
 import { SONOSMODULE } from "./sonosModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class SonosEventStreamManager extends ModuleEventStreamManager<SonosDeviceController, SonosEvent> {
 
-  constructor(managerId: string, controller: SonosDeviceController, actionManager: ActionManager) {
-    super(managerId, SONOSMODULE.id, controller, actionManager);
+  constructor(managerId: string, controller: SonosDeviceController, deviceManager: DeviceManager) {
+    super(managerId, SONOSMODULE.id, controller, deviceManager);
   }
 
   protected async startEventStream(callback: (event: SonosEvent) => void): Promise<void> {
-    let devices = this.actionManager.getDevices();
+    let devices = this.deviceManager.getDevices();
     for (const device of devices) {
       if (device.moduleId === SONOSMODULE.id && device.type === DeviceType.SPEAKER) {
         this.controller.startEventStream(device as SonosSpeaker, callback);
@@ -25,7 +24,7 @@ export class SonosEventStreamManager extends ModuleEventStreamManager<SonosDevic
   }
 
   protected async stopEventStream(): Promise<void> {
-    let devices = this.actionManager.getDevices();
+    let devices = this.deviceManager.getDevices();
     for (const device of devices) {
       if (device.moduleId === SONOSMODULE.id && device.type === DeviceType.SPEAKER) {
         this.controller.stopEventStream(device as SonosSpeaker);
@@ -65,7 +64,7 @@ export class SonosEventStreamManager extends ModuleEventStreamManager<SonosDevic
 
   private async handlePlayStateChange(deviceId: string, playState: string) {
     try {
-      const device = this.actionManager.getDevice(deviceId);
+      const device = this.deviceManager.getDevice(deviceId);
       if (!device || !(device instanceof SonosSpeaker)) {
         return;
       }
@@ -93,10 +92,10 @@ export class SonosEventStreamManager extends ModuleEventStreamManager<SonosDevic
             device.pause(false);
             break;
           default:
-            device.stopp(false);
+            device.stop(false);
             break;
         }
-        this.actionManager.saveDevice(device);
+        this.deviceManager.saveDevice(device);
         logger.debug({ speakerId: deviceId, playState: mappedState, originalState: playState }, "PlayState aktualisiert");
       }
     } catch (err) {
@@ -106,7 +105,7 @@ export class SonosEventStreamManager extends ModuleEventStreamManager<SonosDevic
 
   private async handleVolumeChange(deviceId: string, volume: number) {
     try {
-      const device = this.actionManager.getDevice(deviceId);
+      const device = this.deviceManager.getDevice(deviceId);
       if (!device || !(device instanceof SonosSpeaker)) {
         return;
       }
@@ -114,7 +113,7 @@ export class SonosEventStreamManager extends ModuleEventStreamManager<SonosDevic
       const deviceVolume = device.volume ?? 0;
       if (volume !== deviceVolume) {
         device.setVolume(volume, false);
-        this.actionManager.saveDevice(device);
+        this.deviceManager.saveDevice(device);
         logger.debug({ speakerId: deviceId, volume }, "Volume aktualisiert");
       }
     } catch (err) {
@@ -124,7 +123,7 @@ export class SonosEventStreamManager extends ModuleEventStreamManager<SonosDevic
 
   private async handleMuteChange(deviceId: string, muted: boolean) {
     try {
-      const device = this.actionManager.getDevice(deviceId);
+      const device = this.deviceManager.getDevice(deviceId);
       if (!device || !(device instanceof SonosSpeaker)) {
         return;
       }
@@ -132,7 +131,7 @@ export class SonosEventStreamManager extends ModuleEventStreamManager<SonosDevic
       const deviceMuted = device.muted ?? false;
       if (muted !== deviceMuted) {
         device.setMute(muted, false);
-        this.actionManager.saveDevice(device);
+        this.deviceManager.saveDevice(device);
         logger.debug({ speakerId: deviceId, muted }, "Mute aktualisiert");
       }
     } catch (err) {

@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { SonosModuleManager } from "../../modules/sonos/sonosModuleManager.js";
 import { logger } from "../../../../logger.js";
-import type { RouterDeps } from "../../router.js";
+import type { ServerDeps } from "../../server.js";
 
-export function createSonosModuleRouter(deps: RouterDeps) {
+export function createSonosModuleRouter(deps: ServerDeps) {
   const router = Router();
-  const sonosModule = new SonosModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
-  deps.actionManager.registerModuleManager(sonosModule);
+  const sonosModule = new SonosModuleManager(deps.databaseManager, deps.deviceManager, deps.eventManager);
+  deps.deviceManager.registerModuleManager(sonosModule);
 
   router.get("/devices/discover", async (_req, res) => {
     try {

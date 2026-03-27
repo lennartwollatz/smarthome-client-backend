@@ -1,40 +1,47 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
-import type { Action } from "../../actions/action/Action.js";
-import type { RouterDeps } from "../router.js";
+import type { Action } from "../entities/actions/action/Action.js";
+import type { ServerDeps } from "../server.js";
+import { VoiceAssistantCommandAction } from "../modules/matter/voiceAssistantCommandMapping.js";
 
-export function createActionRouter(deps: RouterDeps) {
+export function createActionRouter(deps: ServerDeps) {
   const router = Router();
 
   router.post("/:actionId/voice-assistant", async (req, res) => {
-    const { keyword } = req.body as { keyword: string };
-    if (!keyword || typeof keyword !== "string" || keyword.trim().length === 0 || keyword.trim().includes(" ")) {
+    const { keyword, actionType } = req.body as { keyword: string; actionType?: VoiceAssistantCommandAction };
+    const actionId = req.params.actionId;
+    if (!actionId) {
+      res.status(400).json({ error: "Action ID is required" });
+      return;
+    }
+    const trimmed = typeof keyword === "string" ? keyword.trim() : "";
+    if (!trimmed || trimmed.includes(" ")) {
       res.status(400).json({ error: "Keyword muss ein einzelnes Wort sein" });
       return;
     }
     try {
-      const result = await deps.voiceAssistantManager.createVoiceAssistantDevice(
-        req.params.actionId,
-        keyword.trim()
-      );
-      res.status(200).json(result);
+      const result = await deps.actionManager.createVoiceAssistantForActionId(actionId, trimmed, actionType, undefined);
+      if(!result) {
+        res.status(400).json({ error: "Fehler beim Erstellen des Voice-Assistant-Device" });
+      } else {
+        res.status(200).json(result);
+      }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === "Action not found") {
+        res.status(404).json({ error: msg });
+        return;
+      }
+      if (msg === "Workflow hat keinen Trigger-Knoten") {
+        res.status(400).json({ error: msg });
+        return;
+      }
       res.status(500).json({ error: "Fehler beim Erstellen des Voice-Assistant-Device" });
     }
   });
 
-  router.delete("/:actionId/voice-assistant", async (req, res) => {
-    try {
-      await deps.voiceAssistantManager.removeVoiceAssistantDevice(req.params.actionId);
-      res.status(200).json({ success: true });
-    } catch (err) {
-      res.status(500).json({ error: "Fehler beim Loeschen des Voice-Assistant-Device" });
-    }
-  });
-
   router.get("/", (_req, res) => {
-    const actions = deps.actionManager.getActions();
-    res.status(200).json(actions);
+    res.status(200).json(deps.actionManager.getActions());
   });
 
   router.post("/", (req, res) => {

@@ -20,6 +20,23 @@ export abstract class DeviceMotion extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  isMotionDetectedSince(seconds: number): boolean {
+    const t = this.timeStringToMiliseconds(this.motion_last_detect ?? '');
+    if (t === null) return false;
+    return Date.now() - t <= seconds * 1000;
+  }
+  isNoMotionDetectedSince(seconds: number): boolean {
+    const t = this.timeStringToMiliseconds(this.motion_last_detect ?? '');
+    if (t === null) return true;
+    return Date.now() - t >= seconds * 1000;
+  }
+  isMotionDetected(): boolean {
+    return this.motion === true;
+  }
+  isNoMotionDetected(): boolean {
+    return this.motion === false;
+  }
+
   async setSensibility(sensitivity: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.sensitivity = sensitivity;
@@ -27,7 +44,6 @@ export abstract class DeviceMotion extends Device {
       await this.executeSetSensibility(sensitivity);
     }
     if (trigger) {
-      this.eventManager?.triggerEvent(new EventMotionStatusChanged(this.id, deviceBefore, { ...this }));
       this.eventManager?.triggerEvent(new EventSensibilityChanged(this.id, deviceBefore, sensitivity));
     }
   }

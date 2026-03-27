@@ -1,18 +1,17 @@
 import { Router } from "express";
 import { WACLightingModuleManager } from "../../modules/waclighting/waclightingModuleManager.js";
 import { logger } from "../../../../logger.js";
-import type{ RouterDeps } from "../../router.js";
-import { WACLightingDeviceDiscover } from "../../modules/waclighting/waclightingDeviceDiscover.js";
+import type { ServerDeps } from "../../server.js";
 
 
-export function createWACLightingModuleRouter(deps: RouterDeps) {
+export function createWACLightingModuleRouter(deps: ServerDeps) {
   const router = Router();
   const wacLightingModule = new WACLightingModuleManager(
     deps.databaseManager,
-    deps.actionManager,
+    deps.deviceManager,
     deps.eventManager 
   );
-  deps.actionManager.registerModuleManager(wacLightingModule);
+  deps.deviceManager.registerModuleManager(wacLightingModule);
 
   router.get("/devices/discover", async (_req, res) => {
     try {

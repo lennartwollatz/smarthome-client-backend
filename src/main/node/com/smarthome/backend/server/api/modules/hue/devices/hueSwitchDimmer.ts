@@ -53,11 +53,11 @@ export class HueSwitchDimmer extends DeviceSwitchDimmer {
     logger.debug("executeTriplePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
   }
 
-  protected async executeSetIntensity(buttonId: string, intensity: number): Promise<void> {
+  protected async executeSetBrightness(buttonId: string, brightness: number): Promise<void> {
     logger.debug(
       "executeSetIntensity fuer Button {} - wird ueber Event-Stream verarbeitet",
       buttonId,
-      intensity
+      brightness
     );
   }
 

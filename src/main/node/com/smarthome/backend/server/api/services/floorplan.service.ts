@@ -1,83 +1,27 @@
 import { Router } from "express";
-import { randomUUID } from "node:crypto";
-import { JsonRepository } from "../../db/jsonRepository.js";
-import type { FloorPlan, Room } from "../../../model/index.js";
-import type { RouterDeps } from "../router.js";
+import type { Room } from "../entities/floorplan/Room.js";
+import type { ServerDeps } from "../server.js";
 
-
-export function createFloorPlanRouter(deps: RouterDeps) {
+export function createFloorPlanRouter(deps: ServerDeps) {
   const router = Router();
-  const floorPlanRepository = new JsonRepository<FloorPlan>(deps.databaseManager, "FloorPlan");
-  const roomRepository = new JsonRepository<Room>(deps.databaseManager, "Room");
+  const floorplanManager = deps.floorplanManager;
 
-  router.get("/", (_req, res) => {
-    const floorPlan = floorPlanRepository.findById("main-floorplan");
-    if (floorPlan) {
-      res.status(200).json(floorPlan);
-    } else {
-      const empty: FloorPlan = { rooms: [] };
-      floorPlanRepository.save("main-floorplan", empty);
-      res.status(200).json(empty);
-    }
-  });
-
-  router.put("/", (req, res) => {
-    const floorPlan = req.body as FloorPlan;
-    floorPlanRepository.save("main-floorplan", floorPlan);
-    res.status(200).json(floorPlan);
+  router.get("/rooms", (_req, res) => {
+    res.status(200).json(floorplanManager.findAllRooms());
   });
 
   router.post("/rooms", (req, res) => {
-    const room = req.body as Room;
-    if (!room.id) room.id = `room-${randomUUID()}`;
-
-    // Wenn kein Index gesetzt ist, den höchsten Index + 1 vergeben
-    if (room.index === undefined || room.index === null) {
-      const floorPlan = floorPlanRepository.findById("main-floorplan") ?? { rooms: [] };
-      if (!Array.isArray(floorPlan.rooms)) floorPlan.rooms = [];
-      const maxIndex = floorPlan.rooms.reduce((max, r) => {
-        const idx = r.index ?? -1;
-        return idx > max ? idx : max;
-      }, -1);
-      room.index = maxIndex + 1;
-    }
-
-    roomRepository.save(room.id, room);
-
-    const floorPlan = floorPlanRepository.findById("main-floorplan") ?? { rooms: [] };
-    if (!Array.isArray(floorPlan.rooms)) floorPlan.rooms = [];
-    floorPlan.rooms = floorPlan.rooms.filter(existing => existing.id !== room.id);
-    floorPlan.rooms.push(room);
-    floorPlanRepository.save("main-floorplan", floorPlan);
-
-    res.status(200).json(room);
+    res.status(200).json(floorplanManager.addRoom(req.body as Room));
   });
 
   router.put("/rooms/:roomId", (req, res) => {
-    const room = req.body as Room;
-    room.id = req.params.roomId;
-    roomRepository.save(room.id, room);
-
-    const floorPlan = floorPlanRepository.findById("main-floorplan");
-    if (floorPlan && Array.isArray(floorPlan.rooms)) {
-      floorPlan.rooms = floorPlan.rooms.filter(existing => existing.id !== room.id);
-      floorPlan.rooms.push(room);
-      floorPlanRepository.save("main-floorplan", floorPlan);
-    }
-
-    res.status(200).json(room);
+    res.status(200).json(floorplanManager.updateRoom(req.params.roomId, req.body as Room));
   });
 
   router.delete("/rooms/:roomId", (req, res) => {
-    const deleted = roomRepository.deleteById(req.params.roomId);
+    const deleted = floorplanManager.deleteRoom(req.params.roomId);
     if (deleted) {
-      const floorPlan = floorPlanRepository.findById("main-floorplan");
-      if (floorPlan && Array.isArray(floorPlan.rooms)) {
-        floorPlan.rooms = floorPlan.rooms.filter(existing => existing.id !== req.params.roomId);
-        floorPlanRepository.save("main-floorplan", floorPlan);
-      }
-      deps.actionManager.removeRoomFromDevices(req.params.roomId);
-      res.status(204).json("");
+      res.status(200).json({ success: true });
     } else {
       res.status(404).json({ error: "Room not found" });
     }
@@ -85,4 +29,3 @@ export function createFloorPlanRouter(deps: RouterDeps) {
 
   return router;
 }
-

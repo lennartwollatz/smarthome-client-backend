@@ -1,8 +1,8 @@
+import { DeviceLightDimmerTemperature } from "../../../../../model/devices/DeviceLightDimmerTemperature.js";
 import { logger } from "../../../../../logger.js";
-import { DeviceLightDimmerTemperatureColor } from "../../../../../model/devices/DeviceLightDimmerTemperatureColor.js";
 import { HueDeviceController } from "../hueDeviceController.js";
 
-export class HueLightDimmerTemperature extends DeviceLightDimmerTemperatureColor {
+export class HueLightDimmerTemperature extends DeviceLightDimmerTemperature {
   private bridgeId?: string;
   private hueResourceId?: string;
   private batteryRid?: string;
@@ -13,7 +13,8 @@ export class HueLightDimmerTemperature extends DeviceLightDimmerTemperatureColor
     id?: string,
     bridgeId?: string,
     hueResourceId?: string,
-    batteryRid?: string
+    batteryRid?: string,
+    hueDeviceController?: HueDeviceController
   ) {
     super();
     if (name) this.name = name;
@@ -21,6 +22,7 @@ export class HueLightDimmerTemperature extends DeviceLightDimmerTemperatureColor
     this.bridgeId = bridgeId;
     this.hueResourceId = hueResourceId;
     this.batteryRid = batteryRid;
+    this.hueDeviceController = hueDeviceController;
     this.moduleId = "hue";
     this.isConnected = true;
   }

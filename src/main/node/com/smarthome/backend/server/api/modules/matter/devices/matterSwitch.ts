@@ -1,21 +1,31 @@
 import { logger } from "../../../../../logger.js";
 import { DeviceSwitch } from "../../../../../model/devices/DeviceSwitch.js";
 import { MatterDeviceController } from "../matterDeviceController.js";
-import { MatterDevice } from "./matterDevice.js";
+import { MatterDeviceButtoned } from "./matterDevice.js";
 import { NodeId } from "@matter/types";
 
-export class MatterSwitch extends DeviceSwitch implements MatterDevice {
+export type MatterSwitchOptions = {
+  moduleId?: string;
+  quickAccess?: boolean;
+  isVoiceAssistantDevice?: boolean;
+};
+
+export class MatterSwitch extends DeviceSwitch implements MatterDeviceButtoned {
   private nodeId: string;
   private matterController?: MatterDeviceController;
-  
-  constructor(
-    name?: string,
-    id?: string,
-    nodeId?: string,
-    buttonIds?: string[]
-  ) {
-    super({ name, id, moduleId: "matter", isConnected: true });
+  private _isVoiceAssistantDevice = false;
+
+  constructor(name?: string, id?: string, nodeId?: string, buttonIds?: readonly string[], opts?: MatterSwitchOptions) {
+    super({
+      name,
+      id,
+      moduleId: opts?.moduleId ?? "matter",
+      isConnected: true,
+      isPairingMode: false,
+      quickAccess: opts?.quickAccess ?? false,
+    });
     this.nodeId = nodeId ?? "0";
+    this._isVoiceAssistantDevice = opts?.isVoiceAssistantDevice ?? false;
     (buttonIds ?? []).forEach(buttonId => this.addButton(buttonId));
   }
 
@@ -24,8 +34,14 @@ export class MatterSwitch extends DeviceSwitch implements MatterDevice {
   }
 
   async updateValues(): Promise<void> {
-    logger.info("Update die Werte fuer {}", this.id);
+    if (!this._isVoiceAssistantDevice) {
+      logger.info("Update die Werte fuer " +this.id);
+    }
     // TODO: Matter Device Controller Anbindung für Status/Subscribe
+  }
+
+  public isVoiceAssistantDevice(): boolean {
+    return this._isVoiceAssistantDevice;
   }
 
   protected async executeToggle(buttonId: string): Promise<void> {

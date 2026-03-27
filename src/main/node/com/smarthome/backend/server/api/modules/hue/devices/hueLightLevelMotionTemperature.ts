@@ -62,46 +62,6 @@ export class HueLightLevelMotionTemperature extends DeviceLightLevelMotionTemper
     // Temperature wird von der Bridge automatisch aktualisiert
   }
 
-  getBridgeId() {
-    return this.bridgeId;
-  }
-
-  setBridgeId(bridgeId: string) {
-    this.bridgeId = bridgeId;
-  }
-
-  getMotionRid() {
-    return this.motionRid;
-  }
-
-  setMotionRid(motionRid: string) {
-    this.motionRid = motionRid;
-  }
-
-  getLightLevelRid() {
-    return this.lightLevelRid;
-  }
-
-  setLightLevelRid(lightLevelRid: string) {
-    this.lightLevelRid = lightLevelRid;
-  }
-
-  getTemperatureRid() {
-    return this.temperatureRid;
-  }
-
-  setTemperatureRid(temperatureRid: string) {
-    this.temperatureRid = temperatureRid;
-  }
-
-  getBatteryRid() {
-    return this.batteryRid;
-  }
-
-  setBatteryRid(batteryRid: string) {
-    this.batteryRid = batteryRid;
-  }
-
   setHueDeviceController(hueDeviceController: HueDeviceController) {
     this.hueDeviceController = hueDeviceController;
   }

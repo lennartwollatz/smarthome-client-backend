@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { HueModuleManager } from "../../modules/hue/hueModuleManager.js";
 import { logger } from "../../../../logger.js";
-import type { RouterDeps } from "../../router.js";
+import type { ServerDeps } from "../../server.js";
 
 
-export function createHueModuleRouter(deps: RouterDeps) {
+export function createHueModuleRouter(deps: ServerDeps) {
   const router = Router();
-  const hueModule = new HueModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
-  deps.actionManager.registerModuleManager(hueModule);
+  const hueModule = new HueModuleManager(deps.databaseManager, deps.deviceManager, deps.eventManager);
+  deps.deviceManager.registerModuleManager(hueModule);
 
   const handleSetSensitivity = (req: { params: { deviceId: string }; body?: any }, res: any) => {
     try {

@@ -1,5 +1,4 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import { logger } from "../../../../logger.js";
 import { ModuleManager } from "../moduleManager.js";
 import { SonosDeviceController } from "./sonosDeviceController.js";
@@ -8,23 +7,24 @@ import { SonosDeviceDiscover } from "./sonosDeviceDiscover.js";
 import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
 import { SonosSpeaker } from "./devices/sonosSpeaker.js";
 import { SonosEvent } from "./sonosEvent.js";
-import { Device } from "../../../../model/index.js";
+import { Device } from "../../../../model/devices/Device.js";
 import { SonosEventStreamManager } from "./sonosEventStreamManager.js";
 import { EventManager } from "../../../events/EventManager.js";
 import { SONOSCONFIG } from "./sonosModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, SonosDeviceController, SonosDeviceController, SonosEvent, DeviceSpeaker, SonosDeviceDiscover, SonosDeviceDiscovered> {
 
   constructor(
     databaseManager: DatabaseManager,
-    actionManager: ActionManager,
+    deviceManager: DeviceManager,
     eventManager: EventManager
   ) {
     const controller = new SonosDeviceController();
     super(
       databaseManager, 
-      actionManager, 
+      deviceManager, 
       eventManager, 
       controller, 
       new SonosDeviceDiscover(databaseManager));
@@ -39,7 +39,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
       // TODO: eventuell sollte die Konvertierung zu einem SonosSpeaker und Speicherung
       // erst dann geschehen, wenn das Device übernommen wird.
       const speakers = await this.convertDiscoveredDevicesToSonosSpeakers(discoveredDevices);
-      this.actionManager.saveDevices(speakers);
+      this.deviceManager.saveDevices(speakers);
       return speakers;
     } catch (err) {
       logger.error({ err }, "Fehler bei der Geraeteerkennung");
@@ -55,7 +55,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
   }
 
   protected createEventStreamManager(): SonosEventStreamManager {
-    return new SonosEventStreamManager(this.getManagerId(), this.deviceController, this.actionManager);
+    return new SonosEventStreamManager(this.getManagerId(), this.deviceController, this.deviceManager);
   }
 
   async setVolume(deviceId: string, volume: number): Promise<boolean> {
@@ -64,7 +64,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
     if (!speaker) return false;
     try {
       speaker.setVolume(volume, true, true);
-      this.actionManager.saveDevice(speaker);
+      this.deviceManager.saveDevice(speaker);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen der Lautstaerke");
@@ -94,7 +94,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
           await speaker.play(true, true);
           break;
         case DeviceSpeaker.PlayState.STOP:
-          await speaker.stopp(true, true);
+          await speaker.stop(true, true);
           break;
         case DeviceSpeaker.PlayState.PAUSE:
           await speaker.pause(true, true);
@@ -102,7 +102,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
       }
       
       // Erfolgreich - speichere das Device mit dem neuen Status
-      this.actionManager.saveDevice(speaker);
+      this.deviceManager.saveDevice(speaker);
       return { success: true };
     } catch (err) {
       // Unerwarteter Fehler - stelle den alten Status wieder her
@@ -112,9 +112,9 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
       } else if (oldPlayState === DeviceSpeaker.PlayState.PAUSE) {
         await speaker.pause(false, false);
       } else {
-        await speaker.stopp(false, false);
+        await speaker.stop(false, false);
       }
-      this.actionManager.saveDevice(speaker);
+      this.deviceManager.saveDevice(speaker);
       return { success: false, error: err instanceof Error ? err.message : "Unerwarteter Fehler" };
     }
   }
@@ -125,7 +125,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
     if (!speaker) return false;
     try {
       speaker.setMute(mute, true, true);
-      this.actionManager.saveDevice(speaker);
+      this.deviceManager.saveDevice(speaker);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen der Stummschaltung");
@@ -160,7 +160,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
   }
 
   private async getSpeaker(deviceId: string): Promise<DeviceSpeaker | null> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) {
       logger.warn({ deviceId }, "Geraet nicht gefunden");
       return null;
@@ -243,25 +243,13 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
   }
 
   async initializeDeviceControllers(): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(this.getModuleId());
-    const updatePromises: Promise<void>[] = [];
-    
-    devices.forEach(device => {
+    const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
+  
+    for (const device of devices) {
       if (device instanceof SonosSpeaker) {
         device.setSonosController(this.deviceController);
-        // Rufe updateValues() für jedes Device auf
-        updatePromises.push(
-          device.updateValues().then(() => {
-            this.actionManager.saveDevice(device);
-          }).catch(err => {
-            logger.error({ err, deviceId: device.id }, "Fehler beim updateValues nach Controller-Initialisierung");
-          })
-        );
       }
-    });
-    
-    // Warte auf alle updateValues()-Aufrufe
-    await Promise.all(updatePromises);
+    }
   }
 }
 

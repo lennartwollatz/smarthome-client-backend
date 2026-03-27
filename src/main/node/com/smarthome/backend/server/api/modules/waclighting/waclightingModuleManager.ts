@@ -11,21 +11,21 @@ import { WACLightingEventStreamManager } from "./waclightingEventStreamManager.j
 import { WACLIGHTINGCONFIG } from "./waclightingModule.js";
 import { WACFanLight } from "./devices/wacFanLight.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
-import { ActionManager } from "../../../actions/ActionManager.js";
 import { EventManager } from "../../../events/EventManager.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 // HeosModuleManager ist abstrakt und wird von konkreten Implementierungen wie DenonModuleManager erweitert
 export class WACLightingModuleManager extends ModuleManager<WACLightingEventStreamManager, WACLightingDeviceController, WACLightingDeviceController, WACLightingEvent, DeviceFanLight, WACLightingDeviceDiscover, WACLightingDeviceDiscovered> {
 
   constructor(
     databaseManager: DatabaseManager,
-    actionManager: ActionManager,
+    deviceManager: DeviceManager,
     eventManager: EventManager
   ) {
     const controller = new WACLightingDeviceController();
     super(
       databaseManager,
-      actionManager,
+      deviceManager,
       eventManager,
       controller,
       new WACLightingDeviceDiscover(databaseManager)
@@ -40,7 +40,7 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
   }
 
   protected createEventStreamManager(): WACLightingEventStreamManager {
-    return new WACLightingEventStreamManager(this.getManagerId(), this.getModuleId(), this.deviceController, this.actionManager);
+    return new WACLightingEventStreamManager(this.getManagerId(), this.getModuleId(), this.deviceController, this.deviceManager);
   }
 
   async discoverDevices(): Promise<Device[]> {
@@ -50,7 +50,7 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
       const wacLightingDevices = await this.deviceDiscover.discover(searchDurationSek, []);
       logger.info({ count: wacLightingDevices.length }, "Geraete gefunden");
       const fans = await this.convertDiscoveredDevicesToWACLightingDevices(wacLightingDevices);
-      this.actionManager.saveDevices(fans);
+      this.deviceManager.saveDevices(fans);
       this.initialiseEventStreamManager();
       return fans;
     } catch (err) {
@@ -89,7 +89,7 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
     if (!fanLight) return false;
     try {
       fanLight.setOn(true, true);
-      this.actionManager.saveDevice(fanLight);
+      this.deviceManager.saveDevice(fanLight);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Einschalten des Fans");
@@ -103,7 +103,7 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
     if (!fanLight) return false;
     try {
       fanLight.setOff(true, true);
-      this.actionManager.saveDevice(fanLight);
+      this.deviceManager.saveDevice(fanLight);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Ausschalten des Fans");
@@ -117,7 +117,7 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
     if (!fanLight) return false;
     try {
       fanLight.setSpeed(speed, true, true);
-      this.actionManager.saveDevice(fanLight);
+      this.deviceManager.saveDevice(fanLight);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen der Fan-Geschwindigkeit");
@@ -131,7 +131,7 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
     if (!fanLight) return false;
     try {
       await fanLight.setLightOn(true, true);
-      this.actionManager.saveDevice(fanLight);
+      this.deviceManager.saveDevice(fanLight);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Schalten des Lichts");
@@ -145,7 +145,7 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
     if (!fanLight) return false;
     try {
       await fanLight.setLightOff(true, true);
-      this.actionManager.saveDevice(fanLight);
+      this.deviceManager.saveDevice(fanLight);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Ausschalten des Lichts");
@@ -159,7 +159,7 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
     if (!fanLight) return false;
     try {
       fanLight.setLightBrightness(brightness, true, true);
-      this.actionManager.saveDevice(fanLight);
+      this.deviceManager.saveDevice(fanLight);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen der Licht-Helligkeit");
@@ -168,7 +168,7 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
   }
 
   private async getFanLight(deviceId: string): Promise<WACFanLight | null> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) {
       logger.warn({ deviceId }, "Geraet nicht gefunden");
       return null;
@@ -218,12 +218,10 @@ export class WACLightingModuleManager extends ModuleManager<WACLightingEventStre
   }
 
   async initializeDeviceControllers(): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(this.getModuleId());
+    const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
     for (const device of devices) {
       if (device instanceof WACFanLight) {
         device.setWACController(this.deviceController);
-        await device.updateValues();
-        this.actionManager.saveDevice(device);
       }
     }
   }

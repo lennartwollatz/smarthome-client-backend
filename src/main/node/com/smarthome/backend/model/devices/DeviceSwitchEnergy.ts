@@ -1,6 +1,5 @@
 import { DeviceSwitch } from "./DeviceSwitch.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import { EventSwitchStatusChanged } from "../../server/events/events/EventSwitchStatusChanged.js";
 import { EventSwitchEnergyUsageChanged } from "../../server/events/events/EventSwitchEnergyUsageChanged.js";
 import { EventSwitchEnergyUsageHigher } from "../../server/events/events/EventSwitchEnergyUsageHigher.js";
 
@@ -68,6 +67,34 @@ export abstract class DeviceSwitchEnergy extends DeviceSwitch {
   abstract updateValues(): Promise<void>;
 
 
+  isEnergyUsageHigher(threshold: number, timePeriod: string): boolean {
+    if (!this.energyUsage) {
+      return false;
+    }
+    let usageValue: number = 0;
+    switch (timePeriod.toLowerCase()) {
+      case 'now':
+        usageValue = this.energyUsage.now;
+        break;
+      case 'day':
+        usageValue = this.energyUsage.tt;
+        break;
+      case 'week':
+        usageValue = this.energyUsage.wt;
+        break;
+      case 'month':
+        usageValue = this.energyUsage.mt;
+        break;
+      case 'year':
+        usageValue = this.energyUsage.yt;
+        break;
+      default:
+        return false;
+    }
+    return usageValue > threshold;
+  }
+
+
   /**
    * Gibt die verfügbaren Zeiträume für Energieverbrauch zurück
    * @returns Array von verfügbaren Zeitraum-Werten
@@ -124,7 +151,6 @@ export abstract class DeviceSwitchEnergy extends DeviceSwitch {
       await this.executeSetEnergyUsage(energyUsage);
     }
     if (trigger) {
-      this.eventManager?.triggerEvent(new EventSwitchStatusChanged(this.id, deviceBefore, { ...this }));
       this.eventManager?.triggerEvent(new EventSwitchEnergyUsageChanged(this.id, deviceBefore, energyUsage));
       this.eventManager?.triggerEvent(new EventSwitchEnergyUsageHigher(this.id, deviceBefore, energyUsage));
     }

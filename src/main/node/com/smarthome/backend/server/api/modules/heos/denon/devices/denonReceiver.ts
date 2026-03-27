@@ -80,7 +80,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
     await this.heos?.setPlayState(this.toHeosSpeaker(), "pause");
   }
 
-  protected async executeStopp(): Promise<void> {
+  protected async executeStop(): Promise<void> {
     await this.heos?.setPlayState(this.toHeosSpeaker(), "stop");
   }
 
@@ -104,12 +104,12 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
     await this.heos?.playTextAsSpeech(this.toHeosSpeaker(), text);
   }
 
-  protected async executeSetSubwooferPower(_subwooferName: string, power: boolean): Promise<void> {
+  protected async executeSetSubwooferPower(_subwooferId: string, power: boolean): Promise<void> {
     await this.heos?.setDenonSubwooferPower(this, power);
   }
 
-  protected async executeSetSubwooferLevel(subwooferName: string, level: number): Promise<void> {
-    await this.heos?.setDenonSubwooferLevel(this, subwooferName, level);
+  protected async executeSetSubwooferLevel(subwooferId: string, level: number): Promise<void> {
+    await this.heos?.setDenonSubwooferLevel(this, subwooferId, level);
   }
 
   protected async executeSetVolumeStart(volumeStart: number): Promise<void> {

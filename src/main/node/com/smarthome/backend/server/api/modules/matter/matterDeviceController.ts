@@ -422,6 +422,13 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
 
   public async startEventStream(device: Device, callback: (event: MatterEvent) => void): Promise<void> {
     const matterDevice = device as unknown as MatterDevice;
+    if (typeof matterDevice.getNodeId !== "function") {
+      logger.debug(
+        { deviceId: device.id },
+        "Matter EventStream uebersprungen: Geraet ist noch kein MatterDevice (z. B. vor DB-Konvertierung)"
+      );
+      return;
+    }
     const node = await this.getNode(NodeId(matterDevice.getNodeId()));
     if( !node) return;
     node.events.eventTriggered.on(({ path: { nodeId, clusterId, endpointId, eventName }, events }) => {

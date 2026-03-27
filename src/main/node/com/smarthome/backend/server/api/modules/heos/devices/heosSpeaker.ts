@@ -91,7 +91,7 @@ export class HeosSpeaker extends DeviceSpeaker {
     await this.heos?.setPlayState(this, "pause");
   }
 
-  protected async executeStopp(): Promise<void> {
+  protected async executeStop(): Promise<void> {
     await this.heos?.setPlayState(this, "stop");
   }
 

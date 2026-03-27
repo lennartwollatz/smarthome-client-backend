@@ -19,40 +19,6 @@ export abstract class DeviceSpeaker extends Device {
     STOP: "stop"
   } as const;
 
-  static TriggerFunctionName = {
-    ON_VOLUME_CHANGED: "onVolumeChanged",
-    ON_VOLUME_LESS: "onVolumeLess(int)",
-    ON_VOLUME_GREATER: "onVolumeGreater(int)",
-    ON_VOLUME_REACHES: "onVolumeReaches(int)",
-    ON_PLAY: "onPlay",
-    ON_STOP: "onStop",
-    ON_MUTE: "onMute",
-    ON_PAUSE: "onPause",
-    ON_NEXT: "onNext",
-    ON_PREVIOUS: "onPrevious"
-  } as const;
-
-  static ActionFunctionName = {
-    SET_VOLUME: "setVolume(int)",
-    PLAY: "play",
-    PAUSE: "pause",
-    STOPP: "stopp",
-    SET_MUTE: "setMute",
-    PLAY_NEXT: "playNext",
-    PLAY_PREVIOUS: "playPrevious",
-    PLAY_SOUND: "playSound(string)",
-    PLAY_TEXT_AS_SOUND: "playTextAsSound(string)"
-  } as const;
-
-  static BoolFunctionName = {
-    IS_PLAYING: "isPlaying",
-    IS_PAUSING: "isPausing",
-    IS_STOPPED: "isStopped",
-    IS_VOLUME_GREATER: "isVolumeGreater(int)",
-    IS_VOLUME_LESS: "isVolumeLess(int)",
-    IS_VOLUME: "isVolume(int)"
-  } as const;
-
   playState?: string;
   volume?: number;
   muted?: boolean;
@@ -71,7 +37,30 @@ export abstract class DeviceSpeaker extends Device {
 
   abstract updateValues(): Promise<void>;
 
-
+  isVolumeGreater(volume: number): boolean {
+    return (this.volume ?? 0) > volume;
+  }
+  isVolumeLess(volume: number): boolean {
+    return (this.volume ?? 0) < volume;
+  }
+  isVolumeEquals(volume: number): boolean {
+    return (this.volume ?? 0) === volume;
+  }
+  isPlaying(): boolean {
+    return this.playState === DeviceSpeaker.PlayState.PLAY;
+  }
+  isPausing(): boolean {
+    return this.playState === DeviceSpeaker.PlayState.PAUSE;
+  }
+  isStopped(): boolean {
+    return this.playState === DeviceSpeaker.PlayState.STOP;
+  }
+  isMuted(): boolean {
+    return this.muted === true;
+  }
+  isUnmuted(): boolean {
+    return this.muted === false;
+  }
 
   async setVolume(volume: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
@@ -120,11 +109,11 @@ export abstract class DeviceSpeaker extends Device {
 
   protected abstract executePause(): Promise<void>;
 
-  async stopp(execute: boolean, trigger: boolean = true) {
+  async stop(execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.playState = DeviceSpeaker.PlayState.STOP;
     if (execute) {
-      await this.executeStopp();
+      await this.executeStop();
     }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
@@ -132,7 +121,7 @@ export abstract class DeviceSpeaker extends Device {
     }
   }
 
-  protected abstract executeStopp(): Promise<void>;
+  protected abstract executeStop(): Promise<void>;
 
   async setMute(muted: boolean, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };

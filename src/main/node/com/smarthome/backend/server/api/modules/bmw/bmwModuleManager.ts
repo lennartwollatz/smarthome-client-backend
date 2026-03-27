@@ -1,5 +1,5 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
+import type { ActionManager } from "../../entities/actions/ActionManager.js";
 import { logger } from "../../../../logger.js";
 import { ModuleManager } from "../moduleManager.js";
 import { BMWDeviceController } from "./bmwDeviceController.js";
@@ -15,6 +15,7 @@ import { Device } from "../../../../model/devices/Device.js";
 import { DeviceCarAddress } from "../../../../model/devices/DeviceCar.js";
 import { BMWCredentialsStore, type BMWCredentials } from "./bmwCredentialsStore.js";
 import { BMWTokenStore } from "./bmwTokenStore.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class BMWModuleManager extends ModuleManager<
   BMWEventStreamManager,
@@ -30,7 +31,7 @@ export class BMWModuleManager extends ModuleManager<
 
   constructor(
     databaseManager: DatabaseManager,
-    actionManager: ActionManager,
+    deviceManager: DeviceManager,
     eventManager: EventManager
   ) {
     const tokenStore = new BMWTokenStore(databaseManager);
@@ -42,7 +43,7 @@ export class BMWModuleManager extends ModuleManager<
       return { username: credentials.username, password: credentials.password, captchaToken: credentials.captchaToken };
     });
 
-    super(databaseManager, actionManager, eventManager, deviceController, deviceDiscover);
+    super(databaseManager, deviceManager, eventManager, deviceController, deviceDiscover);
     this.credentialsStore = credentialsStore;
     this.tokenStore = tokenStore;
   }
@@ -56,7 +57,7 @@ export class BMWModuleManager extends ModuleManager<
   }
 
   protected createEventStreamManager(): BMWEventStreamManager {
-    return new BMWEventStreamManager(this.getManagerId(), this.getModuleId(), this.deviceController, this.actionManager);
+    return new BMWEventStreamManager(this.getManagerId(), this.getModuleId(), this.deviceController, this.deviceManager);
   }
 
   getCredentialsInfo() {
@@ -129,7 +130,7 @@ export class BMWModuleManager extends ModuleManager<
       // Wenn der Login erfolgreich war, liegt jetzt ein OAuth Token im TokenStore -> CaptchaToken entfernen.
       this.clearCaptchaTokenIfOauthTokenPresent();
       const cars = await this.convertDiscoveredVehiclesToCars(discoveredVehicles);
-      this.actionManager.saveDevices(cars);
+      this.deviceManager.saveDevices(cars);
       this.initialiseEventStreamManager();
       return cars;
     } catch (err) {
@@ -142,7 +143,7 @@ export class BMWModuleManager extends ModuleManager<
     const car = await this.getCar(deviceId);
     if (!car) return false;
     car.startClimateControl(true);
-    this.actionManager.saveDevice(car);
+    this.deviceManager.saveDevice(car);
     return true;
   }
 
@@ -150,7 +151,7 @@ export class BMWModuleManager extends ModuleManager<
     const car = await this.getCar(deviceId);
     if (!car) return false;
     car.stopClimateControl(true);
-    this.actionManager.saveDevice(car);
+    this.deviceManager.saveDevice(car);
     return true;
   }
 
@@ -158,7 +159,7 @@ export class BMWModuleManager extends ModuleManager<
     const car = await this.getCar(deviceId);
     if (!car) return false;
     car.sendAddress(subject, address, true);
-    this.actionManager.saveDevice(car);
+    this.deviceManager.saveDevice(car);
     return true;
   }
 
@@ -167,7 +168,7 @@ export class BMWModuleManager extends ModuleManager<
     if (!car) return false;
     await car.updateValues();
     this.clearCaptchaTokenIfOauthTokenPresent();
-    this.actionManager.saveDevice(car);
+    this.deviceManager.saveDevice(car);
     return true;
   }
 
@@ -192,7 +193,7 @@ export class BMWModuleManager extends ModuleManager<
   }
 
   private async getCar(deviceId: string): Promise<BMWCar | null> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return null;
     if (device instanceof BMWCar) {
       device.setBMWController(this.deviceController);
@@ -235,13 +236,11 @@ export class BMWModuleManager extends ModuleManager<
   }
 
   async initializeDeviceControllers(): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(this.getModuleId());
+    const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
     for (const device of devices) {
       if (device instanceof BMWCar) {
         device.setBMWController(this.deviceController);
         device.setCredentialsProvider(() => this.getCredentialsForUse());
-        await device.updateValues();
-        this.actionManager.saveDevice(device);
       }
     }
   }

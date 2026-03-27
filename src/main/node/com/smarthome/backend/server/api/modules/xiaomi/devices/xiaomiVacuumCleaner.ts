@@ -68,8 +68,11 @@ export class XiaomiVacuumCleaner extends DeviceVacuumCleaner {
   }
 
   async updateValues(): Promise<void> {
-    if (!this.xiaomi) {
-      logger.debug({ id: this.id }, "updateValues() uebersprungen - xiaomi ist noch null");
+    if (!this.xiaomi || typeof this.xiaomi.callMiioAndGetResult !== "function") {
+      logger.debug(
+        { id: this.id },
+        "updateValues() uebersprungen - kein gueltiger XiaomiDeviceController"
+      );
       return;
     }
     if (!this.address || !this.token) {
@@ -150,6 +153,12 @@ export class XiaomiVacuumCleaner extends DeviceVacuumCleaner {
 
   setXiaomiController(xiaomiController?: XiaomiDeviceController) {
     this.xiaomi = xiaomiController;
+  }
+
+  toJSON(): Record<string, unknown> {
+    const json = super.toJSON();
+    delete json.xiaomi;
+    return json;
   }
 
   /**

@@ -14,6 +14,13 @@ export abstract class DeviceFanLight extends DeviceFan {
     this.type = DeviceType.FAN_LIGHT;
   }
 
+  isLightOn():boolean {
+    return this.lightOn === true;
+  }
+  isLightOff():boolean {
+    return this.lightOn === false;
+  }
+
   async setLightOn(execute: boolean, trigger: boolean = true) {
     let deviceBefore = { ...this };
     this.lightOn = true;

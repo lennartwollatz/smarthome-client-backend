@@ -16,6 +16,13 @@ export abstract class DeviceLight extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  isLightOn(): boolean {
+    return this.on === true;
+  }
+  isLightOff(): boolean {
+    return this.on === false;
+  }
+
   async setOn(execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.on = true;

@@ -4,5 +4,10 @@ import type { NodeId } from "@matter/types";
 export interface MatterDevice {
     getNodeId(): NodeId;
     setNodeId(nodeId: NodeId): void;
+}
+
+export interface MatterDeviceButtoned {
+    getNodeId(): NodeId;
+    setNodeId(nodeId: NodeId): void;
     getButton(buttonId: string): Button | undefined;
 }

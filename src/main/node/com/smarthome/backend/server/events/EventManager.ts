@@ -1,9 +1,10 @@
+import { logger } from "../../logger.js";
 import { EventListener } from "./EventListener.js";
 import { Event } from "./events/Event.js";
 import { EventType } from "./event-types/EventType.js";
 import { EventLogger } from "./EventLogger.js";
-import { ActionRunnable } from "../actions/runnable/ActionRunnable.js";
-import { ActionRunnableEventBased } from "../actions/runnable/ActionRunnableEventBased.js";
+import { ActionRunnable } from "../api/entities/actions/runnable/ActionRunnable.js";
+import { ActionRunnableEventBased } from "../api/entities/actions/runnable/ActionRunnableEventBased.js";
 
 export class EventManager {
     private eventLogger: EventLogger;
@@ -75,18 +76,30 @@ export class EventManager {
         this.listeners.delete(deviceId);
     }
 
+    removeListenerForScene(sceneId: string) {
+        //TODO: implement
+    }
+
     public removeListenerForDeviceAndEventType(deviceId: string, eventType: EventType) {
         this.listeners.get(deviceId)?.delete(eventType);
     }
 
     public async triggerEvent(event: Event) {
         this.eventLogger.log(event);
-        if (!this.listeners.has(event.deviceId)) {
+        const { deviceId, eventType } = event;
+
+        if (!this.listeners.has(deviceId)) {
+            logger.warn({ deviceId, eventType }, "EventManager: Kein Listener fuer deviceId");
             return;
         }
-        if (!this.listeners.get(event.deviceId)?.has(event.eventType)) {
+        const byDevice = this.listeners.get(deviceId)!;
+        if (!byDevice.has(eventType)) {
+            logger.warn({ deviceId, eventType }, "EventManager: Kein Listener fuer diesen Event-Typ");
             return;
         }
-        this.listeners.get(event.deviceId)?.get(event.eventType)?.forEach(l => l.checkedRun(event));
+        const listeners = byDevice.get(eventType)!;
+        for (const l of listeners) {
+            l.checkedRun(event);
+        }
     }
 }

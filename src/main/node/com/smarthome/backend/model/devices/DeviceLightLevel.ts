@@ -1,10 +1,10 @@
 import { Device } from "./Device.js";
 import { DeviceType } from "./helper/DeviceType.js";
 import { EventLightLevelStatusChanged } from "../../server/events/events/EventLightLevelStatusChanged.js";
-import { EventBrightnessChanged } from "../../server/events/events/EventBrightnessChanged.js";
-import { EventBrightnessEquals } from "../../server/events/events/EventBrightnessEquals.js";
-import { EventBrightnessLess } from "../../server/events/events/EventBrightnessLess.js";
-import { EventBrightnessGreater } from "../../server/events/events/EventBrightnessGreater.js";
+import { EventLightLevelDark } from "../../server/events/events/EventLightLevelDark.js";
+import { EventLightLevelBright } from "../../server/events/events/EventLightLevelBright.js";
+import { EventLightLevelLess } from "../../server/events/events/EventLightLevelLess.js";
+import { EventLightLevelGreater } from "../../server/events/events/EventLightLevelGreater.js";
 
 export abstract class DeviceLightLevel extends Device {
   lightLevel?: number;
@@ -17,6 +17,19 @@ export abstract class DeviceLightLevel extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  isDark(): boolean {
+    return (this.lightLevel ?? 0) < 20;
+  }
+  isBright(): boolean {
+    return (this.lightLevel ?? 0) > 50;
+  }
+  isLightLevelGreater(lightLevel: number): boolean {
+    return (this.lightLevel ?? 0) > lightLevel;
+  }
+  isLightLevelLess(lightLevel: number): boolean {
+    return (this.lightLevel ?? 0) < lightLevel;
+  }
+
   async setLightLevel(lightLevel: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.lightLevel = lightLevel;
@@ -25,10 +38,10 @@ export abstract class DeviceLightLevel extends Device {
     }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventLightLevelStatusChanged(this.id, deviceBefore, {...this}));
-      this.eventManager?.triggerEvent(new EventBrightnessChanged(this.id, deviceBefore, lightLevel));
-      this.eventManager?.triggerEvent(new EventBrightnessEquals(this.id, deviceBefore, lightLevel));
-      this.eventManager?.triggerEvent(new EventBrightnessLess(this.id, deviceBefore, lightLevel));
-      this.eventManager?.triggerEvent(new EventBrightnessGreater(this.id, deviceBefore, lightLevel));
+      this.eventManager?.triggerEvent(new EventLightLevelDark(this.id, deviceBefore, lightLevel));
+      this.eventManager?.triggerEvent(new EventLightLevelBright(this.id, deviceBefore, lightLevel));
+      this.eventManager?.triggerEvent(new EventLightLevelGreater(this.id, deviceBefore, lightLevel));
+      this.eventManager?.triggerEvent(new EventLightLevelLess(this.id, deviceBefore, lightLevel));
     }
   }
 

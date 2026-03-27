@@ -5,31 +5,21 @@ import { createDenonModuleRouter } from "./modules/denonModule.service.js";
 import { createHueModuleRouter } from "./modules/hueModule.service.js";
 import { createLGModuleRouter } from "./modules/lgModule.service.js";
 import { createMatterModuleRouter } from "./modules/matterModule.service.js";
-import { createPresenceModuleRouter } from "./modules/presenceModule.service.js";
 import { createSonosModuleRouter } from "./modules/sonosModule.service.js";
 import { createWACLightingModuleRouter } from "./modules/waclightingModule.service.js";
 import { createXiaomiModuleRouter } from "./modules/xiaomiModule.service.js";
 import { createBMWModuleRouter } from "./modules/bmwModule.service.js";
 import { createAppleCalendarModuleRouter } from "./modules/appleCalendarModule.service.js";
 import { createCalendarModuleRouter } from "./modules/calendarModule.service.js";
-import { createWeatherModuleRouter } from "./modules/weatherModule.service.js";
-import type { RouterDeps } from "../router.js";
-import { DeviceWeather } from "../../../model/devices/DeviceWeather.js";
-import { DeviceType } from "../../../model/devices/helper/DeviceType.js";
-import crypto from "node:crypto";
+import { createWeatherModuleRouter, ensureWeatherDevice } from "./modules/weatherModule.service.js";
+import type { ServerDeps } from "../server.js";
 
-export function createModuleRouter(deps: RouterDeps) {
+export function createModuleRouter(deps: ServerDeps) {
   const router = Router();
   const moduleRepository = new JsonRepository<ModuleModel>(deps.databaseManager, "Module");
 
-  // Parametrisierte Routen ZUERST, damit /:moduleId/install vor router.use("/weather") greift
   router.get("/", (_req, res) => {
     const modules = enrichWithDefaultModules(moduleRepository.findAll());
-    // Wenn Weather-Modul installiert und aktiv: genau ein Gerät sicherstellen
-    const weatherMod = modules.find((m) => m.id === "weather" && m.isInstalled && m.isActive);
-    if (weatherMod) {
-      ensureDefaultWeatherDeviceIfNeeded("weather", deps);
-    }
     const modulesForApi = modules.map(removeSensitiveDataFromModule);
     res.status(200).json(modulesForApi);
   });
@@ -47,8 +37,10 @@ export function createModuleRouter(deps: RouterDeps) {
     const module = getOrCreateModule(moduleRepository, req.params.moduleId);
     module.isInstalled = true;
     module.isActive = true;
-    ensureDefaultWeatherDeviceIfNeeded(req.params.moduleId, deps);
-    deps.actionManager.addDevicesForModule(req.params.moduleId);
+    if (req.params.moduleId === "weather") {
+      ensureWeatherDevice(deps);
+    }
+    deps.deviceManager.addDevicesForModule(req.params.moduleId);
     moduleRepository.save(req.params.moduleId, module);
     res.status(200).json(true);
   });
@@ -66,7 +58,7 @@ export function createModuleRouter(deps: RouterDeps) {
     const module = getOrCreateModule(moduleRepository, req.params.moduleId);
     module.isInstalled = false;
     module.isActive = false;
-    deps.actionManager.removeDevicesForModule(req.params.moduleId);
+    deps.deviceManager.removeDevicesForModule(req.params.moduleId);
     moduleRepository.save(req.params.moduleId, module);
     res.status(200).json(true);
   });
@@ -110,10 +102,12 @@ export function createModuleRouter(deps: RouterDeps) {
     }
     module.isActive = Boolean(request.isActive);
     if (module.isActive) {
-      ensureDefaultWeatherDeviceIfNeeded(req.params.moduleId, deps);
-      deps.actionManager.addDevicesForModule(req.params.moduleId);
+      if (req.params.moduleId === "weather") {
+        ensureWeatherDevice(deps);
+      }
+      deps.deviceManager.addDevicesForModule(req.params.moduleId);
     } else {
-      deps.actionManager.removeDevicesForModule(req.params.moduleId);
+      deps.deviceManager.removeDevicesForModule(req.params.moduleId);
     }
     moduleRepository.save(req.params.moduleId, module);
     res.status(200).json(module.isActive);
@@ -125,7 +119,6 @@ export function createModuleRouter(deps: RouterDeps) {
   router.use("/calendar-apple", createAppleCalendarModuleRouter(deps));
   router.use("/denon", createDenonModuleRouter(deps));
   router.use("/matter", createMatterModuleRouter(deps));
-  router.use("/presence", createPresenceModuleRouter(deps));
   router.use("/hue", createHueModuleRouter(deps));
   router.use("/lg", createLGModuleRouter(deps));
   router.use("/sonos", createSonosModuleRouter(deps));
@@ -178,24 +171,6 @@ function removeSensitiveDataFromModule(module: ModuleModel) {
     };
   }
   return module;
-}
-
-function ensureDefaultWeatherDeviceIfNeeded(moduleId: string, deps: RouterDeps): void {
-  if (moduleId !== "weather") return;
-  const existing = deps.actionManager.getDevicesForModule("weather");
-  if (existing.length > 0) return;
-  const device = new DeviceWeather({
-    id: crypto.randomUUID(),
-    name: "Wetter",
-    moduleId: "weather",
-    type: DeviceType.WEATHER,
-    latitude: 52.52,
-    longitude: 13.41,
-    isConnected: true,
-    quickAccess: true,
-  });
-  deps.actionManager.saveDevice(device);
-  deps.actionManager.restartEventStreamForModule("weather");
 }
 
 function getOrCreateModule(

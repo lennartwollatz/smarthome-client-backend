@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { LGModuleManager } from "../../modules/lg/lgModuleManager.js";
 import { logger } from "../../../../logger.js";
-import type { RouterDeps } from "../../router.js";
+import type { ServerDeps } from "../../server.js";
 
-export function createLGModuleRouter(deps: RouterDeps) {
+export function createLGModuleRouter(deps: ServerDeps) {
   const router = Router();
-  const lgModule = new LGModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
-  deps.actionManager.registerModuleManager(lgModule);
+  const lgModule = new LGModuleManager(deps.databaseManager, deps.deviceManager, deps.eventManager);
+  deps.deviceManager.registerModuleManager(lgModule);
 
   router.get("/devices/discover", async (_req, res) => {
     try {
@@ -26,7 +26,7 @@ export function createLGModuleRouter(deps: RouterDeps) {
         res.status(404).json({ error: "Gerät nicht gefunden oder nicht unterstützt" });
         return;
       }
-      const device = deps.actionManager.getDevice(deviceId);
+      const device = deps.deviceManager.getDevice(deviceId);
       res.status(200).json({ success: true, device: device ?? undefined });
     } catch (error) {
       logger.error({ error }, "Fehler beim Pairing des LG-Geraets");

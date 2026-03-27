@@ -10,7 +10,7 @@ export class EventStop extends Event {
       id: 0,
       name: "device",
       type: "obj",
-      value: deviceBefore
+      value: deviceBefore,
     };
     super(eventId, deviceId, Date.now(), EventType.STOP, [eventCondition], [], []);
   }

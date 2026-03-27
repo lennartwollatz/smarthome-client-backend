@@ -4,16 +4,17 @@ import { WeatherEvent } from "./weatherEvent.js";
 import { WEATHERMODULE } from "./weatherModule.js";
 import { DeviceWeather } from "../../../../model/devices/DeviceWeather.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
+import type { ActionManager } from "../../entities/actions/ActionManager.js";
 import { logger } from "../../../../logger.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 const POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 Minuten
 
 export class WeatherEventStreamManager extends ModuleEventStreamManager<WeatherDeviceController, WeatherEvent> {
   private pollIntervalId: ReturnType<typeof setInterval> | null = null;
 
-  constructor(managerId: string, controller: WeatherDeviceController, actionManager: ActionManager) {
-    super(managerId, WEATHERMODULE.id, controller, actionManager);
+  constructor(managerId: string, controller: WeatherDeviceController, deviceManager: DeviceManager) {
+    super(managerId, WEATHERMODULE.id, controller, deviceManager);
   }
 
   protected handleEvent(event: WeatherEvent): void {
@@ -21,7 +22,7 @@ export class WeatherEventStreamManager extends ModuleEventStreamManager<WeatherD
   }
 
   protected async startEventStream(callback: (event: WeatherEvent) => void): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(WEATHERMODULE.id);
+    const devices = this.deviceManager.getDevicesForModule(WEATHERMODULE.id);
     const weatherDevices = devices.filter(
       (d): d is DeviceWeather => d?.type === DeviceType.WEATHER
     );
@@ -32,7 +33,7 @@ export class WeatherEventStreamManager extends ModuleEventStreamManager<WeatherD
     }
 
     const poll = async () => {
-      const currentDevices = this.actionManager.getDevicesForModule(WEATHERMODULE.id).filter(
+      const currentDevices = this.deviceManager.getDevicesForModule(WEATHERMODULE.id).filter(
         (d): d is DeviceWeather => d?.type === DeviceType.WEATHER
       );
       for (const device of currentDevices) {
@@ -43,7 +44,7 @@ export class WeatherEventStreamManager extends ModuleEventStreamManager<WeatherD
         try {
           const success = await this.controller.fetchWeather(device);
           if (success) {
-            this.actionManager.saveDevice(device);
+            this.deviceManager.saveDevice(device);
             callback({
               deviceid: device.id!,
               data: { type: "weather.updated", value: device }

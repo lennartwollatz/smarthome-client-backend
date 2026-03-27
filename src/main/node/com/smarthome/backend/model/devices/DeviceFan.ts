@@ -15,6 +15,16 @@ export abstract class DeviceFan extends DeviceLight {
     this.type = DeviceType.FAN;
   }
 
+  fanSpeedEquals(speed: number):boolean {
+    return (this.speed ?? 0) === speed;
+  }
+  fanSpeedLess(speed: number):boolean {
+    return (this.speed ?? 0) < speed;
+  }
+  fanSpeedGreater(speed: number):boolean {
+    return (this.speed ?? 0) > speed;
+  }
+
   async setSpeed(speed: number, execute: boolean, trigger: boolean = true) {
     let fanBefore = { ...this };
     this.speed = speed;

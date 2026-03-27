@@ -130,7 +130,7 @@ export class DeviceCalendar extends Device {
     return this.modules.find(module => module.getModuleId() === target);
   }
 
-  entryStarted(entryId: string, now: Date = new Date()) {
+  entryStarted(entryId: string, now: Date = new Date()):boolean {
     const ev = this.getEntry(entryId);
     if (!ev) return false;
     const nowMs = now.getTime();
@@ -140,7 +140,7 @@ export class DeviceCalendar extends Device {
     return s <= nowMs && nowMs < e;
   }
 
-  entryEnded(entryId: string, now: Date = new Date()) {
+  entryEnded(entryId: string, now: Date = new Date()):boolean {
     const ev = this.getEntry(entryId);
     if (!ev) return false;
     const nowMs = now.getTime();
@@ -149,17 +149,38 @@ export class DeviceCalendar extends Device {
     return nowMs >= e;
   }
 
-  hasEntriesToday(now: Date = new Date()) {
+  hasEntryNow(now: Date = new Date()):boolean {
+    return this.getCurrentEntry(now) != null;
+  }
+
+  hasEntryInNextMinutes(minutes: number, now: Date = new Date()):boolean {
+    const next = this.getNextEntry(now);
+    if (!next) return false;
+    const nowMs = now.getTime();
+    const startMs = new Date(next.start).getTime();
+    if (Number.isNaN(nowMs) || Number.isNaN(startMs)) return false;
+    return startMs >= nowMs && startMs <= nowMs + Math.max(0, minutes) * 60_000;
+  }
+
+  nextEntryTitleContains(needle: string, now: Date = new Date()):boolean {
+    const n = (needle ?? "").trim().toLowerCase();
+    if (!n) return false;
+    const next = this.getNextEntry(now);
+    const title = (next?.title ?? "").toLowerCase();
+    return title.includes(n);
+  }
+
+  hasEntriesToday(now: Date = new Date()):boolean {
     const { from, to } = dayRange(now, 0);
     return this.hasEntriesInRange(from, to);
   }
 
-  hasEntriesTomorrow(now: Date = new Date()) {
+  hasEntriesTomorrow(now: Date = new Date()):boolean {
     const { from, to } = dayRange(now, 1);
     return this.hasEntriesInRange(from, to);
   }
 
-  hasEntriesThisWeek(now: Date = new Date()) {
+  hasEntriesThisWeek(now: Date = new Date()):boolean {
     const { from, to } = weekRange(now);
     return this.hasEntriesInRange(from, to);
   }
@@ -433,19 +454,6 @@ export class DeviceCalendar extends Device {
     }
   }
 
-  hasEntryNow(now: Date = new Date()) {
-    return this.getCurrentEntry(now) != null;
-  }
-
-  hasEntryInNextMinutes(minutes: number, now: Date = new Date()) {
-    const next = this.getNextEntry(now);
-    if (!next) return false;
-    const nowMs = now.getTime();
-    const startMs = new Date(next.start).getTime();
-    if (Number.isNaN(nowMs) || Number.isNaN(startMs)) return false;
-    return startMs >= nowMs && startMs <= nowMs + Math.max(0, minutes) * 60_000;
-  }
-
   private hasEntriesInRange(from: Date, to: Date): boolean {
     const fromMs = from.getTime();
     const toMs = to.getTime();
@@ -476,14 +484,6 @@ export class DeviceCalendar extends Device {
       }
     }
     return best;
-  }
-
-  nextEntryTitleContains(needle: string, now: Date = new Date()) {
-    const n = (needle ?? "").trim().toLowerCase();
-    if (!n) return false;
-    const next = this.getNextEntry(now);
-    const title = (next?.title ?? "").toLowerCase();
-    return title.includes(n);
   }
 
   setEntries(entries: DeviceCalendarEntry[], calendarId: string) {

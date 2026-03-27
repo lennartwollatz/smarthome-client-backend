@@ -18,12 +18,59 @@ type HueDeviceRecord = Record<string, unknown> & {
   moduleId?: string;
 };
 
-type MotionStatus = {
-  motion?: boolean;
-  lastChanged?: string;
+export type MotionStatus = {
+  motion: boolean;
+  lastChanged: string;
+  sensitivity: number;
+};
+
+export type LightLevelStatus = {
+  lightLevel: number;
+};
+
+export type TemperatureStatus = {
+  temperature: number;
+};
+
+export type BatteryStatus = {
+  batteryLevel: number;
+};
+
+export type LightStatus = {
+  on: boolean;
+  brightness?: number;
+  colorX?: number;
+  colorY?: number;
+  colorTemperature?: number;
 };
 
 type HueResource = Record<string, unknown> & { id?: string };
+
+/** Hue Farbtemperatur in Mirek; für Nutzer-UI wird 0–100 % linear auf diesen Bereich abgebildet. */
+const LIGHT_COLOR_TEMP_MIREK_MIN = 153;
+const LIGHT_COLOR_TEMP_MIREK_MAX = 500;
+
+/**
+ * Mirek von der Bridge → 0–100 % (invers linear zu {@link lightTemperaturePercentToMirek}).
+ */
+export function mirekToLightTemperaturePercent(mirek: number): number {
+  if (!Number.isFinite(mirek)) return 0;
+  const m = Math.max(LIGHT_COLOR_TEMP_MIREK_MIN, Math.min(LIGHT_COLOR_TEMP_MIREK_MAX, mirek));
+  const span = LIGHT_COLOR_TEMP_MIREK_MAX - LIGHT_COLOR_TEMP_MIREK_MIN;
+  return Math.round(((m - LIGHT_COLOR_TEMP_MIREK_MIN) / span) * 100);
+}
+
+function lightTemperaturePercentToMirek(percent: number): number {
+  if (!Number.isFinite(percent)) return LIGHT_COLOR_TEMP_MIREK_MIN;
+  const p = Math.max(0, Math.min(100, percent));
+  const span = LIGHT_COLOR_TEMP_MIREK_MAX - LIGHT_COLOR_TEMP_MIREK_MIN;
+  return Math.round(LIGHT_COLOR_TEMP_MIREK_MIN + (p / 100) * span);
+}
+
+function clampHueColorXY(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
 
 export class HueDeviceController extends ModuleDeviceController<HueEvent, Device> {
   private bridgeRepository?: JsonRepository<HueBridgeDiscovered>;
@@ -166,39 +213,55 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
     return resources[0] ?? null;
   }
 
-  async getBattery(bridgeId: string, batteryRid: string | undefined | null) {
+  async getBattery(bridgeId: string, batteryRid: string | undefined | null) : Promise<BatteryStatus | null>{
     if (!batteryRid) return null;
     try {
       const resource = await this.fetchSingleResource(bridgeId, "device_power", batteryRid);
       const powerState = (resource?.power_state as Record<string, unknown> | undefined) ?? {};
       const batteryLevel = powerState.battery_level as number | undefined;
-      return typeof batteryLevel === "number" ? batteryLevel : null;
+      return typeof batteryLevel === "number" ? { batteryLevel: batteryLevel } : null;
     } catch (err) {
       logger.error({ err }, "Fehler beim Abrufen des Batteriestatus");
       return null;
     }
   }
 
-  async getTemperature(bridgeId: string, resourceId: string) {
+  async getLight(bridgeId: string, lightRid: string | undefined | null) : Promise<LightStatus | null>{
+    if (!lightRid) return null;
+    try {
+      const resource = await this.fetchSingleResource(bridgeId, "light", lightRid);
+      const on = (resource?.on as Record<string, unknown> | undefined)?.on ?? false;
+      const brightness = (resource?.dimming as Record<string, unknown> | undefined)?.brightness ?? undefined;
+      const colorX = ((resource?.color as Record<string, unknown> | undefined)?.xy as Record<string, unknown> | undefined)?.x ?? undefined;
+      const colorY = ((resource?.color as Record<string, unknown> | undefined)?.xy as Record<string, unknown> | undefined)?.y ?? undefined;
+      const colorTemperature = (resource?.color_temperature as Record<string, unknown> | undefined)?.mirek ?? undefined;
+      return { on, brightness, colorX, colorY, colorTemperature } as LightStatus;
+    } catch (err) {
+      logger.error({ err }, "Fehler beim Abrufen des Lichtstatus");
+      return null;
+    }
+  }
+
+  async getTemperature(bridgeId: string, resourceId: string) : Promise<TemperatureStatus | null>{
     try {
       const resource = await this.fetchSingleResource(bridgeId, "temperature", resourceId);
       const report = (resource?.temperature as Record<string, unknown> | undefined)
         ?.temperature_report as Record<string, unknown> | undefined;
       const temperature = report?.temperature as number | undefined;
-      return typeof temperature === "number" ? temperature : null;
+      return typeof temperature === "number" ? { temperature: temperature } : null;
     } catch (err) {
       logger.error({ err }, "Fehler beim Abrufen der Temperatur");
       return null;
     }
   }
 
-  async getLightLevel(bridgeId: string, resourceId: string) {
+  async getLightLevel(bridgeId: string, resourceId: string) : Promise<LightLevelStatus | null>{
     try {
       const resource = await this.fetchSingleResource(bridgeId, "light_level", resourceId);
       const report = (resource?.light as Record<string, unknown> | undefined)
         ?.light_level_report as Record<string, unknown> | undefined;
       const level = report?.light_level as number | undefined;
-      return typeof level === "number" ? level : null;
+      return typeof level === "number" ? { lightLevel: level } : null;
     } catch (err) {
       logger.error({ err }, "Fehler beim Abrufen des Helligkeitswerts");
       return null;
@@ -210,24 +273,13 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
       const resource = await this.fetchSingleResource(bridgeId, "motion", resourceId);
       const report = (resource?.motion as Record<string, unknown> | undefined)
         ?.motion_report as Record<string, unknown> | undefined;
-      const motion = report?.motion as boolean | undefined;
-      const lastChanged = report?.changed as string | undefined;
+      const motion = report?.motion as boolean | undefined ?? false;
+      const lastChanged = report?.changed as string | undefined ?? Date.now().toString();
       if (motion == null && lastChanged == null) return null;
-      return { motion, lastChanged };
+      const reportSensitivity = (resource?.sensitivity as Record<string, unknown> | undefined)
+      return { motion, lastChanged, sensitivity: reportSensitivity?.sensitivity as number ?? 0 };
     } catch (err) {
       logger.error({ err }, "Fehler beim Abrufen des Bewegungsstatus");
-      return null;
-    }
-  }
-
-  async getSensitivity(bridgeId: string, resourceId: string) {
-    try {
-      const resource = await this.fetchSingleResource(bridgeId, "motion", resourceId);
-      const sensitivity = (resource?.sensitivity as Record<string, unknown> | undefined)
-        ?.sensitivity as number | undefined;
-      return typeof sensitivity === "number" ? sensitivity : null;
-    } catch (err) {
-      logger.error({ err }, "Fehler beim Abrufen der Empfindlichkeit");
       return null;
     }
   }
@@ -258,14 +310,20 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
   }
 
   private async setLightColor(bridgeId: string, hueResourceId: string, x: number, y: number) {
-    const roundedX = Math.round(x * 1000) / 1000;
-    const roundedY = Math.round(y * 1000) / 1000;
-    const data = { color: { xy: { x: roundedX, y: roundedY } } };
+    const cx = clampHueColorXY(x);
+    const cy = clampHueColorXY(y);
+    const roundedX = Math.round(cx * 1000) / 1000;
+    const roundedY = Math.round(cy * 1000) / 1000;
+    const data = { color: { xy: { x: roundedX, y: roundedY } }};
     await this.updateResource(bridgeId, "light", hueResourceId, data);
   }
 
-  private async setLightTemperature(bridgeId: string, hueResourceId: string, temperature: number) {
-    const data = { color_temperature: { mirek: temperature } };
+  /**
+   * @param temperaturePercent 0–100 (UI), wird auf Mirek 153–500 gemappt
+   */
+  private async setLightTemperature(bridgeId: string, hueResourceId: string, temperaturePercent: number) {
+    const mirek = lightTemperaturePercentToMirek(temperaturePercent);
+    const data = { color_temperature: { mirek } };
     await this.updateResource(bridgeId, "light", hueResourceId, data);
   }
 
@@ -283,6 +341,7 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
     return true;
   }
 
+  /** @param temperature 0–100 (Farbtemperatur-UI), nicht Mirek */
   async setTemperature(deviceId: string, temperature: number) {
     const info = await this.getDeviceInfo(deviceId);
     if (!info || !info.hueResourceId) return false;
@@ -290,6 +349,7 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
     return true;
   }
 
+  /** CIE xy-Farbkoordinaten, jeweils 0–1 */
   async setColor(deviceId: string, x: number, y: number) {
     const info = await this.getDeviceInfo(deviceId);
     if (!info || !info.hueResourceId) return false;

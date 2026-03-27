@@ -15,6 +15,16 @@ export abstract class DeviceLightDimmer extends DeviceLight {
     this.type = DeviceType.LIGHT_DIMMER;
   }
 
+  isBrightnessEquals(brightness: number): boolean {
+    return this.brightness === brightness;
+  }
+  isBrightnessLess(brightness: number): boolean {
+    return (this.brightness ?? 0) < brightness;
+  }
+  isBrightnessGreater(brightness: number): boolean {
+    return (this.brightness ?? 0) > brightness;
+  }
+
   async setBrightness(brightness: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.brightness = brightness;

@@ -15,6 +15,16 @@ export abstract class DeviceLightDimmerTemperature extends DeviceLightDimmer {
     this.type = DeviceType.LIGHT_DIMMER_TEMPERATURE;
   }
 
+  isLightTemperatureEquals(temperature: number): boolean {
+    return this.temperature === temperature;
+  }
+  isLightTemperatureLess(temperature: number): boolean {
+    return (this.temperature ?? 0) < temperature;
+  }
+  isLightTemperatureGreater(temperature: number): boolean {
+    return (this.temperature ?? 0) > temperature;
+  }
+
   async setTemperature(temperature: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.temperature = temperature;

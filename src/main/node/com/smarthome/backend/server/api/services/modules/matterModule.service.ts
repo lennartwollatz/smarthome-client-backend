@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { MatterModuleManager } from "../../modules/matter/matterModuleManager.js";
 import { logger } from "../../../../logger.js";
-import type { RouterDeps } from "../../router.js";
+import type { ServerDeps } from "../../server.js";
+import { MatterModuleManager } from "../../modules/matter/matterModuleManager.js";
 
-export function createMatterModuleRouter(deps: RouterDeps) {
+export function createMatterModuleRouter(deps: ServerDeps) {
   const router = Router();
-  const matterModule = new MatterModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
-  deps.actionManager.registerModuleManager(matterModule);
+  const matterModule = new MatterModuleManager(deps.databaseManager, deps.deviceManager, deps.eventManager, deps.actionManager, deps.userManager);
+  deps.deviceManager.registerModuleManager(matterModule);
 
   router.get("/devices/discover", async (_req, res) => {
     try {

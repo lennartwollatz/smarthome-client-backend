@@ -1,6 +1,6 @@
 import net from "node:net";
 import type { DatabaseManager } from "../../../../db/database.js";
-import type { ActionManager } from "../../../../actions/ActionManager.js";
+import { DeviceManager } from "../../../entities/devices/deviceManager.js";
 import { JsonRepository } from "../../../../db/jsonRepository.js";
 import { logger } from "../../../../../logger.js";
 import { HeosDeviceController } from "../heosDeviceController.js";
@@ -8,7 +8,7 @@ import { HeosDeviceDiscovered } from "../heosDeviceDiscovered.js";
 import { DenonHeosSpeakerDeviceDiscover } from "./denonHeosSpeakerDeviceDiscover.js";
 import { DeviceSpeaker } from "../../../../../model/devices/DeviceSpeaker.js";
 import { DenonSpeaker } from "./devices/denonSpeaker.js";
-import { Device } from "../../../../../model/index.js";
+import { Device } from "../../../../../model/devices/Device.js";
 import { HeosModuleManager } from "../heosModuleManager.js";
 import { EventManager } from "../../../../events/EventManager.js";
 import { HeosEventStreamManager } from "../heosEventStreamManager.js";
@@ -20,13 +20,13 @@ export class DenonModuleManager extends HeosModuleManager {
    
   constructor(
     databaseManager: DatabaseManager,
-    actionManager: ActionManager,
+    deviceManager: DeviceManager,
     eventManager: EventManager
   ) {
     const controller = new HeosDeviceController();
     const discoveredDeviceRepository = new JsonRepository<HeosDeviceDiscovered>(databaseManager, "HeosDeviceDiscovered");
     const discover = new DenonHeosSpeakerDeviceDiscover(databaseManager, discoveredDeviceRepository, controller);
-    super(databaseManager, actionManager, eventManager, discover);
+    super(databaseManager, deviceManager, eventManager, discover);
   }
 
   public getModuleId(): string {
@@ -37,7 +37,7 @@ export class DenonModuleManager extends HeosModuleManager {
   }
 
   protected createEventStreamManager(): HeosEventStreamManager {
-    return new HeosEventStreamManager(this.getManagerId(), this.getModuleId(), this.deviceController, this.actionManager);
+    return new HeosEventStreamManager(this.getManagerId(), this.getModuleId(), this.deviceController, this.deviceManager);
   }
 
   async discoverDevices(): Promise<Device[]> {
@@ -54,7 +54,7 @@ export class DenonModuleManager extends HeosModuleManager {
       }
       logger.info({ count: byUniqueIp.length }, "Geraete gefunden");
       const speakers = await this.convertDiscoveredDevicesToDenonSpeakers(byUniqueIp);
-      this.actionManager.saveDevices(speakers);
+      this.deviceManager.saveDevices(speakers);
       this.initialiseEventStreamManager();
       return speakers;
     } catch (err) {
@@ -94,7 +94,7 @@ export class DenonModuleManager extends HeosModuleManager {
     if (!speaker) return false;
     try {
       speaker.setVolume(volume, true);
-      this.actionManager.saveDevice(speaker);
+      this.deviceManager.saveDevice(speaker);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen der Lautstaerke");
@@ -114,13 +114,13 @@ export class DenonModuleManager extends HeosModuleManager {
           speaker.play(true);
           break;
         case DeviceSpeaker.PlayState.STOP:
-          speaker.stopp(true);
+          speaker.stop(true);
           break;
         case DeviceSpeaker.PlayState.PAUSE:
           speaker.pause(true);
           break;
       }
-      this.actionManager.saveDevice(speaker);
+      this.deviceManager.saveDevice(speaker);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen des Wiedergabestatus");
@@ -134,7 +134,7 @@ export class DenonModuleManager extends HeosModuleManager {
     if (!speaker) return false;
     try {
       speaker.setMute(mute, true);
-      this.actionManager.saveDevice(speaker);
+      this.deviceManager.saveDevice(speaker);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen der Stummschaltung");
@@ -169,7 +169,7 @@ export class DenonModuleManager extends HeosModuleManager {
   }
 
   private async getReceiver(deviceId: string): Promise<DenonReceiver | null> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) {
       logger.warn({ deviceId }, "Geraet nicht gefunden");
       return null;
@@ -201,7 +201,7 @@ export class DenonModuleManager extends HeosModuleManager {
     if (!receiver) return false;
     try {
       await (receiver as any).setVolumeStart(volumeStart, true, true);
-      this.actionManager.saveDevice(receiver);
+      this.deviceManager.saveDevice(receiver);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen von Volume-Start");
@@ -215,7 +215,7 @@ export class DenonModuleManager extends HeosModuleManager {
     if (!receiver) return false;
     try {
       await (receiver as any).setVolumeMax(volumeMax, true, true);
-      this.actionManager.saveDevice(receiver);
+      this.deviceManager.saveDevice(receiver);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen von Volume-Max");
@@ -229,7 +229,7 @@ export class DenonModuleManager extends HeosModuleManager {
     if (!receiver) return false;
     try {
       await (receiver as any).setSource(sourceIndex, selected, true, true);
-      this.actionManager.saveDevice(receiver);
+      this.deviceManager.saveDevice(receiver);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen der aktiven Quelle");
@@ -243,7 +243,7 @@ export class DenonModuleManager extends HeosModuleManager {
     if (!receiver) return false;
     try {
       await (receiver as any).setZonePower(zoneName, power, true, true);
-      this.actionManager.saveDevice(receiver);
+      this.deviceManager.saveDevice(receiver);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen der Zonen-Power");
@@ -252,7 +252,7 @@ export class DenonModuleManager extends HeosModuleManager {
   }
 
   private async getSpeaker(deviceId: string): Promise<DeviceSpeaker | null> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) {
       logger.warn({ deviceId }, "Geraet nicht gefunden");
       return null;
@@ -347,25 +347,13 @@ export class DenonModuleManager extends HeosModuleManager {
   }
 
   async initializeDeviceControllers(): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(this.getModuleId());
-    const updatePromises: Promise<void>[] = [];
-    
-    devices.forEach(device => {
+    const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
+    for (const device of devices) {
         if (device instanceof DenonSpeaker || device instanceof DenonReceiver) {
-          (device as any).setHeosController(this.deviceController);
-          // Rufe updateValues() für jedes Device auf
-          updatePromises.push(
-            device.updateValues().then(() => {
-              this.actionManager.saveDevice(device);
-            }).catch(err => {
-              logger.error({ err, deviceId: device.id }, "Fehler beim updateValues nach Controller-Initialisierung");
-            })
-          );
+          device.setHeosController(this.deviceController);
         }
-    });
+    }
     
-    // Warte auf alle updateValues()-Aufrufe
-    await Promise.all(updatePromises);
   }
 }
 

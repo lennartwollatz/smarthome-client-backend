@@ -4,7 +4,7 @@ import { logger } from "../../../../logger.js";
 import { CalendarModuleManager } from "../../modules/calendar/calendarModuleManager.js";
 import { DEFAULT_CALENDAR_DEVICE_ID, DeviceCalendar, type DeviceCalendarEntry } from "../../../../model/devices/DeviceCalendar.js";
 import { DEFAULT_CREDENTIALS_ID } from "../../modules/appleCalendar/appleCalendarDeviceDiscover.js";
-import type { RouterDeps } from "../../router.js";
+import type { ServerDeps } from "../../server.js";
 
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message || "Unbekannter Fehler";
@@ -16,14 +16,14 @@ function toErrorMessage(err: unknown): string {
   }
 }
 
-export function createCalendarModuleRouter(deps: RouterDeps): Router{
+export function createCalendarModuleRouter(deps: ServerDeps): Router {
   const router = Router();
 
-  const calendarModule = new CalendarModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
-  deps.actionManager.registerModuleManager(calendarModule);
+  const calendarModule = new CalendarModuleManager(deps.databaseManager, deps.deviceManager, deps.eventManager);
+  deps.deviceManager.registerModuleManager(calendarModule);
 
   function getCalendarDevice(): DeviceCalendar | null {
-    const device = deps.actionManager.getDevice(DEFAULT_CALENDAR_DEVICE_ID);
+    const device = deps.deviceManager.getDevice(DEFAULT_CALENDAR_DEVICE_ID);
     return device as DeviceCalendar | null;
   }
 
@@ -33,12 +33,12 @@ export function createCalendarModuleRouter(deps: RouterDeps): Router{
       let changed = false;
       if (!existing.isConnected) { existing.isConnected = true; changed = true; }
       if (!existing.quickAccess) { existing.quickAccess = true; changed = true; }
-      if (changed) deps.actionManager.saveDevice(existing);
+      if (changed) deps.deviceManager.saveDevice(existing);
       return existing;
     }
     const device = new DeviceCalendar({ isConnected: true, quickAccess: true });
     device.addModule(calendarModule);
-    deps.actionManager.saveDevice(device);
+    deps.deviceManager.saveDevice(device);
     return device;
   }
 
@@ -111,7 +111,7 @@ export function createCalendarModuleRouter(deps: RouterDeps): Router{
         color,
         show
       });
-      deps.actionManager.saveDevice(device);
+      deps.deviceManager.saveDevice(device);
       res.status(201).json(createdCalendar);
     } catch (error) {
       const message = toErrorMessage(error);
@@ -182,7 +182,7 @@ export function createCalendarModuleRouter(deps: RouterDeps): Router{
       };
 
       await device.addEntry(newEntry, true);
-      deps.actionManager.saveDevice(device);
+      deps.deviceManager.saveDevice(device);
       res.status(201).json({ id: newEntry.id });
     } catch (error) {
       logger.error({ err: error, calendarId }, "Fehler beim Erstellen eines Kalender-Termins");
@@ -256,7 +256,7 @@ export function createCalendarModuleRouter(deps: RouterDeps): Router{
       if (typeof allDay === "boolean") {
         await device.changeEntryAllDay(eventId, allDay);
       }
-      deps.actionManager.saveDevice(device);
+      deps.deviceManager.saveDevice(device);
       res.status(200).json({
         id: eventId,
         start,
@@ -295,7 +295,7 @@ export function createCalendarModuleRouter(deps: RouterDeps): Router{
         return;
       }
       await device.deleteEntry(eventId);
-      deps.actionManager.saveDevice(device);
+      deps.deviceManager.saveDevice(device);
       res.status(200).json({ id: eventId });
     } catch (error) {
       logger.error({ err: error, eventId }, "Fehler beim Loeschen eines Kalender-Termins");
@@ -330,11 +330,45 @@ export function createCalendarModuleRouter(deps: RouterDeps): Router{
         name: req.body.name,
         assignedUserIds: req.body.assignedUserIds,
       });
-      deps.actionManager.saveDevice(device);
+      deps.deviceManager.saveDevice(device);
       res.status(200).json({ id: calendarId, show: req.body.show, color: req.body.color, name: req.body.name, assignedUserIds: req.body.assignedUserIds });
       return;
     }
     res.status(404).json({ error: "Kalender nicht gefunden" });
+  });
+
+  /**
+   * Entfernt einen manuell angelegten Kalender inkl. aller zugehörigen Termine (lokaler Device-State).
+   */
+  router.delete("/calendars/:calendarId", (req, res) => {
+    let calendarId = String(req.params.calendarId ?? "").trim();
+    try {
+      calendarId = decodeURIComponent(calendarId);
+    } catch {
+      res.status(400).json({ error: "Ungueltige Kalender-ID in URL" });
+      return;
+    }
+    if (!calendarId) {
+      res.status(400).json({ error: "Ungueltige Kalender-ID" });
+      return;
+    }
+    const device = getCalendarDevice();
+    if (!device) {
+      res.status(404).json({ error: "Kalender nicht gefunden" });
+      return;
+    }
+    const calendar = device.getCalendars().find(entry => String(entry.id ?? "").trim() === calendarId);
+    if (!calendar) {
+      res.status(404).json({ error: "Kalender nicht gefunden" });
+      return;
+    }
+    if (calendar.properties?.createdManually !== true) {
+      res.status(403).json({ error: "Nur manuell hinzugefuegte Kalender koennen geloescht werden" });
+      return;
+    }
+    device.removeCalendar(calendarId);
+    deps.deviceManager.saveDevice(device);
+    res.status(200).json({ id: calendarId });
   });
 
   router.get("/calendars/:moduleId", (req, res) => {

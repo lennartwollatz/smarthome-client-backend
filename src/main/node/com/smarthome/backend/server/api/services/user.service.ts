@@ -1,98 +1,77 @@
 import { Router } from "express";
-import { randomUUID } from "node:crypto";
-import { JsonRepository } from "../../db/jsonRepository.js";
-import { User } from "../../../model/User.js";
-import { logger } from "../../../logger.js";
-import type { RouterDeps } from "../router.js";
+import type { User } from "../entities/users/User.js";
+import type { ServerDeps } from "../server.js";
 
-export function createUserRouter(deps: RouterDeps) {
+export function createUserRouter(deps: ServerDeps) {
   const router = Router();
-  const userRepository = new JsonRepository<User>(deps.databaseManager, "User");
-  const presenceManager = deps.presenceManager;
+  const userManager = deps.userManager;
 
   router.get("/", (_req, res) => {
-    const users = userRepository.findAll();
-    res.status(200).json(users);
+    res.status(200).json(userManager.findAll());
   });
 
   router.post("/", async (req, res) => {
-    const user = req.body as User;
-    if (!user.id) {
-      user.id = `user-${randomUUID()}`;
+    const created = await userManager.createUser(req.body as User);
+    if (created == null) {
+      res.status(500).json({ success: false, error: "User could not be created" });
+      return;
     }
-    if (user.locationTrackingEnabled == null) user.locationTrackingEnabled = false;
-    if (user.pushNotificationsEnabled == null) user.pushNotificationsEnabled = false;
-    if (user.emailNotificationsEnabled == null) user.emailNotificationsEnabled = false;
-    if (user.smsNotificationsEnabled == null) user.smsNotificationsEnabled = false;
+    res.status(201).json({ success: true, user: created });
+  });
 
-    try {
-      const presenceInfo = await presenceManager.createPresenceDevice(user);
-      user.presencePairingCode = presenceInfo.manualPairingCode;
-      user.presencePasscode = presenceInfo.passcode;
-      user.presenceDiscriminator = presenceInfo.discriminator;
-      user.presenceDevicePort = presenceInfo.port;
-    } catch (err) {
-      logger.error({ err, userId: user.id }, "Fehler beim Erstellen des Presence-Device");
+  router.get("/:userId/regenerate-token", (req, res) => {
+    const user = userManager.regenerateTrackingToken(req.params.userId);
+    if (user == null) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
     }
+    res.status(200).json({ success: true, user });
+  });
 
-    userRepository.save(user.id, user);
-    res.status(201).json(user);
+  router.post("/:userId/setPresent", (req, res) => {
+    const user = userManager.setUserPresent(req.params.userId);
+    if (!user) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+    res.status(200).json({ success: true, user });
+  });
+
+  router.post("/:userId/setAbsent", (req, res) => {
+    const user = userManager.setUserAbsent(req.params.userId);
+    if (!user) {
+      res.status(404).json({ success: false, error: "User not found" });
+      return;
+    }
+    res.status(200).json({ success: true, user });
   });
 
   router.get("/:userId", (req, res) => {
-    const user = userRepository.findById(req.params.userId);
+    const user = userManager.findById(req.params.userId);
     if (user) {
-      res.status(200).json(user);
+      res.status(200).json({ success: true, user });
     } else {
-      res.status(404).json({ error: "User not found" });
+      res.status(404).json({ success: false, error: "User not found" });
     }
   });
 
   router.put("/:userId", (req, res) => {
-    const existingUser = userRepository.findById(req.params.userId);
-    const user = req.body as User;
-    user.id = req.params.userId;
-
-    if (existingUser) {
-      user.presenceDevicePort = existingUser.presenceDevicePort;
-      user.presencePairingCode = existingUser.presencePairingCode;
-      user.presencePasscode = existingUser.presencePasscode;
-      user.presenceDiscriminator = existingUser.presenceDiscriminator;
+    const user = userManager.updateUser(req.params.userId, req.body as User);
+    if (user) {
+      res.status(200).json({ success: true, user });
+    } else {
+      res.status(404).json({ success: false, error: "User not found" });
     }
-
-    userRepository.save(user.id, user);
-    res.status(200).json("");
   });
 
   router.delete("/:userId", async (req, res) => {
-    const userId = req.params.userId;
-
-    try {
-      await presenceManager.removePresenceDevice(userId);
-    } catch (err) {
-      logger.error({ err, userId }, "Fehler beim Entfernen des Presence-Device");
-    }
-
-    const deleted = userRepository.deleteById(userId);
+    const deleted = await userManager.deleteUser(req.params.userId);
     if (deleted) {
-      res.status(204).json("");
+      res.status(204).json({ success: true });
     } else {
-      res.status(404).json({ error: "User not found" });
+      res.status(404).json({ success: false, error: "User not found" });
     }
-  });
-
-  router.get("/:userId/regenerate-token", (req, res) => {
-    const user = userRepository.findById(req.params.userId);
-    if (!user) {
-      res.status(404).json({ error: "User not found" });
-      return;
-    }
-    const newToken = randomUUID().replace(/-/g, "");
-    user.trackingToken = newToken;
-    userRepository.save(req.params.userId, user);
-    res.status(200).json(newToken);
   });
 
   return router;
 }
-

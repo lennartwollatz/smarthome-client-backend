@@ -1,4 +1,4 @@
-import { CalendarConfig, DeviceCalendarEntry } from "../../../../model/index.js";
+import type { CalendarConfig, DeviceCalendarEntry } from "../../../../model/devices/DeviceCalendar.js";
 import type { ModuleEvent } from "../moduleEvent.js";
 
 export interface AppleCalendarEvent extends ModuleEvent {

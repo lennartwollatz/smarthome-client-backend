@@ -1,6 +1,5 @@
 import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import { HueBridgeDiscover } from "./hueBridgeDiscover.js";
 import { HueDeviceDiscover } from "./hueDeviceDiscover.js";
 import { HueDeviceController } from "./hueDeviceController.js";
@@ -28,12 +27,13 @@ import { EventManager } from "../../../events/EventManager.js";
 import { HUECONFIG } from "./hueModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { HueSwitchDimmer } from "./devices/hueSwitchDimmer.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager, HueBridgeController, HueDeviceController, HueEvent, Device, HueDeviceDiscover, HueDeviceDiscovered, HueBridgeController, HueBridgeDiscover, HueBridgeDiscovered> {
 
   constructor(
     databaseManager: DatabaseManager,
-    actionManager: ActionManager,
+    deviceManager: DeviceManager,
     eventManager: EventManager
   ) {
     const deviceController = new HueDeviceController(databaseManager);
@@ -43,7 +43,7 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
     
     super(
       databaseManager,
-      actionManager,
+      deviceManager,
       eventManager,
       deviceController,
       deviceDiscover,
@@ -60,7 +60,7 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
   }
 
   protected createEventStreamManager(): HueEventStreamManager {
-    return new HueEventStreamManager(this.getManagerId(), this.bridgeController, this.actionManager, this.databaseManager);
+    return new HueEventStreamManager(this.getManagerId(), this.bridgeController, this.deviceManager, this.databaseManager);
   }
 
   async getBridges() {
@@ -95,59 +95,59 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
 
   async discoverDevicesForBridge(bridgeId: string) {
     const devices = await this.deviceDiscover.discoverDevices(bridgeId);
-    this.actionManager.saveDevices(devices);
+    this.deviceManager.saveDevices(devices);
     return devices;
   }
 
   async setSensitivity(deviceId: string, sensitivity: number): Promise<boolean> {
     if (sensitivity < 0 || sensitivity > 100) return false;
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceMotion)) return false;
     await device.setSensibility(sensitivity, true);
-    return this.actionManager.saveDevice(device);
+    return this.deviceManager.saveDevice(device);
   }
 
   async setOn(deviceId: string): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLight)) return false;
     await device.setOn(true);
-    return this.actionManager.saveDevice(device);
+    return this.deviceManager.saveDevice(device);
   }
 
   async setOff(deviceId: string): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLight)) return false;
     await device.setOff(true);
-    return this.actionManager.saveDevice(device);
+    return this.deviceManager.saveDevice(device);
   }
 
   async setBrightness(deviceId: string, brightness: number): Promise<boolean> {
     if (brightness < 0 || brightness > 100) return false;
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLightDimmer)) return false;
     await device.setBrightness(brightness, true);
-    return this.actionManager.saveDevice(device);
+    return this.deviceManager.saveDevice(device);
   }
 
   async setTemperature(deviceId: string, temperature: number): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLightDimmerTemperature)) return false;
     await device.setTemperature(temperature, true);
-    return this.actionManager.saveDevice(device);
+    return this.deviceManager.saveDevice(device);
   }
 
   async setColor(deviceId: string, x: number, y: number): Promise<boolean> {
     if (x < 0 || x > 1 || y < 0 || y > 1) return false;
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     if (!(device instanceof DeviceLightDimmerTemperatureColor)) return false;
     await device.setColor(x, y, true);
-    return this.actionManager.saveDevice(device);
+    return this.deviceManager.saveDevice(device);
   }
 
   async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
@@ -219,10 +219,9 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
   }
 
   async initializeDeviceControllers(): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(this.getModuleId());
-    const updatePromises: Promise<void>[] = [];
+    const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
     
-    devices.forEach(device => {
+    for (const device of devices) {
         if (device instanceof HueLight || 
             device instanceof HueLightDimmer || 
             device instanceof HueLightDimmerTemperatureColor || 
@@ -232,19 +231,8 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
             device instanceof HueMotionSensor ||
             device instanceof HueSwitchDimmer) {
           device.setHueDeviceController(this.deviceController);
-          // Rufe updateValues() für jedes Device auf
-          updatePromises.push(
-            device.updateValues().then(() => {
-              this.actionManager.saveDevice(device);
-            }).catch(err => {
-              logger.error({ err, deviceId: device.id }, "Fehler beim updateValues nach Controller-Initialisierung");
-            })
-          );
       }
-    });
-    
-    // Warte auf alle updateValues()-Aufrufe
-    await Promise.all(updatePromises);
+    }
   }
 }
 

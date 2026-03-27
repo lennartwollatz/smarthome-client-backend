@@ -19,7 +19,7 @@ export abstract class DeviceSwitch extends Device {
     firstPressTime: number;
     name?: string;
     connectedToLight?: boolean;
-    intensity?: number;
+    brightness?: number;
 
     constructor(
       on = false,
@@ -29,7 +29,7 @@ export abstract class DeviceSwitch extends Device {
       firstPressTime = 0,
       name?: string,
       connectedToLight?: boolean,
-      intensity?: number
+      brightness?: number
     ) {
       this.on = on;
       this.pressCount = pressCount;
@@ -38,7 +38,7 @@ export abstract class DeviceSwitch extends Device {
       this.firstPressTime = firstPressTime;
       this.name = name;
       this.connectedToLight = connectedToLight;
-      this.intensity = intensity;
+      this.brightness = brightness;
     }
 
     isOn() {
@@ -61,6 +61,10 @@ export abstract class DeviceSwitch extends Device {
       return this.initialPressTime;
     }
 
+    getBrightness() {
+      return this.brightness;
+    }
+
     setInitialPressTime(initialPressTime: number) {
       this.initialPressTime = initialPressTime;
     }
@@ -81,8 +85,8 @@ export abstract class DeviceSwitch extends Device {
       this.lastPressTime = lastPressTime;
     }
 
-    setIntensity(intensity: number) {
-      this.intensity = intensity;
+    setBrightness(brightness: number) {
+      this.brightness = brightness;
     }
   };
 
@@ -121,7 +125,7 @@ export abstract class DeviceSwitch extends Device {
         button?.firstPressTime ?? 0,
         button?.name,
         button?.connectedToLight ?? false,
-        button?.intensity ?? button?.on ? 100 : 0
+        button?.brightness ?? button?.on ? 100 : 0
       );
     }
     this.buttons = rehydratedButtons;
@@ -150,6 +154,13 @@ export abstract class DeviceSwitch extends Device {
     } else {
       this.eventManager?.triggerEvent(new EventSwitchButtonOff(this.id, deviceBefore, buttonId));
     }
+  }
+
+  isOn(buttonId: string) {
+    return this.buttons?.[buttonId]?.isOn() ?? false;
+  }
+  isOff(buttonId: string) {
+    return !this.isOn(buttonId);
   }
 
   async on(buttonId: string, execute: boolean, trigger: boolean = true) {
@@ -266,32 +277,6 @@ export abstract class DeviceSwitch extends Device {
     button.setInitialPressTime(Date.now());
   }
 
-  async setLongPressed(buttonId: string, execute: boolean, trigger: boolean) {
-    const deviceBefore = { ...this };
-    const button = this.buttons?.[buttonId];
-    if (!button) return;
-
-    const now = Date.now();
-    button.setLastPressTime(now);
-    const durationMs = now - button.getFirstPressTime();
-    const reductionFactor = Math.min(1.0, durationMs / 5000.0);
-    let intensity = Math.round(100.0 * (1.0 - reductionFactor));
-    intensity = Math.max(0, Math.min(100, intensity));
-    button.setFirstPressTime(now);
-    button.setInitialPressTime(now);
-    button.setPressCount(0);
-
-    if (execute) {
-      await this.executeSetIntensity(buttonId, intensity);
-    }
-
-    if(trigger){
-      this.eventManager?.triggerEvent(new EventSwitchStatusChanged(this.id, deviceBefore, { ...this }));
-      this.eventManager?.triggerEvent(new EventSwitchLongPressed(this.id, deviceBefore, buttonId));
-    }
-  }
-
-  protected abstract executeSetIntensity(buttonId: string, intensity: number): Promise<void>;
 }
 
 export type Button = InstanceType<typeof DeviceSwitch.Button>;

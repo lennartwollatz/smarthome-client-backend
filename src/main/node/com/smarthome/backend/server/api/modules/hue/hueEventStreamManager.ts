@@ -1,5 +1,4 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { JsonRepository } from "../../../db/jsonRepository.js";
 import { HueBridgeDiscovered } from "./hueBridgeDiscovered.js";
@@ -15,12 +14,14 @@ import { DeviceTemperature } from "../../../../model/devices/DeviceTemperature.j
 import { HueBridgeController } from "./hueBridgeController.js";
 import { HueEvent } from "./hueEvent.js";
 import { HUECONFIG } from "./hueModule.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
+import { mirekToLightTemperaturePercent } from "./hueDeviceController.js";
 
 export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeController, HueEvent> {
   private repository: JsonRepository<HueBridgeDiscovered>;
 
-  constructor(managerId:string, controller: HueBridgeController, actionManager: ActionManager, databaseManager: DatabaseManager) {
-    super(managerId, HUECONFIG.id, controller, actionManager);
+  constructor(managerId:string, controller: HueBridgeController, deviceManager: DeviceManager, databaseManager: DatabaseManager) {
+    super(managerId, HUECONFIG.id, controller, deviceManager);
     this.repository = new JsonRepository<HueBridgeDiscovered>(databaseManager, "HueDiscoveredBridge");
   }
 
@@ -78,7 +79,7 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
 
   private updateLightFromEvent(resourceId: string, eventData: Record<string, unknown>) {
     const deviceId = `hue-light-${resourceId}`;
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return;
     if (!(device instanceof DeviceLight)) return;
 
@@ -109,8 +110,8 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
       const colorObj = (eventData as any).color as { xy?: { x?: number; y?: number } } | undefined;
       const xy = colorObj?.xy;
       if (xy && typeof xy.x === "number" && typeof xy.y === "number") {
-        const x = Math.round(xy.x * 1000) / 1000;
-        const y = Math.round(xy.y * 1000) / 1000;
+        const x = Math.round(Math.max(0, Math.min(1, xy.x)) * 1000) / 1000;
+        const y = Math.round(Math.max(0, Math.min(1, xy.y)) * 1000) / 1000;
         device.setColor(x, y, false);
       }
     }
@@ -119,18 +120,19 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
       const temp = (eventData as any).color_temperature as { mirek?: number } | undefined;
       if (temp && typeof temp.mirek === "number") {
         const mirek = temp.mirek;
-        if (device.temperature !== mirek) {
-          device.setTemperature(mirek, false);
+        const percent = mirekToLightTemperaturePercent(mirek);
+        if (device.temperature !== percent) {
+          device.setTemperature(percent, false);
         }
       }
     }
 
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
   }
 
   private updateButtonFromEvent(resourceId: string, eventData: Record<string, unknown>) {
     const deviceId = `hue-button-${resourceId}`;
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return;
     if (!(device instanceof DeviceSwitch)) return;
 
@@ -140,12 +142,12 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
     if (event === "short_release" || event === "long_release") {
       device.toggle(buttonId, false);
     }
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
   }
 
   private updateMotionSensorFromEvent(resourceId: string, eventData: Record<string, unknown>) {
     const deviceId = `hue-motion-${resourceId}`;
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return;
     if (!(device instanceof DeviceMotion)) return;
 
@@ -154,12 +156,12 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
     if (report && typeof report.changed === "string" && typeof report.motion === "boolean") {
       device.setMotion(report.motion, report.changed, false);
     }
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
   }
 
   private updateTemperatureSensorFromEvent(resourceId: string, eventData: Record<string, unknown>) {
     const deviceId = `hue-temperature-${resourceId}`;
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return;
     if (!(device instanceof DeviceTemperature)) return;
 
@@ -170,12 +172,12 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
         device.setTemperature(temperature, false);
       }
     }
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
   }
 
   private updateLightLevelSensorFromEvent(resourceId: string, eventData: Record<string, unknown>) {
     const deviceId = `hue-light_level-${resourceId}`;
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return;
     if (!(device instanceof DeviceLightLevel)) return;
 
@@ -186,7 +188,7 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
         device.setLightLevel(lightLevel, false);
       }
     }
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
   }
 }
 

@@ -1,10 +1,10 @@
 import { logger } from "../../../../../logger.js";
 import { DeviceSwitchEnergy, Energy } from "../../../../../model/devices/DeviceSwitchEnergy.js";
 import { MatterDeviceController } from "../matterDeviceController.js";
-import { MatterDevice } from "./matterDevice.js";
+import { MatterDeviceButtoned } from "./matterDevice.js";
 import { NodeId } from "@matter/types";
 
-export class MatterSwitchEnergy extends DeviceSwitchEnergy implements MatterDevice {
+export class MatterSwitchEnergy extends DeviceSwitchEnergy implements MatterDeviceButtoned {
   private nodeId: string;
   private matterController?: MatterDeviceController;
   

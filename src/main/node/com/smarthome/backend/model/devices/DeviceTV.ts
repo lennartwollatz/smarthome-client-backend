@@ -31,6 +31,40 @@ export abstract class DeviceTV extends Device {
     this.type = DeviceType.TV;
   }
 
+  /** Entspricht den Einträgen `BASE_FUNCTIONS_BOOL` im Frontend (`device-tv.ts`). */
+  isPowerOn(): boolean {
+    return !!this.power;
+  }
+
+  isPowerOff(): boolean {
+    return !this.power;
+  }
+
+  isScreenOn(): boolean {
+    return !!this.screen;
+  }
+
+  isScreenOff(): boolean {
+    return !this.screen;
+  }
+
+  isChannelSelected(channelId: string): boolean {
+    return this.selectedChannel === channelId;
+  }
+
+  isAppSelected(appId: string): boolean {
+    return this.selectedApp === appId;
+  }
+
+  isVolumeGreater(volume: number): boolean {
+    return this.volume > volume;
+  }
+  isVolumeLess(volume: number): boolean {
+    return this.volume < volume;
+  }
+  isVolumeEquals(volume: number): boolean {
+    return this.volume === volume;
+  }
 
   async setPowerOn(execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
@@ -79,16 +113,46 @@ export abstract class DeviceTV extends Device {
 
   protected abstract executeSetPower(power: boolean): Promise<void>;
 
+  async setScreenOn(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    this.screen = true;
+    if (execute) {
+      await this.executeSetScreenOn();
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventTVScreenChanged(this.id, deviceBefore, true));
+      await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
+      await this.eventManager?.triggerEvent(new EventTVScreenOn(this.id, deviceBefore, true));
+    }
+  }
+
+  protected abstract executeSetScreenOn(): Promise<void>;
+
+  async setScreenOff(execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    this.screen = false;
+    if (execute) {
+      await this.executeSetScreenOff();
+    }
+    if (trigger) {
+      await this.eventManager?.triggerEvent(new EventTVScreenChanged(this.id, deviceBefore, false));
+      await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
+      await this.eventManager?.triggerEvent(new EventTVScreenOff(this.id, deviceBefore, false));
+    }
+  }
+
+  protected abstract executeSetScreenOff(): Promise<void>;
+
   async setScreen(screen: boolean, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.screen = screen;
     if (execute) {
-      this.executeSetScreen(screen);
+      await this.executeSetScreen(screen);
     }
     if (trigger) {
       await this.eventManager?.triggerEvent(new EventTVScreenChanged(this.id, deviceBefore, screen));
       await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
-      if(screen){
+      if (screen) {
         await this.eventManager?.triggerEvent(new EventTVScreenOn(this.id, deviceBefore, screen));
       } else {
         await this.eventManager?.triggerEvent(new EventTVScreenOff(this.id, deviceBefore, screen));
@@ -98,16 +162,15 @@ export abstract class DeviceTV extends Device {
 
   protected abstract executeSetScreen(screen: boolean): Promise<void>;
 
-  async setChannel(channel: string, execute: boolean, trigger: boolean = true) {
+  async setChannel(channelId: string, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
-    this.selectedChannel = channel;
-    this.power = true;
+    this.selectedChannel = channelId;
     if (execute) {
-      this.executeSetChannel(channel);
+      await this.executeSetChannel(channelId);
     }
     if (trigger) {
-      await this.eventManager?.triggerEvent(new EventTVChannelChanged(this.id, deviceBefore, channel));
-      await this.eventManager?.triggerEvent(new EventTVChannelSelected(this.id, deviceBefore, channel));
+      await this.eventManager?.triggerEvent(new EventTVChannelChanged(this.id, deviceBefore, channelId));
+      await this.eventManager?.triggerEvent(new EventTVChannelSelected(this.id, deviceBefore, channelId));
       await this.eventManager?.triggerEvent(new EventTVStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
@@ -119,7 +182,7 @@ export abstract class DeviceTV extends Device {
     this.selectedApp = appId;
     this.power = true;
     if (execute) {
-      this.executeStartApp(appId);
+      await this.executeStartApp(appId);
     }
     if (trigger) {
       await this.eventManager?.triggerEvent(new EventTVAppChanged(this.id, deviceBefore, appId));

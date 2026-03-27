@@ -1,10 +1,10 @@
 import { logger } from "../../../../../logger.js";
 import { DeviceSwitchDimmer } from "../../../../../model/devices/DeviceSwitchDimmer.js";
 import { MatterDeviceController } from "../matterDeviceController.js";
-import { MatterDevice } from "./matterDevice.js";
+import { MatterDeviceButtoned } from "./matterDevice.js";
 import { NodeId } from "@matter/types";
 
-export class MatterSwitchDimmer extends DeviceSwitchDimmer implements MatterDevice {
+export class MatterSwitchDimmer extends DeviceSwitchDimmer implements MatterDeviceButtoned {
   private nodeId: string;
   private matterController?: MatterDeviceController;
   
@@ -48,9 +48,10 @@ export class MatterSwitchDimmer extends DeviceSwitchDimmer implements MatterDevi
     logger.debug("executeTriplePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
   }
 
-  protected async executeSetIntensity(buttonId: string, intensity: number): Promise<void> {
-    await this.matterController?.setIntensity(this, buttonId, intensity);
+  protected async executeSetBrightness(buttonId: string, brightness: number): Promise<void> {
+    await this.matterController?.setIntensity(this, buttonId, brightness);
   }
+
 
   getNodeId(): NodeId {
     return NodeId(this.nodeId);

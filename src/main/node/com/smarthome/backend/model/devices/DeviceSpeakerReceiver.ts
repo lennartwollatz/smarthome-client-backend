@@ -34,45 +34,138 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
     return this.sources;
   }
 
-  async setSubwooferLevel(subwooferName: string, level: number, execute: boolean, trigger: boolean = true) {
+  getZones() {
+    return this.zones;
+  }
+
+  isSubwooferPowerOn(subwooferId: string) {
+    return this.subwoofers?.find(subwoofer => subwoofer.id === subwooferId)?.power ?? false;
+  }
+  isSubwooferPowerOff(subwooferId: string) {
+    const on = this.subwoofers?.find(subwoofer => subwoofer.id === subwooferId)?.power ?? false;
+    return !on;
+  }
+  isAnySubwooferOn() {
+    return this.subwoofers?.some(subwoofer => subwoofer.power) ?? false;
+  }
+  areAllSubwoofersOff() {
+    return this.subwoofers?.every(subwoofer => !subwoofer.power) ?? true;
+  }
+  isSubwooferLevelGreater(subwooferId: string, level: number) {
+    const db = this.subwoofers?.find(subwoofer => subwoofer.id === subwooferId)?.db ?? 0;
+    return db > level;
+  }
+  isSubwooferLevelLess(subwooferId: string, level: number) {
+    const db = this.subwoofers?.find(subwoofer => subwoofer.id === subwooferId)?.db ?? 0;
+    return db < level;
+  }
+  isSubwooferLevelEquals(subwooferId: string, level: number) {
+    const db = this.subwoofers?.find(subwoofer => subwoofer.id === subwooferId)?.db ?? 0;
+    return db === level;
+  }
+  isZonePowerOn(zoneName: string) {
+    return this.zones?.find(zone => zone.name === zoneName)?.power ?? false;
+  }
+  isZonePowerOff(zoneName: string) {
+    return this.zones?.find(zone => zone.name === zoneName)?.power ?? false;
+  }
+  isAnyZoneOn() {
+    return this.zones?.some(zone => zone.power) ?? false;
+  }
+  areAllZonesOff() {
+    return this.zones?.every(zone => !zone.power) ?? true;
+  }
+  isSourceSelected(sourceIndex: string) {
+    return this.sources?.find(source => source.index === sourceIndex)?.selected ?? false;
+  }
+
+  async setSubwooferLevel(subwooferId: string, level: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.subwoofers
-      ?.find(subwoofer => subwoofer.name === subwooferName)
+      ?.find(subwoofer => subwoofer.id === subwooferId)
       ?.setDb(level);
     if (execute) {
-      await this.executeSetSubwooferLevel(subwooferName, level);
+      await this.executeSetSubwooferLevel(subwooferId, level);
     }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
-      this.eventManager?.triggerEvent(new EventSubwooferLevelChanged(this.id, deviceBefore, subwooferName, level));
-      this.eventManager?.triggerEvent(new EventSubwooferLevelEquals(this.id, deviceBefore, subwooferName, level));
-      this.eventManager?.triggerEvent(new EventSubwooferLevelLess(this.id, deviceBefore, subwooferName, level));
-      this.eventManager?.triggerEvent(new EventSubwooferLevelGreater(this.id, deviceBefore, subwooferName, level));
+      this.eventManager?.triggerEvent(new EventSubwooferLevelChanged(this.id, deviceBefore, subwooferId, level));
+      this.eventManager?.triggerEvent(new EventSubwooferLevelEquals(this.id, deviceBefore, subwooferId, level));
+      this.eventManager?.triggerEvent(new EventSubwooferLevelLess(this.id, deviceBefore, subwooferId, level));
+      this.eventManager?.triggerEvent(new EventSubwooferLevelGreater(this.id, deviceBefore, subwooferId, level));
     }
   }
 
-  protected abstract executeSetSubwooferLevel(subwooferName: string, level: number): Promise<void>;
+  async setSubwooferLevelAll(level: number, execute: boolean, trigger: boolean = true) {
+    for (const subwoofer of this.subwoofers ?? []) {
+      await this.setSubwooferLevel(subwoofer.id ?? '', level, execute, trigger);
+    }
+  }
 
-  async setSubwooferPower(subwooferName: string, power: boolean, execute: boolean, trigger: boolean = true) {
+  protected abstract executeSetSubwooferLevel(subwooferId: string, level: number): Promise<void>;
+
+  async setSubwooferPower(subwooferId: string, power: boolean, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.subwoofers
-      ?.find(subwoofer => subwoofer.name === subwooferName)
+      ?.find(subwoofer => subwoofer.id === subwooferId)
       ?.setPower(power);
     if (execute) {
-      await this.executeSetSubwooferPower(subwooferName, power);
+      await this.executeSetSubwooferPower(subwooferId, power);
     }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
-      this.eventManager?.triggerEvent(new EventSubwooferPowerChanged(this.id, deviceBefore, subwooferName, power));
+      this.eventManager?.triggerEvent(new EventSubwooferPowerChanged(this.id, deviceBefore, subwooferId, power));
       if (power) {
-        this.eventManager?.triggerEvent(new EventSubwooferPowerOn(this.id, deviceBefore, subwooferName));
+        this.eventManager?.triggerEvent(new EventSubwooferPowerOn(this.id, deviceBefore, subwooferId));
       } else {
-        this.eventManager?.triggerEvent(new EventSubwooferPowerOff(this.id, deviceBefore, subwooferName));
+        this.eventManager?.triggerEvent(new EventSubwooferPowerOff(this.id, deviceBefore, subwooferId));
       }
     }
   }
 
-  protected abstract executeSetSubwooferPower(subwooferName: string, power: boolean): Promise<void>;
+  async setSubwooferPowerOn(subwooferId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    this.subwoofers
+      ?.find(subwoofer => subwoofer.id === subwooferId)
+      ?.setPower(true);
+    if (execute) {
+      await this.executeSetSubwooferPower(subwooferId, true);
+    }
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventSubwooferPowerChanged(this.id, deviceBefore, subwooferId, true));
+      this.eventManager?.triggerEvent(new EventSubwooferPowerOn(this.id, deviceBefore, subwooferId));
+    }
+  }
+
+  async setSubwooferPowerOff(subwooferId: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    this.subwoofers
+      ?.find(subwoofer => subwoofer.id === subwooferId)
+      ?.setPower(false);
+    if (execute) {
+      await this.executeSetSubwooferPower(subwooferId, false);
+    }
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventSubwooferPowerChanged(this.id, deviceBefore, subwooferId, false));
+      this.eventManager?.triggerEvent(new EventSubwooferPowerOff(this.id, deviceBefore, subwooferId));
+    }
+  }
+
+  async setSubwooferPowerAllOn(execute: boolean, trigger: boolean = true) {
+    for (const subwoofer of this.subwoofers ?? []) {
+      await this.setSubwooferPowerOn(subwoofer.id ?? '', execute, trigger);
+    }
+  }
+
+  async setSubwooferPowerAllOff(execute: boolean, trigger: boolean = true) {
+    for (const subwoofer of this.subwoofers ?? []) {
+      await this.setSubwooferPowerOff(subwoofer.id ?? '', execute, trigger);
+    }
+  }
+
+  protected abstract executeSetSubwooferPower(subwooferId: string, power: boolean): Promise<void>;
 
   async setVolumeStart(volumeStart: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
@@ -117,6 +210,38 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
       } else {
         this.eventManager?.triggerEvent(new EventSpeakerZonePowerOff(this.id, deviceBefore, zoneName));
       }
+    }
+  }
+
+  async setZonePowerOn(zoneName: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    this.zones?.find(zone => zone.name === zoneName)?.setPower(true);
+    this.zones
+      ?.filter(zone => zone.name !== zoneName)
+      .forEach(zone => zone.setPower(false));
+    if (execute) {
+      await this.executeSetZonePower(zoneName, true);
+    }
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventSpeakerZonePowerChanged(this.id, deviceBefore, zoneName, true));
+      this.eventManager?.triggerEvent(new EventSpeakerZonePowerOn(this.id, deviceBefore, zoneName));
+    }
+  }
+
+  async setZonePowerOff(zoneName: string, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    this.zones?.find(zone => zone.name === zoneName)?.setPower(false);
+    this.zones
+      ?.filter(zone => zone.name !== zoneName)
+      .forEach(zone => zone.setPower(false));
+    if (execute) {
+      await this.executeSetZonePower(zoneName, false);
+    }
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventSpeakerZonePowerChanged(this.id, deviceBefore, zoneName, false));
+      this.eventManager?.triggerEvent(new EventSpeakerZonePowerOff(this.id, deviceBefore, zoneName));
     }
   }
 

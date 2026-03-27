@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { DenonModuleManager } from "../../modules/heos/denon/denonModuleManager.js";
 import { logger } from "../../../../logger.js";
-import type { RouterDeps } from "../../router.js";
+import type { ServerDeps } from "../../server.js";
 
-export function createDenonModuleRouter(deps: RouterDeps) {
+export function createDenonModuleRouter(deps: ServerDeps) {
   const router = Router();
-  const denonModule = new DenonModuleManager(deps.databaseManager, deps.actionManager, deps.eventManager);
-  deps.actionManager.registerModuleManager(denonModule);
+  const denonModule = new DenonModuleManager(deps.databaseManager, deps.deviceManager, deps.eventManager);
+  deps.deviceManager.registerModuleManager(denonModule);
 
   router.get("/devices/discover", async (_req, res) => {
     try {

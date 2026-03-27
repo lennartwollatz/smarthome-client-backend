@@ -1,5 +1,4 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { WACLightingDeviceController } from "./waclightingDeviceController.js";
 import { WACLightingEvent } from "./waclightingEvent.js";
@@ -7,6 +6,7 @@ import { WACLIGHTINGMODULE } from "./waclightingModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { DeviceFanLight } from "../../../../model/devices/DeviceFanLight.js";
 import { DeviceFanLightDimmer } from "../../../../model/devices/DeviceFanLightDimmer.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class WACLightingEventStreamManager extends ModuleEventStreamManager<WACLightingDeviceController, WACLightingEvent> {
   private pollingInterval: NodeJS.Timeout | null = null;
@@ -16,9 +16,9 @@ export class WACLightingEventStreamManager extends ModuleEventStreamManager<WACL
     managerId: string,
     moduleId: string,
     controller: WACLightingDeviceController,
-    actionManager: ActionManager
+    deviceManager: DeviceManager
   ) {
-    super(managerId, moduleId, controller, actionManager);
+    super(managerId, moduleId, controller, deviceManager);
   }
 
   protected async startEventStream(callback: (event: WACLightingEvent) => void): Promise<void> {
@@ -49,7 +49,7 @@ export class WACLightingEventStreamManager extends ModuleEventStreamManager<WACL
   }
 
   private async pollAllDevices(callback: (event: WACLightingEvent) => void): Promise<void> {
-    const devices = this.actionManager.getDevices();
+    const devices = this.deviceManager.getDevices();
     
     for (const device of devices) {
       if (device.moduleId !== WACLIGHTINGMODULE.id) continue;
@@ -129,7 +129,7 @@ export class WACLightingEventStreamManager extends ModuleEventStreamManager<WACL
 
     logger.debug({ deviceId: event.deviceid, eventType: event.data.type }, "WAC Lighting Event empfangen");
 
-    const device = this.actionManager.getDevice(event.deviceid);
+    const device = this.deviceManager.getDevice(event.deviceid);
     if (!device || !(device instanceof DeviceFanLightDimmer)) {
       return;
     }
@@ -176,7 +176,7 @@ export class WACLightingEventStreamManager extends ModuleEventStreamManager<WACL
       }
 
       if (shouldSave) {
-        this.actionManager.saveDevice(device);
+        this.deviceManager.saveDevice(device);
       }
     } catch (err) {
       logger.error({ err, deviceId: event.deviceid }, "Fehler beim Verarbeiten von WAC Lighting Event");

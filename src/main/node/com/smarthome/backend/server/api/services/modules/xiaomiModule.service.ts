@@ -1,16 +1,16 @@
 import { Router } from "express";
 import { logger } from "../../../../logger.js";
-import type { RouterDeps } from "../../router.js";
+import type { ServerDeps } from "../../server.js";
 import { XiaomiModuleManager } from "../../modules/xiaomi/xiaomiModuleManager.js";
 
-export function createXiaomiModuleRouter(deps: RouterDeps) {
+export function createXiaomiModuleRouter(deps: ServerDeps) {
   const router = Router();
   const xiaomiModule = new XiaomiModuleManager(
     deps.databaseManager,
-    deps.actionManager,
+    deps.deviceManager,
     deps.eventManager
   );
-  deps.actionManager.registerModuleManager(xiaomiModule);
+  deps.deviceManager.registerModuleManager(xiaomiModule);
 
   // Discovery: Liefert gefundene Xiaomi-Staubsauger zurück
   router.get("/devices/discover", async (_req, res) => {

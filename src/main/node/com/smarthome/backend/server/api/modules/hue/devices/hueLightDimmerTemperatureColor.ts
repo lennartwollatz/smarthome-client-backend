@@ -13,7 +13,8 @@ export class HueLightDimmerTemperatureColor extends DeviceLightDimmerTemperature
     id?: string,
     bridgeId?: string,
     hueResourceId?: string,
-    batteryRid?: string
+    batteryRid?: string,
+    hueDeviceController?: HueDeviceController
   ) {
     super();
     if (name) this.name = name;
@@ -21,6 +22,7 @@ export class HueLightDimmerTemperatureColor extends DeviceLightDimmerTemperature
     this.bridgeId = bridgeId;
     this.hueResourceId = hueResourceId;
     this.batteryRid = batteryRid;
+    this.hueDeviceController = hueDeviceController;
     this.moduleId = "hue";
     this.isConnected = true;
   }

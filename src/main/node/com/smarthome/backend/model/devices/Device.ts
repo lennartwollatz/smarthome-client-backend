@@ -51,4 +51,11 @@ export class Device {
     }
     return result;
   }
+
+  /** Millisekunden des Zeitpunkts oder `null` wenn nicht gesetzt/nicht parsebar. */
+  protected timeStringToMiliseconds(time: string): number | null {
+    if (time == null || time === "") return null;
+    const ms = Date.parse(time);
+    return Number.isNaN(ms) ? null : ms;
+  }
 }

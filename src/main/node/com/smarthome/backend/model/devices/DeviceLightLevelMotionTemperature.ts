@@ -1,10 +1,5 @@
 import { Device } from "./Device.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import { EventLightLevelMotionTemperatureStatusChanged } from "../../server/events/events/EventLightLevelMotionTemperatureStatusChanged.js";
-import { EventBrightnessChanged } from "../../server/events/events/EventBrightnessChanged.js";
-import { EventBrightnessEquals } from "../../server/events/events/EventBrightnessEquals.js";
-import { EventBrightnessLess } from "../../server/events/events/EventBrightnessLess.js";
-import { EventBrightnessGreater } from "../../server/events/events/EventBrightnessGreater.js";
 import { EventTemperatureChanged } from "../../server/events/events/EventTemperatureChanged.js";
 import { EventTemperatureEquals } from "../../server/events/events/EventTemperatureEquals.js";
 import { EventTemperatureLess } from "../../server/events/events/EventTemperatureLess.js";
@@ -14,6 +9,12 @@ import { EventMotionDetected } from "../../server/events/events/EventMotionDetec
 import { EventNoMotionDetected } from "../../server/events/events/EventNoMotionDetected.js";
 import { EventMotionDetectedSince } from "../../server/events/events/EventMotionDetectedSince.js";
 import { EventNoMotionDetectedSince } from "../../server/events/events/EventNoMotionDetectedSince.js";
+import { EventLightLevelStatusChanged } from "../../server/events/events/EventLightLevelStatusChanged.js";
+import { EventLightLevelBright } from "../../server/events/events/EventLightLevelBright.js";
+import { EventLightLevelDark } from "../../server/events/events/EventLightLevelDark.js";
+import { EventLightLevelGreater } from "../../server/events/events/EventLightLevelGreater.js";
+import { EventLightLevelLess } from "../../server/events/events/EventLightLevelLess.js";
+import { EventMotionStatusChanged } from "../../server/events/events/EventMotionStatusChanged.js";
 
 export abstract class DeviceLightLevelMotionTemperature extends Device {
   sensitivity?: number;
@@ -29,7 +30,40 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
   }
 
   abstract updateValues(): Promise<void>;
+  
+  isDark(): boolean {
+    return (this.lightLevel ?? 0) < 20;
+  }
+  isBright(): boolean {
+    return (this.lightLevel ?? 0) > 50;
+  }
+  isLightLevelGreater(lightLevel: number): boolean {
+    return (this.lightLevel ?? 0) > lightLevel;
+  }
+  isLightLevelLess(lightLevel: number): boolean {
+    return (this.lightLevel ?? 0) < lightLevel;
+  }
+  isTemperatureGreater(temperature: number): boolean {
+    return (this.temperature ?? 0) > temperature;
+  }
+  isTemperatureLess(temperature: number): boolean {
+    return (this.temperature ?? 0) < temperature;
+  }
+  isTemperatureEquals(temperature: number): boolean {
+    return (this.temperature ?? 0) === temperature;
+  }
 
+  isMotionDetectedSince(seconds: number): boolean {
+    const t = this.timeStringToMiliseconds(this.motion_last_detect ?? '');
+    if (t === null) return false;
+    return Date.now() - t <= seconds * 1000;
+  }
+
+  isNoMotionDetectedSince(seconds: number): boolean {
+    const t = this.timeStringToMiliseconds(this.motion_last_detect ?? '');
+    if (t === null) return true;
+    return Date.now() - t >= seconds * 1000;
+  }
 
   async setSensibility(sensitivity: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
@@ -38,7 +72,6 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
       await this.executeSetSensibility(sensitivity);
     }
     if (trigger) {
-      this.eventManager?.triggerEvent(new EventLightLevelMotionTemperatureStatusChanged(this.id, deviceBefore, { ...this }));
       this.eventManager?.triggerEvent(new EventSensibilityChanged(this.id, deviceBefore, sensitivity));
     }
   }
@@ -55,7 +88,7 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
       await this.executeSetMotion(motion, motion_last_detect);
     }
     if (trigger) {
-      this.eventManager?.triggerEvent(new EventLightLevelMotionTemperatureStatusChanged(this.id, deviceBefore, { ...this }));
+      this.eventManager?.triggerEvent(new EventMotionStatusChanged(this.id, deviceBefore, {...this}));
       if (motion) {
         this.eventManager?.triggerEvent(new EventMotionDetected(this.id, deviceBefore));
         this.eventManager?.triggerEvent(new EventMotionDetectedSince(this.id, deviceBefore, motion_last_detect));
@@ -76,11 +109,11 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
       await this.executeSetLightLevel(lightLevel);
     }
     if (trigger) {
-      this.eventManager?.triggerEvent(new EventLightLevelMotionTemperatureStatusChanged(this.id, deviceBefore, { ...this }));
-      this.eventManager?.triggerEvent(new EventBrightnessChanged(this.id, deviceBefore, lightLevel));
-      this.eventManager?.triggerEvent(new EventBrightnessEquals(this.id, deviceBefore, lightLevel));
-      this.eventManager?.triggerEvent(new EventBrightnessLess(this.id, deviceBefore, lightLevel));
-      this.eventManager?.triggerEvent(new EventBrightnessGreater(this.id, deviceBefore, lightLevel));
+      this.eventManager?.triggerEvent(new EventLightLevelStatusChanged(this.id, deviceBefore, {...this}));
+      this.eventManager?.triggerEvent(new EventLightLevelDark(this.id, deviceBefore, lightLevel));
+      this.eventManager?.triggerEvent(new EventLightLevelBright(this.id, deviceBefore, lightLevel));
+      this.eventManager?.triggerEvent(new EventLightLevelGreater(this.id, deviceBefore, lightLevel));
+      this.eventManager?.triggerEvent(new EventLightLevelLess(this.id, deviceBefore, lightLevel));
     }
   }
 
@@ -94,7 +127,6 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
       await this.executeSetTemperature(temperature);
     }
     if (trigger) {
-      this.eventManager?.triggerEvent(new EventLightLevelMotionTemperatureStatusChanged(this.id, deviceBefore, { ...this }));
       this.eventManager?.triggerEvent(new EventTemperatureChanged(this.id, deviceBefore, temperature));
       this.eventManager?.triggerEvent(new EventTemperatureEquals(this.id, deviceBefore, temperature));
       this.eventManager?.triggerEvent(new EventTemperatureLess(this.id, deviceBefore, temperature));

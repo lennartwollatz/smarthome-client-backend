@@ -6,6 +6,11 @@ export class LGTV extends DeviceTV {
   address?: string;
   clientKey?: string | null;
   macAddress?: string | null;
+  /**
+   * Wird vom LGDeviceController bei Verbindungs-Timeout gesetzt (TV aus / nicht erreichbar),
+   * damit {@link updateValues} keine weiteren PyWebOSTV-Aufrufe macht.
+   */
+  lastPollUnreachable = false;
   private lg?: LGDeviceController;
 
   constructor();
@@ -39,15 +44,33 @@ export class LGTV extends DeviceTV {
     if (!this.lg) {
       return;
     }
+    this.lastPollUnreachable = false;
     try {
       if (this.clientKey) {
         const selectedApp = await this.lg.getSelectedApp(this);
+        if (this.lastPollUnreachable) {
+          this.selectedApp = undefined;
+          this.selectedChannel = undefined;
+          this.power = false;
+          return;
+        }
         this.selectedApp = selectedApp ?? undefined;
         if (!selectedApp) {
           const selectedChannel = await this.lg.getSelectedChannel(this);
+          if (this.lastPollUnreachable) {
+            this.selectedChannel = undefined;
+            this.power = false;
+            return;
+          }
           this.selectedChannel = selectedChannel ?? undefined;
         }
         const vol = await this.lg.getVolume(this);
+        if (this.lastPollUnreachable) {
+          this.selectedApp = undefined;
+          this.selectedChannel = undefined;
+          this.power = false;
+          return;
+        }
         if (typeof vol === "number") {
           this.volume = vol;
         }
@@ -116,6 +139,16 @@ export class LGTV extends DeviceTV {
     } else {
       void await this.lg.powerOff(this);
     }
+  }
+
+  protected async executeSetScreenOn(): Promise<void> {
+    if (!this.lg) return;
+    await this.lg.screenOn(this);
+  }
+
+  protected async executeSetScreenOff(): Promise<void> {
+    if (!this.lg) return;
+    await this.lg.screenOff(this);
   }
 
   protected async executeSetScreen(screen: boolean): Promise<void> {

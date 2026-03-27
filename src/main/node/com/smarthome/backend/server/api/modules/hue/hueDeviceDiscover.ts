@@ -1,7 +1,15 @@
 import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { HueBridgeDiscovered } from "./hueBridgeDiscovered.js";
-import { HueDeviceController } from "./hueDeviceController.js";
+import {
+  BatteryStatus,
+  HueDeviceController,
+  LightLevelStatus,
+  LightStatus,
+  MotionStatus,
+  TemperatureStatus,
+  mirekToLightTemperaturePercent
+} from "./hueDeviceController.js";
 import { HueLight } from "./devices/hueLight.js";
 import { HueLightDimmer } from "./devices/hueLightDimmer.js";
 import { HueLightDimmerTemperature } from "./devices/hueLightDimmerTemperature.js";
@@ -56,31 +64,22 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
 
   public async discoverDevices(bridgeId: string): Promise<Device[]> {
     const resources = await this.hueController.fetchAllResourcesAll(bridgeId);
-    const resourceMap = new Map<string, HueResource>();
-    resources.forEach(resource => {
-      if (resource.id) {
-        resourceMap.set(resource.id, resource);
-      }
-    });
 
     const deviceResources = resources.filter(resource => getResourceType(resource) === "device") as DeviceResource[];
     const discoveredDevices: Device[] = [];
 
-    deviceResources.forEach(deviceResource => {
-      const devices = this.convertToDevices(deviceResource, bridgeId, resourceMap);
-      devices.forEach(device => {
-        discoveredDevices.push(device);
-      });
-    });
+    for (const deviceResource of deviceResources) {
+      const devices = await this.convertToDevices(deviceResource, bridgeId);
+      discoveredDevices.push(...devices);
+    }
 
     return discoveredDevices;
   }
 
-  private convertToDevices(
+  private async convertToDevices(
     deviceObj: DeviceResource,
-    bridgeId: string,
-    resourceMap: Map<string, HueResource>
-  ):Device[] {
+    bridgeId: string
+  ):Promise<Device[]> {
     const devices: Device[] = [];
     const deviceProps = extractDeviceProperties(deviceObj);
     if (!deviceProps) return devices;
@@ -92,15 +91,42 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     if (buttonRids.length > 0) {
       const deviceId = deviceProps.deviceId ?? deviceObj.id;
       if (deviceId) {
-        const buttonDevice = this.convertToHueButtonWithMultipleRids(
+        const buttonDevice = await this.convertToHueButtonWithMultipleRids(
           deviceProps,
           bridgeId,
           deviceId,
           buttonRids
         );
-        if (buttonDevice) devices.push(buttonDevice);
+        if (buttonDevice) {
+          devices.push(buttonDevice);
+        }
       }
       return devices;
+    }
+
+    // Prüfe ob das Gerät alle drei Sensoren hat (motion, light_level, temperature)
+    const motionRid = services.find(s => s?.rtype === "motion" && s?.rid)?.rid as string | undefined;
+    const lightLevelRid = services.find(s => s?.rtype === "light_level" && s?.rid)?.rid as string | undefined;
+    const temperatureRid = services.find(s => s?.rtype === "temperature" && s?.rid)?.rid as string | undefined;
+
+    // Wenn alle drei vorhanden sind, erstelle ein kombiniertes Gerät
+    if (motionRid && lightLevelRid && temperatureRid) {
+      const deviceId = deviceProps.deviceId ?? deviceObj.id;
+      if (deviceId) {
+        const combinedDevice = await this.convertToHueLightLevelMotionTemperature(
+          deviceProps.deviceName ?? "",
+          deviceId,
+          bridgeId,
+          motionRid,
+          lightLevelRid,
+          temperatureRid,
+          deviceProps.ridBattery
+        );
+        if (combinedDevice) {
+          devices.push(combinedDevice);
+          return devices;
+        }
+      }
     }
 
     const skipTypes = new Set([
@@ -112,372 +138,415 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
       "bridge"
     ]);
 
-    // Prüfe ob das Gerät alle drei Sensoren hat (motion, light_level, temperature)
-    const motionRid = services.find(s => s?.rtype === "motion" && s?.rid)?.rid as string | undefined;
-    const lightLevelRid = services.find(s => s?.rtype === "light_level" && s?.rid)?.rid as string | undefined;
-    const temperatureRid = services.find(s => s?.rtype === "temperature" && s?.rid)?.rid as string | undefined;
-
-    // Wenn alle drei vorhanden sind, erstelle ein kombiniertes Gerät
-    if (motionRid && lightLevelRid && temperatureRid) {
-      const deviceId = deviceProps.deviceId ?? deviceObj.id;
-      if (deviceId) {
-        const combinedDevice = this.convertToHueLightLevelMotionTemperature(
-          deviceObj,
-          deviceProps,
-          bridgeId,
-          deviceId,
-          motionRid,
-          lightLevelRid,
-          temperatureRid,
-          resourceMap
-        );
-        if (combinedDevice) {
-          devices.push(combinedDevice);
-          return devices;
-        }
-      }
-    }
-
     // Ansonsten erstelle separate Geräte wie bisher
-    services.forEach(service => {
+    for (const service of services) {
       const rtype = service?.rtype;
       const rid = service?.rid;
-      if (!rtype || !rid || skipTypes.has(rtype)) return;
+      if (!rtype || !rid || skipTypes.has(rtype)) continue;
 
       // Überspringe motion, light_level und temperature, wenn sie bereits im kombinierten Gerät verwendet wurden
       if ((rtype === "motion" && motionRid && lightLevelRid && temperatureRid) ||
           (rtype === "light_level" && motionRid && lightLevelRid && temperatureRid) ||
           (rtype === "temperature" && motionRid && lightLevelRid && temperatureRid)) {
-        return;
+        continue;
       }
 
       let device: Device | null = null;
       switch (rtype) {
         case "motion":
-          device = this.convertToHueMotionSensor(deviceObj, deviceProps, bridgeId, rid, resourceMap);
+          device = await this.convertToHueMotionSensor(deviceProps.deviceName ?? "", deviceProps.deviceId ?? "", bridgeId, rid, deviceProps.ridBattery);
           break;
         case "camera_motion":
-          device = this.convertToHueCameraMotionSensor(deviceObj, deviceProps, bridgeId, rid, resourceMap);
+          device = await this.convertToHueCameraMotionSensor(deviceProps.deviceName ?? "", deviceProps.deviceId ?? "", bridgeId, rid, deviceProps.ridBattery);
           break;
         case "light_level":
-          device = this.convertToHueLightLevelSensor(deviceObj, deviceProps, bridgeId, rid, resourceMap);
+          device = await this.convertToHueLightLevelSensor(deviceProps.deviceName ?? "", deviceProps.deviceId ?? "", bridgeId, rid, deviceProps.ridBattery);
           break;
         case "temperature":
-          device = this.convertToHueTemperatureSensor(deviceObj, deviceProps, bridgeId, rid, resourceMap);
+          device = await this.convertToHueTemperatureSensor(deviceProps.deviceName ?? "", deviceProps.deviceId ?? "", bridgeId, rid, deviceProps.ridBattery);
           break;
         case "light":
-          device = this.convertToHueLight(deviceObj, deviceProps, bridgeId, rid, resourceMap);
+          device = await this.convertToHueLight(deviceProps.deviceName ?? "", deviceProps.deviceId ?? "", bridgeId, rid, deviceProps.ridBattery);
           break;
         default:
           break;
       }
       if (device) devices.push(device);
-    });
+    };
 
     return devices;
   }
 
-  private applyBattery(device: Device, batteryLevel: number | null | undefined) {
-    if (batteryLevel == null) {
-      device.hasBattery = false;
-      return;
-    }
-    device.hasBattery = true;
-    device.batteryLevel = batteryLevel;
-  }
-
-  private getBatteryLevel(ridBattery: string | undefined, resourceMap: Map<string, HueResource>) {
-    if (!ridBattery) return null;
-    const resource = resourceMap.get(ridBattery);
-    if (!resource) return null;
-    const powerState = (resource.power_state as Record<string, unknown> | undefined) ?? {};
-    const batteryLevel =
-      (powerState.battery_level as number | undefined) ??
-      (resource.battery_level as number | undefined);
-    return typeof batteryLevel === "number" ? batteryLevel : null;
-  }
-
-  private convertToHueLight(
-    lightObj: HueResource,
-    deviceProps: DeviceProperties,
+  private async convertToHueLight(
+    deviceName: string,
+    deviceId: string,
     bridgeId: string,
-    rid: string,
-    resourceMap: Map<string, HueResource>
-  ):HueLight | HueLightDimmer | HueLightDimmerTemperature | HueLightDimmerTemperatureColor {
-    const on = Boolean((lightObj.on as Record<string, unknown> | undefined)?.on);
-    const brightness = (lightObj.dimming as Record<string, unknown> | undefined)?.brightness as
-      | number
-      | undefined;
-    const colorTemperature = (lightObj.color_temperature as Record<string, unknown> | undefined)
-      ?.mirek as number | undefined;
-    const xy = (lightObj.color as Record<string, unknown> | undefined)?.xy as
-      | Record<string, unknown>
-      | undefined;
-    const colorX = typeof xy?.x === "number" ? Math.round((xy.x as number) * 1000) / 1000 : null;
-    const colorY = typeof xy?.y === "number" ? Math.round((xy.y as number) * 1000) / 1000 : null;
+    lightRid: string,
+    batteryRid?: string,
+  ):Promise<HueLight | HueLightDimmer | HueLightDimmerTemperature | HueLightDimmerTemperatureColor | null> {
+    
+    const hueDeviceId = `hue-${bridgeId}-${deviceId}`;
+   
+    // Lade Light-Daten
+    const lightStatus: LightStatus | null = await this.hueController.getLight(bridgeId, lightRid);
+    if (!lightStatus) return null;
+    const on = lightStatus.on;
+    const brightness = lightStatus.brightness;
+    const colorX = lightStatus.colorX;
+    const colorY = lightStatus.colorY;
+    const colorTemperature = lightStatus.colorTemperature;
 
-    const deviceId = `hue-light-${rid}`;
-    let device:
-      | HueLight
-      | HueLightDimmer
-      | HueLightDimmerTemperature
-      | HueLightDimmerTemperatureColor;
+    let device: HueLight | HueLightDimmer | HueLightDimmerTemperature | HueLightDimmerTemperatureColor;
 
-    if (brightness == null && colorTemperature == null && (colorX == null || colorY == null)) {
-      device = new HueLight(deviceProps.deviceName, deviceId, bridgeId, rid, deviceProps.ridBattery);
-    } else if (brightness != null && colorTemperature == null && (colorX == null || colorY == null)) {
-      device = new HueLightDimmer(deviceProps.deviceName, deviceId, bridgeId, rid, deviceProps.ridBattery);
-      device.setBrightness(brightness, false);
-    } else if (brightness != null && colorTemperature != null && (colorX == null || colorY == null)) {
+    if (brightness !== undefined && colorTemperature === undefined && (colorX === undefined || colorY === undefined)) {
+      device = new HueLightDimmer(
+        deviceName,
+        hueDeviceId,
+        bridgeId,
+        lightRid,
+        batteryRid,
+        this.hueController
+      );
+      device.setBrightness(brightness, false, false);
+    } else if (brightness !== undefined && colorTemperature !== undefined && (colorX === undefined || colorY === undefined)) {
       device = new HueLightDimmerTemperature(
-        deviceProps.deviceName,
-        deviceId,
+        deviceName,
+        hueDeviceId,
         bridgeId,
-        rid,
-        deviceProps.ridBattery
+        lightRid,
+        batteryRid,
+        this.hueController
       );
-      device.setBrightness(brightness, false);
-      device.setTemperature(colorTemperature, false);
-    } else if (brightness != null && colorX != null && colorY != null) {
+      device.setBrightness(brightness, false, false);
+      device.setTemperature(mirekToLightTemperaturePercent(colorTemperature), false, false);
+    } else if (brightness !== undefined && colorX !== undefined && colorY !== undefined) {
       device = new HueLightDimmerTemperatureColor(
-        deviceProps.deviceName,
-        deviceId,
+        deviceName,
+        hueDeviceId,
         bridgeId,
-        rid,
-        deviceProps.ridBattery
+        lightRid,
+        batteryRid,
+        this.hueController
       );
-      device.setBrightness(brightness, false);
-      if (colorTemperature != null) {
-        device.setTemperature(colorTemperature, false);
+      device.setBrightness(brightness, false, false);
+      if (colorTemperature) {
+        device.setTemperature(mirekToLightTemperaturePercent(colorTemperature), false, false);
       }
-      device.setColor(colorX, colorY, false);
+      device.setColor(colorX, colorY, false, false);
     } else {
-      device = new HueLightDimmer(deviceProps.deviceName, deviceId, bridgeId, rid, deviceProps.ridBattery);
-      if (brightness != null) {
-        device.setBrightness(brightness, false);
-      }
+      device = new HueLight(
+        deviceName,
+        hueDeviceId,
+        bridgeId,
+        lightRid,
+        batteryRid,
+        this.hueController
+      );
     }
 
-    if (on) {
-      device.setOn(false);
-    } else {
-      device.setOff(false);
+    if(on) device.setOn(false, false); else device.setOff(false, false);
+
+
+    if( batteryRid ) {
+      const batteryStatus: BatteryStatus | null = await this.hueController.getBattery(bridgeId, batteryRid);
+      if ( batteryStatus ) {
+        const batteryLevel = batteryStatus.batteryLevel;
+        if (batteryLevel) {
+          device.hasBattery = true;
+          device.batteryLevel = batteryLevel;
+        } else {
+          device.hasBattery = false;
+        }
+      }
     }
-    device.setHueDeviceController(this.hueController);
-    this.applyBattery(device, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
     return device;
   }
 
-  private convertToHueMotionSensor(
-    motionObj: HueResource,
-    deviceProps: DeviceProperties,
-    bridgeId: string,
-    rid: string,
-    resourceMap: Map<string, HueResource>
-  ):HueMotionSensor {
-    const deviceId = `hue-motion-${rid}`;
-    const sensor = new HueMotionSensor(
-      deviceProps.deviceName,
-      deviceId,
-      bridgeId,
-      rid,
-      deviceProps.ridBattery,
-      this.hueController
-    );
-
-    const motionReport = (motionObj.motion as Record<string, unknown> | undefined)
-      ?.motion_report as Record<string, unknown> | undefined;
-    const motion = motionReport?.motion as boolean | undefined;
-    const changed = motionReport?.changed as string | undefined;
-    if (typeof motion === "boolean" && changed) {
-      sensor.setMotion(motion, changed, false);
-    }
-    const sensitivity = (motionObj.sensitivity as Record<string, unknown> | undefined)?.sensitivity as
-      | number
-      | undefined;
-    if (typeof sensitivity === "number") {
-      sensor.setSensibility(sensitivity, false);
-    }
-    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    return sensor;
-  }
-
-  private convertToHueCameraMotionSensor(
-    motionObj: HueResource,
-    deviceProps: DeviceProperties,
-    bridgeId: string,
-    rid: string,
-    resourceMap: Map<string, HueResource>
-  ):HueCameraMotionSensor {
-    const deviceId = `hue-camera-motion-${rid}`;
-    const sensor = new HueCameraMotionSensor(
-      deviceProps.deviceName,
-      deviceId,
-      bridgeId,
-      rid,
-      deviceProps.ridBattery,
-      this.hueController
-    );
-
-    const motionReport = (motionObj.motion as Record<string, unknown> | undefined)
-      ?.motion_report as Record<string, unknown> | undefined;
-    const motion = motionReport?.motion as boolean | undefined;
-    const changed = motionReport?.changed as string | undefined;
-    if (typeof motion === "boolean" && changed) {
-      sensor.setMotion(motion, changed, false);
-    }
-    const sensitivity = (motionObj.sensitivity as Record<string, unknown> | undefined)?.sensitivity as
-      | number
-      | undefined;
-    if (typeof sensitivity === "number") {
-      sensor.setSensibility(sensitivity, false);
-    }
-    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    return sensor;
-  }
-
-  private convertToHueLightLevelSensor(
-    lightLevelObj: HueResource,
-    deviceProps: DeviceProperties,
-    bridgeId: string,
-    rid: string,
-    resourceMap: Map<string, HueResource>
-  ):HueLightLevelSensor {
-    const deviceId = `hue-light-level-${rid}`;
-    const sensor = new HueLightLevelSensor(
-      deviceProps.deviceName,
-      deviceId,
-      bridgeId,
-      rid,
-      deviceProps.ridBattery,
-      this.hueController
-    );
-    const level = (lightLevelObj.light as Record<string, unknown> | undefined)
-      ?.light_level_report as Record<string, unknown> | undefined;
-    const lightValue = level?.light_level as number | undefined;
-    if (typeof lightValue === "number") {
-      sensor.setLightLevel(lightValue, false);
-    }
-    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    return sensor;
-  }
-
-  private convertToHueTemperatureSensor(
-    temperatureObj: HueResource,
-    deviceProps: DeviceProperties,
-    bridgeId: string,
-    rid: string,
-    resourceMap: Map<string, HueResource>
-  ):HueTemperatureSensor {
-    const deviceId = `hue-temperature-${rid}`;
-    const sensor = new HueTemperatureSensor(
-      deviceProps.deviceName,
-      deviceId,
-      bridgeId,
-      rid,
-      deviceProps.ridBattery,
-      this.hueController
-    );
-    const report = (temperatureObj.temperature as Record<string, unknown> | undefined)
-      ?.temperature_report as Record<string, unknown> | undefined;
-    const temperature = report?.temperature as number | undefined;
-    if (typeof temperature === "number") {
-      sensor.setTemperature(temperature, false);
-    }
-    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    return sensor;
-  }
-
-  private convertToHueLightLevelMotionTemperature(
-    deviceObj: DeviceResource,
-    deviceProps: DeviceProperties,
-    bridgeId: string,
+  private async convertToHueMotionSensor(
+    deviceName: string,
     deviceId: string,
+    bridgeId: string,
+    motionRid: string,
+    batteryRid?: string,
+  ):Promise<HueMotionSensor | null> {
+    const hueDeviceId = `hue-${bridgeId}-${deviceId}`;
+    const sensor = new HueMotionSensor(
+      deviceName,
+      hueDeviceId,
+      bridgeId,
+      motionRid,
+      batteryRid,
+      this.hueController
+    );
+
+    // Lade Motion-Daten
+    const motionStatus: MotionStatus | null = await this.hueController.getMotion(bridgeId, motionRid);
+    if (motionStatus) {
+      const motion = motionStatus.motion;
+      const changed = motionStatus.lastChanged;
+      if (motion && changed) {
+        sensor.setMotion(motion, changed, false);
+      }
+      const sensitivity = motionStatus.sensitivity;
+      if (sensitivity) {
+        sensor.setSensibility(sensitivity, false);
+      }
+    } else {
+      return null;
+    }
+
+    if( batteryRid ) {
+      const batteryStatus: BatteryStatus | null = await this.hueController.getBattery(bridgeId, batteryRid);
+      if ( batteryStatus ) {
+        const batteryLevel = batteryStatus.batteryLevel;
+        if (batteryLevel) {
+          sensor.hasBattery = true;
+          sensor.batteryLevel = batteryLevel;
+        } else {
+          sensor.hasBattery = false;
+        }
+      }
+    }
+    
+    return sensor;
+  }
+
+  private async convertToHueCameraMotionSensor(
+    deviceName: string,
+    deviceId: string,
+    bridgeId: string,
+    motionRid: string,
+    batteryRid?: string,
+  ):Promise<HueCameraMotionSensor | null> {
+    const hueDeviceId = `hue-${bridgeId}-${deviceId}`;
+    const sensor = new HueCameraMotionSensor(
+      deviceName,
+      hueDeviceId,
+      bridgeId,
+      motionRid,
+      batteryRid,
+      this.hueController
+    );
+
+    // Lade Motion-Daten
+    const motionStatus: MotionStatus | null = await this.hueController.getMotion(bridgeId, motionRid);
+    if (motionStatus) {
+      const motion = motionStatus.motion;
+      const changed = motionStatus.lastChanged;
+      if (motion && changed) {
+        sensor.setMotion(motion, changed, false);
+      }
+      const sensitivity = motionStatus.sensitivity;
+      if (sensitivity) {
+        sensor.setSensibility(sensitivity, false);
+      }
+    } else {
+      return null;
+    }
+
+    if( batteryRid ) {
+      const batteryStatus: BatteryStatus | null = await this.hueController.getBattery(bridgeId, batteryRid);
+      if ( batteryStatus ) {
+        const batteryLevel = batteryStatus.batteryLevel;
+        if (batteryLevel) {
+          sensor.hasBattery = true;
+          sensor.batteryLevel = batteryLevel;
+        } else {
+          sensor.hasBattery = false;
+        }
+      }
+    }
+    
+    return sensor;
+  }
+
+  private async convertToHueLightLevelSensor(
+    deviceName: string,
+    deviceId: string,
+    bridgeId: string,
+    lightLevelRid: string,
+    batteryRid?: string,
+  ):Promise<HueLightLevelSensor | null> {
+    const hueDeviceId = `hue-${bridgeId}-${deviceId}`;
+    const sensor = new HueLightLevelSensor(
+      deviceName,
+      hueDeviceId,
+      bridgeId,
+      lightLevelRid,
+      batteryRid,
+      this.hueController
+    );
+
+    // Lade Light Level-Daten
+    const lightLevelStatus: LightLevelStatus | null = await this.hueController.getLightLevel(bridgeId, lightLevelRid);
+    if (lightLevelStatus) {
+      const lightLevel = lightLevelStatus.lightLevel;
+      if (lightLevel) {
+        sensor.setLightLevel(lightLevel, false);
+      }
+    } else {
+      return null;
+    }
+
+    if( batteryRid ) {
+      const batteryStatus: BatteryStatus | null = await this.hueController.getBattery(bridgeId, batteryRid);
+      if ( batteryStatus ) {
+        const batteryLevel = batteryStatus.batteryLevel;
+        if (batteryLevel) {
+          sensor.hasBattery = true;
+          sensor.batteryLevel = batteryLevel;
+        } else {
+          sensor.hasBattery = false;
+        }
+      }
+    }
+    
+    return sensor;
+  }
+
+  private async convertToHueTemperatureSensor(
+    deviceName: string,
+    deviceId: string,
+    bridgeId: string,
+    temperatureRid: string,
+    batteryRid?: string,
+  ):Promise<HueTemperatureSensor | null> {
+    const hueDeviceId = `hue-${bridgeId}-${deviceId}`;
+    const sensor = new HueTemperatureSensor(
+      deviceName,
+      hueDeviceId,
+      bridgeId,
+      temperatureRid,
+      batteryRid,
+      this.hueController
+    );
+
+    // Lade Temperature-Daten
+    const temperatureStatus: TemperatureStatus | null = await this.hueController.getTemperature(bridgeId, temperatureRid);
+    if (temperatureStatus) {
+      const temperature = temperatureStatus.temperature;
+      if (temperature) {
+        sensor.setTemperature(temperature, false);
+      }
+    } else {
+      return null;
+    }
+
+    if( batteryRid ) {
+      const batteryStatus: BatteryStatus | null = await this.hueController.getBattery(bridgeId, batteryRid);
+      if ( batteryStatus ) {
+        const batteryLevel = batteryStatus.batteryLevel;
+        if (batteryLevel) {
+          sensor.hasBattery = true;
+          sensor.batteryLevel = batteryLevel;
+        } else {
+          sensor.hasBattery = false;
+        }
+      }
+    }
+    return sensor;
+  }
+
+  private async convertToHueLightLevelMotionTemperature(
+    deviceName: string,
+    deviceId: string,
+    bridgeId: string,
     motionRid: string,
     lightLevelRid: string,
     temperatureRid: string,
-    resourceMap: Map<string, HueResource>
-  ):HueLightLevelMotionTemperature {
-    const hueDeviceId = `hue-light-level-motion-temperature-${deviceId}`;
+    batteryRid?: string,
+  ):Promise<HueLightLevelMotionTemperature | null> {
+    const hueDeviceId = `hue-${bridgeId}-${deviceId}`;
     const sensor = new HueLightLevelMotionTemperature(
-      deviceProps.deviceName,
+      deviceName,
       hueDeviceId,
       bridgeId,
       motionRid,
       lightLevelRid,
       temperatureRid,
-      deviceProps.ridBattery,
+      batteryRid,
       this.hueController
     );
 
     // Lade Motion-Daten
-    const motionResource = resourceMap.get(motionRid);
-    if (motionResource) {
-      const motionReport = (motionResource.motion as Record<string, unknown> | undefined)
-        ?.motion_report as Record<string, unknown> | undefined;
-      const motion = motionReport?.motion as boolean | undefined;
-      const changed = motionReport?.changed as string | undefined;
-      if (typeof motion === "boolean" && changed) {
+    const motionStatus: MotionStatus | null = await this.hueController.getMotion(bridgeId, motionRid);
+    if (motionStatus) {
+      const motion = motionStatus.motion;
+      const changed = motionStatus.lastChanged;
+      if (motion && changed) {
         sensor.setMotion(motion, changed, false);
       }
-      const sensitivity = (motionResource.sensitivity as Record<string, unknown> | undefined)?.sensitivity as
-        | number
-        | undefined;
-      if (typeof sensitivity === "number") {
+      const sensitivity = motionStatus.sensitivity;
+      if (sensitivity) {
         sensor.setSensibility(sensitivity, false);
       }
+    } else {
+      return null;
     }
 
     // Lade Light Level-Daten
-    const lightLevelResource = resourceMap.get(lightLevelRid);
-    if (lightLevelResource) {
-      const level = (lightLevelResource.light as Record<string, unknown> | undefined)
-        ?.light_level_report as Record<string, unknown> | undefined;
-      const lightValue = level?.light_level as number | undefined;
-      if (typeof lightValue === "number") {
-        sensor.setLightLevel(lightValue, false);
+    const lightLevelStatus: LightLevelStatus | null = await this.hueController.getLightLevel(bridgeId, lightLevelRid);
+    if (lightLevelStatus) {
+      const lightLevel = lightLevelStatus.lightLevel;
+      if (lightLevel) {
+        sensor.setLightLevel(lightLevel, false);
       }
-    }
+    } 
 
     // Lade Temperature-Daten
-    const temperatureResource = resourceMap.get(temperatureRid);
-    if (temperatureResource) {
-      const report = (temperatureResource.temperature as Record<string, unknown> | undefined)
-        ?.temperature_report as Record<string, unknown> | undefined;
-      const temperature = report?.temperature as number | undefined;
-      if (typeof temperature === "number") {
+    const temperatureStatus: TemperatureStatus | null = await this.hueController.getTemperature(bridgeId, temperatureRid);
+    if (temperatureStatus) {
+      const temperature = temperatureStatus.temperature;
+      if (temperature) {
         sensor.setTemperature(temperature, false);
       }
-    }
+    } 
 
-    this.applyBattery(sensor, this.getBatteryLevel(deviceProps.ridBattery, resourceMap));
-    sensor.setHueDeviceController(this.hueController);
+    if( batteryRid ) {
+      const batteryStatus: BatteryStatus | null = await this.hueController.getBattery(bridgeId, batteryRid);
+      if ( batteryStatus ) {
+        const batteryLevel = batteryStatus.batteryLevel;
+        if (batteryLevel) {
+          sensor.hasBattery = true;
+          sensor.batteryLevel = batteryLevel;
+        } else {
+          sensor.hasBattery = false;
+        }
+      }
+    }
     
-    // Stelle sicher, dass die Resource IDs im Device-Objekt gespeichert werden
-    sensor.setBridgeId(bridgeId);
-    sensor.setMotionRid(motionRid);
-    sensor.setLightLevelRid(lightLevelRid);
-    sensor.setTemperatureRid(temperatureRid);
-    sensor.setBatteryRid(deviceProps.ridBattery ?? "");
     return sensor;
   }
 
-  private convertToHueButtonWithMultipleRids(
+  private async convertToHueButtonWithMultipleRids(
     deviceProps: DeviceProperties,
     bridgeId: string,
     deviceId: string,
-    buttonRids: string[]
-  ):Device {
-    const hueDeviceId = `hue-button-${deviceId}`;
+    buttonRids: string[],
+    batteryRid?: string,
+  ):Promise<HueSwitchDimmer | null> {
+    const hueDeviceId = `hue-${bridgeId}-${deviceId}`;
     const device = new HueSwitchDimmer(
       deviceProps.deviceName,
       hueDeviceId,
       bridgeId,
       buttonRids,
-      deviceProps.ridBattery,
+      batteryRid,
       this.hueController
     );
-    this.applyBattery(device, null);
+
+    if( batteryRid ) {
+      const batteryStatus: BatteryStatus | null = await this.hueController.getBattery(bridgeId, batteryRid);
+      if ( batteryStatus ) {
+        const batteryLevel = batteryStatus.batteryLevel;
+        if (batteryLevel) {
+          device.hasBattery = true;
+          device.batteryLevel = batteryLevel;
+        } else {
+          device.hasBattery = false;
+        }
+      }
+    }
     return device;
   }
 }

@@ -1,5 +1,4 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import { logger } from "../../../../logger.js";
 import { ModuleManager } from "../moduleManager.js";
 import { XiaomiDeviceController } from "./xiaomiDeviceController.js";
@@ -8,22 +7,23 @@ import { XiaomiDeviceDiscover } from "./xiaomiDeviceDiscover.js";
 import { DeviceVacuumCleaner } from "../../../../model/devices/DeviceVacuumCleaner.js";
 import { XiaomiVacuumCleaner } from "./devices/xiaomiVacuumCleaner.js";
 import { XiaomiEvent } from "./xiaomiEvent.js";
-import { Device } from "../../../../model/index.js";
+import { Device } from "../../../../model/devices/Device.js";
 import { XiaomiEventStreamManager } from "./xiaomiEventStreamManager.js";
 import { EventManager } from "../../../events/EventManager.js";
 import { XIAOMICONFIG } from "./xiaomiModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager, XiaomiDeviceController, XiaomiDeviceController, XiaomiEvent, DeviceVacuumCleaner, XiaomiDeviceDiscover, XiaomiDeviceDiscovered> {
 
   constructor(
     databaseManager: DatabaseManager,
-    actionManager: ActionManager,
+    deviceManager: DeviceManager,
     eventManager: EventManager
   ) {
     super(
       databaseManager, 
-      actionManager, 
+      deviceManager, 
       eventManager, 
       new XiaomiDeviceController(), 
       new XiaomiDeviceDiscover(databaseManager));
@@ -37,7 +37,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
   }
 
   protected createEventStreamManager(): XiaomiEventStreamManager {
-    return new XiaomiEventStreamManager(this.getManagerId(), this.deviceController, this.actionManager);
+    return new XiaomiEventStreamManager(this.getManagerId(), this.deviceController, this.deviceManager);
   }
 
   async discoverDevices(): Promise<Device[]> {
@@ -49,7 +49,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
       // TODO: eventuell sollte die Konvertierung zu einem XiaomiVacuumCleaner und Speicherung
       // erst dann geschehen, wenn das Device übernommen wird.
       const vacuumCleaners = await this.convertDiscoveredDevicesToVacuumCleaners(discoveredDevices);
-      this.actionManager.saveDevices(vacuumCleaners);
+      this.deviceManager.saveDevices(vacuumCleaners);
       this.initialiseEventStreamManager();
       return vacuumCleaners;
     } catch (err) {
@@ -107,7 +107,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
         this.deviceController
       );
       await vacuum.updateValues();
-      this.actionManager.saveDevice(vacuum);
+      this.deviceManager.saveDevice(vacuum);
       this.initialiseEventStreamManager();
 
       logger.info({ deviceId, address: trimmedIp }, "Xiaomi Staubsauger erfolgreich hinzugefuegt");
@@ -125,7 +125,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     if (!vacuum) return false;
     try {
       await vacuum.setPower(power, true, true);
-      this.actionManager.saveDevice(vacuum);
+      this.deviceManager.saveDevice(vacuum);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Setzen des Power-Zustands");
@@ -139,7 +139,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     if (!vacuum) return false;
     try {
       await vacuum.startCleaning(true, true);
-      this.actionManager.saveDevice(vacuum);
+      this.deviceManager.saveDevice(vacuum);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Starten der Reinigung");
@@ -153,7 +153,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     if (!vacuum) return false;
     try {
       await vacuum.stopCleaning(true, true);
-      this.actionManager.saveDevice(vacuum);
+      this.deviceManager.saveDevice(vacuum);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Stoppen der Reinigung");
@@ -167,7 +167,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     if (!vacuum) return false;
     try {
       await vacuum.pauseCleaning(true, true);
-      this.actionManager.saveDevice(vacuum);
+      this.deviceManager.saveDevice(vacuum);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Pausieren der Reinigung");
@@ -181,7 +181,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     if (!vacuum) return false;
     try {
       await vacuum.resumeCleaning(true, true);
-      this.actionManager.saveDevice(vacuum);
+      this.deviceManager.saveDevice(vacuum);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Fortsetzen der Reinigung");
@@ -195,7 +195,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     if (!vacuum) return false;
     try {
       await vacuum.dock(true, true);
-      this.actionManager.saveDevice(vacuum);
+      this.deviceManager.saveDevice(vacuum);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Senden zur Docking-Station");
@@ -220,7 +220,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
   }
 
   private async getVacuumCleaner(deviceId: string): Promise<DeviceVacuumCleaner | null> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) {
       logger.warn({ deviceId }, "Geraet nicht gefunden");
       return null;
@@ -301,6 +301,10 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
       case DeviceType.VACUUM:
         const xiaomiVacuumCleaner = new XiaomiVacuumCleaner();
         Object.assign(xiaomiVacuumCleaner, device);
+        if (!((xiaomiVacuumCleaner as any).triggerListeners instanceof Map)) {
+          (xiaomiVacuumCleaner as any).triggerListeners = new Map();
+        }
+        xiaomiVacuumCleaner.setXiaomiController(this.deviceController);
         await xiaomiVacuumCleaner.updateValues();
         convertedDevice = xiaomiVacuumCleaner;
         break;
@@ -310,11 +314,11 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
   }
 
   async initializeDeviceControllers(): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(this.getModuleId());
+    const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
     for (const device of devices) {
-        (device as XiaomiVacuumCleaner).setXiaomiController(this.deviceController);
-        await (device as XiaomiVacuumCleaner).updateValues();
-        this.actionManager.saveDevice(device);
+      if (device instanceof XiaomiVacuumCleaner) {
+        device.setXiaomiController(this.deviceController);
+      }
     }
   }
 }

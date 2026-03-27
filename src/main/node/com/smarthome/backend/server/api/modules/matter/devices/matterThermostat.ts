@@ -1,9 +1,7 @@
 import { NodeId } from "@matter/types";
-import { logger } from "../../../../../logger.js";
 import { DeviceThermostat, TemperatureSchedule } from "../../../../../model/devices/DeviceThermostat.js";
 import { MatterDeviceController } from "../matterDeviceController.js";
 import { MatterDevice } from "./matterDevice.js";
-import { Button } from "../../../../../model/devices/DeviceSwitch.js";
 
 export class MatterThermostat extends DeviceThermostat implements MatterDevice {
   private nodeId: string;
@@ -50,9 +48,5 @@ export class MatterThermostat extends DeviceThermostat implements MatterDevice {
     this.nodeId = String(nodeId);
   }
 
-  // MatterDevice verlangt aktuell getButton(); Thermostat hat keine Buttons.
-  getButton(_buttonId: string): Button | undefined {
-    return undefined;
-  }
 }
 

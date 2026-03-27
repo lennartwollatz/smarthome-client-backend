@@ -1,7 +1,7 @@
 import { EventCondition } from "../event-types/EventCondition.js";
 import { EventListener } from "../EventListener.js";
 import { EventType } from "../event-types/EventType.js";
-import { Event } from "./Event.js";
+import { Event, eventButtonIdMatchesListener } from "./Event.js";
 import crypto from "crypto";
 
 export class EventSwitchButtonOff extends Event {
@@ -27,6 +27,7 @@ export class EventSwitchButtonOff extends Event {
   }
 
   public matchesListener(listener: EventListener): boolean {
-    return listener.deviceId === this.deviceId;
+    if (listener.deviceId !== this.deviceId) return false;
+    return eventButtonIdMatchesListener(this, listener);
   }
 }

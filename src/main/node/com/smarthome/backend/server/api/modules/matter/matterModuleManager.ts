@@ -1,6 +1,7 @@
 import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
-import { Device, TemperatureSchedule } from "../../../../model/index.js";
+import { Device } from "../../../../model/devices/Device.js";
+import type { TemperatureSchedule } from "../../../../model/devices/DeviceThermostat.js";
 import { MatterDeviceDiscover } from "./matterDeviceDiscover.js";
 import { MatterDeviceDiscovered } from "./matterDeviceDiscovered.js";
 import { MatterDeviceController } from "./matterDeviceController.js";
@@ -14,41 +15,99 @@ import { MatterSwitch } from "./devices/matterSwitch.js";
 import { MatterSwitchDimmer } from "./devices/matterSwitchDimmer.js";
 import { matterVendors } from "./matterVendors.js";
 import { MatterThermostat } from "./devices/matterThermostat.js";
-import { ActionManager } from "../../../actions/ActionManager.js";
 import { EventManager } from "../../../events/EventManager.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
+import { MatterVirtualDeviceManager } from "./MatterVirtualDeviceManager.js";
+import { VoiceAssistantTrigger } from "../../entities/actions/action/VoiceAssistantTrigger.js";
+import { VoiceAssistantCommandAction } from "./voiceAssistantCommandMapping.js";
+import { ActionManager } from "../../entities/actions/ActionManager.js";
+import { UserManager } from "../../entities/users/userManager.js";
 
 export type PairingPayload = {
   pairingCode: string;
 };
 
 export class MatterModuleManager extends ModuleManager<MatterEventStreamManager, MatterDeviceController, MatterDeviceController, MatterEvent, Device, MatterDeviceDiscover, MatterDeviceDiscovered> {
+  private virtualDeviceManager: MatterVirtualDeviceManager;
 
   constructor(
     databaseManager: DatabaseManager,
+    deviceManager: DeviceManager,
+    eventManager: EventManager,
     actionManager: ActionManager,
-    eventManager: EventManager
+    userManager: UserManager
   ) {
-    const controller = new MatterDeviceController(databaseManager);
     super(
       databaseManager,
-      actionManager,
+      deviceManager,
       eventManager,
-      controller,
+      new MatterDeviceController(databaseManager),
       new MatterDeviceDiscover(databaseManager)
     );
+    this.virtualDeviceManager = new MatterVirtualDeviceManager(databaseManager, deviceManager, userManager, eventManager);
+    actionManager.setMatterModuleManager(this);
+    userManager.setMatterModuleManager(this);
   }
 
-  
+  protected createEventStreamManager(): MatterEventStreamManager {
+    return new MatterEventStreamManager(this.getManagerId(), this.deviceController, this.deviceManager);
+  }
+
+  async initializeDeviceControllers(): Promise<void> {
+    const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
+    for (const device of devices) {
+      if (device instanceof MatterSwitchEnergy) {
+        device.setMatterController(this.deviceController);
+      }
+      if (device instanceof MatterSwitch) {
+        device.setMatterController(this.deviceController);
+      }
+      if (device instanceof MatterSwitchDimmer) {
+        device.setMatterController(this.deviceController);
+      }
+      if (device instanceof MatterThermostat) {
+        device.setMatterController(this.deviceController);
+      }
+    }
+  }
+
   public getModuleId(): string {
     return MATTERCONFIG.id;
   }
+
   protected getManagerId(): string {
     return MATTERCONFIG.managerId;
   }
 
+  async createPresenceDeviceForUser(userId: string): Promise<{ nodeId: string; port: number; pairingCode: string; passcode: number; discriminator: number; presenceDeviceId: string }> {
+    return await this.virtualDeviceManager.createPresenceDevice(userId);
+  }
+
+  async removePresenceDeviceForUser(userId: string): Promise<boolean> {
+    return await this.virtualDeviceManager.removePresenceDevice(userId);
+  }
+
+  async setUserPresent(userId: string): Promise<boolean> {
+    return await this.virtualDeviceManager.setUserPresent(userId);
+  }
+
+  async setUserAbsent(userId: string): Promise<boolean> {
+    return await this.virtualDeviceManager.setUserAbsent(userId);
+  }
+
+  async createVoiceAssistantDevice(trimmed: string, actionType: VoiceAssistantCommandAction | undefined, deviceId: string | undefined): Promise<VoiceAssistantTrigger | null> {
+    return await this.virtualDeviceManager.createVoiceAssistantDevice(trimmed, actionType, deviceId);
+  }
+
+  async removeVoiceAssistantDevice(deviceId: string): Promise<boolean> {
+    return await this.virtualDeviceManager.removeVoiceAssistantDevice(deviceId);
+  }
+  
+
+
   async discoverDevices(): Promise<MatterDeviceDiscovered[]> {
     try {
-      const existingDevices = this.actionManager.getDevicesForModule(this.getModuleId());
+      const existingDevices = this.deviceManager.getDevicesForModule(this.getModuleId());
       return await this.deviceDiscover.discover(5, existingDevices.map(d => d.id));
     } catch (err) {
       logger.error({ err }, "Fehler bei der Geraeteerkennung");
@@ -83,7 +142,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
 
 
     const matterDevice = await this.toMatterDevice(pairedDevice);
-    const saved = this.actionManager.saveDevice(matterDevice);
+    const saved = this.deviceManager.saveDevice(matterDevice);
     if (saved) {
       //this.initialiseEventStreamManager();
     }
@@ -91,7 +150,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   }
 
   async unpairDevice(deviceId: string): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     return this.deviceController.unpairDevice(device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer);
   }
@@ -115,17 +174,12 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
 
 
     const matterDevice = await this.toMatterDevice(pairedDevice);
-    const saved = this.actionManager.saveDevice(matterDevice);
+    const saved = this.deviceManager.saveDevice(matterDevice);
     if (saved) {
       //this.initialiseEventStreamManager();
     }
     return { success: saved, nodeId: pairedDevice.nodeId ?? undefined, deviceId: matterDevice.id };
   }
-
-  protected createEventStreamManager(): MatterEventStreamManager {
-    return new MatterEventStreamManager(this.getManagerId(), this.deviceController, this.actionManager);
-  }
-
 
   private async toMatterDevice(device: MatterDeviceDiscovered) {
     const id = device.id;
@@ -231,77 +285,58 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     return convertedDevice;
   }
 
-  async initializeDeviceControllers(): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(this.getModuleId());
-    for (const device of devices) {
-      if (device instanceof MatterSwitchEnergy) {
-          await device.updateValues();
-          this.actionManager.saveDevice(device);
-      }
-      if (device instanceof MatterSwitch) {
-          await device.updateValues();
-          this.actionManager.saveDevice(device);
-      }
-      if (device instanceof MatterSwitchDimmer) {
-          await device.updateValues();
-          this.actionManager.saveDevice(device);
-      }
-      if (device instanceof MatterThermostat) {
-        await device.updateValues();
-        this.actionManager.saveDevice(device);
-    }
-    }
-  }
+
 
   async toggle(deviceId: string, buttonId:string): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     await ( device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer).toggle(buttonId, true, true);
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
     return true;
   }
 
   async setOn(deviceId: string, buttonId:string): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     await ( device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer).on(buttonId, true, true);
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
     return true;
   }
 
   async setOff(deviceId: string, buttonId:string): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     await ( device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer).off(buttonId, true, true);
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
     return true;
   }
 
   async setIntensity(deviceId: string, buttonId:string, intensity:number): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
-    await (device as MatterSwitchDimmer).setIntensity(buttonId, intensity, true, true);
-    this.actionManager.saveDevice(device);
+    await (device as MatterSwitchDimmer).setBrightness(buttonId, intensity, true, true);
+    this.deviceManager.saveDevice(device);
     return true;
   }
 
   async setTemperatureGoal(deviceId: string, temperatureGoal:number): Promise<boolean> {
     const bounded = Math.max(15, Math.min(30, temperatureGoal));
     const constraintTemperature = Math.round(bounded * 100) / 100;
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     await ( device as MatterThermostat).setTemperatureGoal(constraintTemperature, true, true);
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
     return true;
   }
 
   async setTemperatureSchedules(deviceId: string, temperatureSchedules:TemperatureSchedule[]): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
     await ( device as MatterThermostat).setTemperatureSchedules(temperatureSchedules, true, true);
-    this.actionManager.saveDevice(device);
+    this.deviceManager.saveDevice(device);
     return true;
   }
+
 }
 
 function toDeviceType(deviceTypeKey: string | null): DeviceType | null {

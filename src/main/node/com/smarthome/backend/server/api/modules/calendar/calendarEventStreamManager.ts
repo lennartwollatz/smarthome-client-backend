@@ -1,14 +1,14 @@
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import type { CalendarEvent } from "./calendarEvent.js";
 import { CALENDARCONFIG } from "./calendarModule.js";
 import { CalendarDeviceController } from "./calendarDeviceController.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class CalendarEventStreamManager extends ModuleEventStreamManager<CalendarDeviceController, CalendarEvent> {
 
-  constructor(managerId: string, controller: CalendarDeviceController, actionManager: ActionManager, databaseManager: DatabaseManager) {
-    super(managerId, CALENDARCONFIG.id, controller, actionManager);
+  constructor(managerId: string, controller: CalendarDeviceController, deviceManager: DeviceManager, databaseManager: DatabaseManager) {
+    super(managerId, CALENDARCONFIG.id, controller, deviceManager);
   }
 
   protected handleEvent(_event: CalendarEvent): void {

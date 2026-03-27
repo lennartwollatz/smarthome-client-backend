@@ -1,20 +1,21 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
+import type { ActionManager } from "../../entities/actions/ActionManager.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { XiaomiVacuumCleaner } from "./devices/xiaomiVacuumCleaner.js";
 import { XiaomiDeviceController } from "./xiaomiDeviceController.js";
 import { XiaomiEvent } from "./xiaomiEvent.js";
 import { XIAOMIMODULE } from "./xiaomiModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class XiaomiEventStreamManager extends ModuleEventStreamManager<XiaomiDeviceController, XiaomiEvent> {
 
-  constructor(managerId: string, controller: XiaomiDeviceController, actionManager: ActionManager) {
-    super(managerId, XIAOMIMODULE.id, controller, actionManager);
+  constructor(managerId: string, controller: XiaomiDeviceController, deviceManager: DeviceManager) {
+    super(managerId, XIAOMIMODULE.id, controller, deviceManager);
   }
 
   protected async startEventStream(callback: (event: XiaomiEvent) => void): Promise<void> {
-    let devices = this.actionManager.getDevices();
+    let devices = this.deviceManager.getDevices();
     for (const device of devices) {
       if (device.moduleId === XIAOMIMODULE.id && device.type === DeviceType.VACUUM) {
         await this.controller.startEventStream(device as XiaomiVacuumCleaner, callback);
@@ -23,7 +24,7 @@ export class XiaomiEventStreamManager extends ModuleEventStreamManager<XiaomiDev
   }
 
   protected async stopEventStream(): Promise<void> {
-    let devices = this.actionManager.getDevices();
+    let devices = this.deviceManager.getDevices();
     for (const device of devices) {
       if (device.moduleId === XIAOMIMODULE.id && device.type === DeviceType.VACUUM) {
         await this.controller.stopEventStream(device as XiaomiVacuumCleaner);
@@ -58,7 +59,7 @@ export class XiaomiEventStreamManager extends ModuleEventStreamManager<XiaomiDev
 
   private async handleStatusChange(deviceId: string, status: Record<string, unknown>) {
     try {
-      const device = this.actionManager.getDevice(deviceId);
+      const device = this.deviceManager.getDevice(deviceId);
       if (!device || !(device instanceof XiaomiVacuumCleaner)) {
         return;
       }
@@ -66,7 +67,7 @@ export class XiaomiEventStreamManager extends ModuleEventStreamManager<XiaomiDev
       // Update device status based on event data
       // TODO: Implement specific status updates based on MiIO protocol
       logger.debug({ deviceId, status }, "Status aktualisiert");
-      this.actionManager.saveDevice(device);
+      this.deviceManager.saveDevice(device);
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Verarbeiten von Status-Aenderung");
     }
@@ -74,7 +75,7 @@ export class XiaomiEventStreamManager extends ModuleEventStreamManager<XiaomiDev
 
   private async handleStateChange(deviceId: string, state: string) {
     try {
-      const device = this.actionManager.getDevice(deviceId);
+      const device = this.deviceManager.getDevice(deviceId);
       if (!device || !(device instanceof XiaomiVacuumCleaner)) {
         return;
       }
@@ -82,7 +83,7 @@ export class XiaomiEventStreamManager extends ModuleEventStreamManager<XiaomiDev
       // Update device state based on event data
       // TODO: Implement specific state updates based on MiIO protocol
       logger.debug({ deviceId, state }, "State aktualisiert");
-      this.actionManager.saveDevice(device);
+      this.deviceManager.saveDevice(device);
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Verarbeiten von State-Aenderung");
     }

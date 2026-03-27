@@ -1,20 +1,21 @@
-import { ActionManager } from "../../actions/ActionManager.js";
+import { ActionManager } from "../entities/actions/ActionManager.js";
 import { logger } from "../../../logger.js";
 import { ModuleEvent } from "./moduleEvent.js";
 import { ModuleEventController } from "./moduleEventController.js";
+import { DeviceManager } from "../entities/devices/deviceManager.js";
 
 export abstract class ModuleEventStreamManager<C extends ModuleEventController, E extends ModuleEvent> {
   protected managerId: string;
   protected moduleId: string;
   protected controller: C;
-  protected actionManager: ActionManager;
+  protected deviceManager: DeviceManager;
   private running = false;
 
-  constructor(managerId: string, moduleId:string, controller: C, actionManager: ActionManager) {
+  constructor(managerId: string, moduleId:string, controller: C, deviceManager: DeviceManager) {
     this.managerId = managerId;
     this.moduleId = moduleId;
     this.controller = controller;
-    this.actionManager = actionManager;
+    this.deviceManager = deviceManager;
   }
 
   protected abstract handleEvent(event: E): void;

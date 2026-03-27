@@ -7,13 +7,10 @@ import { EventVacuumCleaningStopped } from "../../server/events/events/EventVacu
 import { EventVacuumCleaningPaused } from "../../server/events/events/EventVacuumCleaningPaused.js";
 import { EventVacuumCleaningResumed } from "../../server/events/events/EventVacuumCleaningResumed.js";
 import { EventVacuumDocked } from "../../server/events/events/EventVacuumDocked.js";
-import { EventVacuumUndocked } from "../../server/events/events/EventVacuumUndocked.js";
 import { EventVacuumRoomEntered } from "../../server/events/events/EventVacuumRoomEntered.js";
 import { EventVacuumRoomLeft } from "../../server/events/events/EventVacuumRoomLeft.js";
-import { EventVacuumRoomCleaned } from "../../server/events/events/EventVacuumRoomCleaned.js";
 import { EventVacuumZoneEntered } from "../../server/events/events/EventVacuumZoneEntered.js";
 import { EventVacuumZoneLeft } from "../../server/events/events/EventVacuumZoneLeft.js";
-import { EventVacuumZoneCleaned } from "../../server/events/events/EventVacuumZoneCleaned.js";
 import { EventVacuumWaterBoxFull } from "../../server/events/events/EventVacuumWaterBoxFull.js";
 import { EventVacuumWaterBoxEmpty } from "../../server/events/events/EventVacuumWaterBoxEmpty.js";
 import { EventVacuumWaterBoxLevelChanged } from "../../server/events/events/EventVacuumWaterBoxLevelChanged.js";
@@ -30,8 +27,6 @@ import { EventVacuumBatteryChanged } from "../../server/events/events/EventVacuu
 import { EventVacuumBatteryEquals } from "../../server/events/events/EventVacuumBatteryEquals.js";
 import { EventVacuumBatteryLess } from "../../server/events/events/EventVacuumBatteryLess.js";
 import { EventVacuumBatteryGreater } from "../../server/events/events/EventVacuumBatteryGreater.js";
-import { EventVacuumModeChanged } from "../../server/events/events/EventVacuumModeChanged.js";
-import { EventVacuumModeEquals } from "../../server/events/events/EventVacuumModeEquals.js";
 import { EventFanSpeedChanged } from "../../server/events/events/EventFanSpeedChanged.js";
 import { EventFanSpeedEquals } from "../../server/events/events/EventFanSpeedEquals.js";
 import { EventFanSpeedLess } from "../../server/events/events/EventFanSpeedLess.js";
@@ -64,6 +59,60 @@ export abstract class DeviceVacuumCleaner extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  isCleaning(): boolean {
+    return this.cleaningState === true;
+  }
+  isDocked(): boolean {
+    return this.dockedState === true;
+  }
+  isWaterBoxFull(): boolean {
+    return this.waterBoxFullState === true;
+  }
+  isDirtyWaterBoxFull(): boolean {
+    return this.dirtyWaterBoxFullState === true;
+  }
+  isWaterBoxEmpty(): boolean {
+    return (this.waterBoxLevel ?? 0) === 0;
+  }
+  isDirtyWaterBoxEmpty(): boolean {
+    return (this.dirtyWaterBoxLevel ?? 0) === 0;
+  }
+  isWaterBoxLevelGreater(waterBoxLevel: number): boolean {
+    return (this.waterBoxLevel ?? 0) > waterBoxLevel;
+  }
+  isWaterBoxLevelLess(waterBoxLevel: number): boolean {
+    return (this.waterBoxLevel ?? 0) < waterBoxLevel;
+  }
+  isWaterBoxLevelEquals(waterBoxLevel: number): boolean {
+    return (this.waterBoxLevel ?? 0) === waterBoxLevel;
+  }
+  isDirtyWaterBoxLevelGreater(dirtyWaterBoxLevel: number): boolean {
+    return (this.dirtyWaterBoxLevel ?? 0) > dirtyWaterBoxLevel;
+  }
+  isDirtyWaterBoxLevelLess(dirtyWaterBoxLevel: number): boolean {
+    return (this.dirtyWaterBoxLevel ?? 0) < dirtyWaterBoxLevel;
+  }
+  isDirtyWaterBoxLevelEquals(dirtyWaterBoxLevel: number): boolean {
+    return (this.dirtyWaterBoxLevel ?? 0) === dirtyWaterBoxLevel;
+  }
+  isBatteryLess(battery: number): boolean {
+    return (this.battery ?? 0) < battery;
+  }
+  isBatteryGreater(battery: number): boolean {
+    return (this.battery ?? 0) > battery;
+  }
+  isBatteryEquals(battery: number): boolean {
+    return (this.battery ?? 0) === battery;
+  }
+  isFanSpeedGreater(fanSpeed: number): boolean {
+    return (this.fanSpeed ?? 0) > fanSpeed;
+  }
+  isFanSpeedLess(fanSpeed: number): boolean {
+    return (this.fanSpeed ?? 0) < fanSpeed;
+  }
+  isFanSpeedEquals(fanSpeed: number): boolean {
+    return (this.fanSpeed ?? 0) === fanSpeed;
+  }
 
   async setPower(power: boolean, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
@@ -193,25 +242,6 @@ export abstract class DeviceVacuumCleaner extends Device {
 
   protected abstract executeChangeFanSpeed(fanSpeed: number): Promise<void>;
 
-  async changeWaterBoxLevel(waterBoxLevel: number, execute: boolean, trigger: boolean = true) {
-    const deviceBefore = { ...this };
-    this.waterBoxLevel = waterBoxLevel;
-    if (execute) {
-      await this.executeChangeWaterBoxLevel(waterBoxLevel);
-    }
-    if (trigger) {
-      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelChanged(this.id, deviceBefore, waterBoxLevel));
-      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelEquals(this.id, deviceBefore, waterBoxLevel));
-      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelLess(this.id, deviceBefore, waterBoxLevel));
-      await this.eventManager?.triggerEvent(new EventVacuumWaterBoxLevelGreater(this.id, deviceBefore, waterBoxLevel));
-      if (waterBoxLevel >= 100) await this.eventManager?.triggerEvent(new EventVacuumWaterBoxFull(this.id, deviceBefore));
-      if (waterBoxLevel <= 0) await this.eventManager?.triggerEvent(new EventVacuumWaterBoxEmpty(this.id, deviceBefore));
-      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
-    }
-  }
-
-  protected abstract executeChangeWaterBoxLevel(waterBoxLevel: number): Promise<void>;
-
   async setBattery(battery: number, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.battery = battery;
@@ -224,17 +254,6 @@ export abstract class DeviceVacuumCleaner extends Device {
     }
   }
 
-  async setFanSpeed(fanSpeed: number, trigger: boolean = true) {
-    const deviceBefore = { ...this };
-    this.fanSpeed = fanSpeed;
-    if (trigger) {
-      await this.eventManager?.triggerEvent(new EventFanSpeedChanged(this.id, deviceBefore, fanSpeed));
-      await this.eventManager?.triggerEvent(new EventFanSpeedEquals(this.id, deviceBefore, fanSpeed));
-      await this.eventManager?.triggerEvent(new EventFanSpeedLess(this.id, deviceBefore, fanSpeed));
-      await this.eventManager?.triggerEvent(new EventFanSpeedGreater(this.id, deviceBefore, fanSpeed));
-      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
-    }
-  }
 
   async setWaterBoxLevel(waterBoxLevel: number, trigger: boolean = true) {
     const deviceBefore = { ...this };
@@ -302,26 +321,6 @@ export abstract class DeviceVacuumCleaner extends Device {
     if (trigger) {
       if (dirtyWaterBoxFull) await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxFull(this.id, deviceBefore));
       else await this.eventManager?.triggerEvent(new EventVacuumDirtyWaterBoxEmpty(this.id, deviceBefore));
-      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
-    }
-  }
-
-  async setDocked(docked: boolean, trigger: boolean = true) {
-    const deviceBefore = { ...this };
-    this.dockedState = docked;
-    if (trigger) {
-      if (docked) await this.eventManager?.triggerEvent(new EventVacuumDocked(this.id, deviceBefore));
-      else await this.eventManager?.triggerEvent(new EventVacuumUndocked(this.id, deviceBefore));
-      await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
-    }
-  }
-
-  async setCleaning(cleaning: boolean, trigger: boolean = true) {
-    const deviceBefore = { ...this };
-    this.cleaningState = cleaning;
-    if (trigger) {
-      if (cleaning) await this.eventManager?.triggerEvent(new EventVacuumCleaningStarted(this.id, deviceBefore));
-      else await this.eventManager?.triggerEvent(new EventVacuumCleaningStopped(this.id, deviceBefore));
       await this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }

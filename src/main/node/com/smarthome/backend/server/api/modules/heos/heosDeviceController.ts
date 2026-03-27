@@ -202,9 +202,9 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     await this.sendDenonGet(receiver.address, path);
   }
 
-  async setDenonSubwooferLevel(_receiver: DenonReceiver, _subwooferName: string, _level: number) {
+  async setDenonSubwooferLevel(_receiver: DenonReceiver, _subwooferId: string, _level: number) {
     const receiver = _receiver;
-    const levelTag = this.resolveSubwooferTag(receiver, _subwooferName);
+    const levelTag = this.resolveSubwooferTag(receiver, _subwooferId);
     const data = `<${levelTag}>${_level}</${levelTag}>`;
     const path = `/ajax/audio/set_config?type=3&data=${this.urlEncode(data)}`;
     await this.sendDenonGet(receiver.address, path);
@@ -331,12 +331,10 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     return encodeURIComponent(data);
   }
 
-  private resolveSubwooferTag(receiver: DenonReceiver, subwooferName: string) {
+  private resolveSubwooferTag(receiver: DenonReceiver, subwooferId: string) {
     const subs = receiver.subwoofers ?? [];
     if (!subs.length) return "SubwooferLevel1";
-    const index = subs.findIndex(
-      sw => sw?.name?.toLowerCase() === subwooferName.toLowerCase()
-    );
+    const index = subs.findIndex(sw => String(sw?.id ?? "") === String(subwooferId));
     if (index === 0) return "SubwooferLevel1";
     if (index === 1) return "SubwooferLevel2";
     return "SubwooferLevel1";

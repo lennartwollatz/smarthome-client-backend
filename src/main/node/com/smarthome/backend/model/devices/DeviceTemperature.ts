@@ -1,6 +1,5 @@
 import { Device } from "./Device.js";
 import { DeviceType } from "./helper/DeviceType.js";
-import { EventTemperatureStatusChanged } from "../../server/events/events/EventTemperatureStatusChanged.js";
 import { EventTemperatureChanged } from "../../server/events/events/EventTemperatureChanged.js";
 import { EventTemperatureEquals } from "../../server/events/events/EventTemperatureEquals.js";
 import { EventTemperatureLess } from "../../server/events/events/EventTemperatureLess.js";
@@ -24,6 +23,16 @@ export abstract class DeviceTemperature extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  isTemperatureEquals(temperature: number): boolean {
+    return (this.temperature ?? 0) === temperature;
+  }
+  isTemperatureLess(temperature: number): boolean {
+    return (this.temperature ?? 0) < temperature;
+  }
+  isTemperatureGreater(temperature: number): boolean {
+    return (this.temperature ?? 0) > temperature;
+  }
+
 
   async setTemperature(temperature: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
@@ -33,7 +42,6 @@ export abstract class DeviceTemperature extends Device {
       await this.executeSetTemperature(temperature);
     }
     if (trigger) {
-      this.eventManager?.triggerEvent(new EventTemperatureStatusChanged(this.id, deviceBefore, { ...this }));
       this.eventManager?.triggerEvent(new EventTemperatureChanged(this.id, deviceBefore, temperature));
       this.eventManager?.triggerEvent(new EventTemperatureEquals(this.id, deviceBefore, temperature));
       this.eventManager?.triggerEvent(new EventTemperatureLess(this.id, deviceBefore, temperature));

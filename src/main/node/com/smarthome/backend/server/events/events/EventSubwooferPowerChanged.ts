@@ -8,7 +8,7 @@ export class EventSubwooferPowerChanged extends Event {
   constructor(
     deviceId: string,
     deviceBefore: object,
-    subwooferName: string,
+    subwooferId: string,
     power: boolean,
     eventId: string = crypto.randomUUID()
   ) {
@@ -19,7 +19,7 @@ export class EventSubwooferPowerChanged extends Event {
       value: deviceBefore
     };
     const resultConditions: EventCondition[] = [
-      { id: 0, name: "subwooferName", type: "str", value: subwooferName },
+      { id: 0, name: "subwooferId", type: "str", value: subwooferId },
       { id: 0, name: "power", type: "bool", value: power }
     ];
     super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_POWER_CHANGED, [eventCondition], [], resultConditions);

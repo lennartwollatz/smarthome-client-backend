@@ -1,5 +1,4 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import type { EventManager } from "../../../events/EventManager.js";
 import { Device } from "../../../../model/devices/Device.js";
 import { DeviceWeather } from "../../../../model/devices/DeviceWeather.js";
@@ -10,6 +9,7 @@ import { WeatherEventStreamManager } from "./weatherEventStreamManager.js";
 import { WeatherEvent } from "./weatherEvent.js";
 import { ModuleManager } from "../moduleManager.js";
 import { WEATHERCONFIG, WEATHERMODULE } from "./weatherModule.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class WeatherModuleManager extends ModuleManager<
   WeatherEventStreamManager,
@@ -22,12 +22,12 @@ export class WeatherModuleManager extends ModuleManager<
 > {
   constructor(
     databaseManager: DatabaseManager,
-    actionManager: ActionManager,
+    deviceManager: DeviceManager,
     eventManager: EventManager
   ) {
     super(
       databaseManager,
-      actionManager,
+      deviceManager,
       eventManager,
       new WeatherDeviceController(eventManager),
       new WeatherDeviceDiscover(databaseManager)
@@ -38,7 +38,7 @@ export class WeatherModuleManager extends ModuleManager<
     return new WeatherEventStreamManager(
       this.getManagerId(),
       this.deviceController,
-      this.actionManager
+      this.deviceManager
     );
   }
 
@@ -60,13 +60,13 @@ export class WeatherModuleManager extends ModuleManager<
   }
 
   async refreshDevice(deviceId: string): Promise<boolean> {
-    const device = this.actionManager.getDevice(deviceId);
+    const device = this.deviceManager.getDevice(deviceId);
     if (!device || device.moduleId !== WEATHERMODULE.id || device.type !== "weather") {
       return false;
     }
     const success = await this.deviceController.fetchWeather(device as DeviceWeather);
     if (success) {
-      this.actionManager.saveDevice(device);
+      this.deviceManager.saveDevice(device);
     }
     return success;
   }

@@ -10,6 +10,28 @@ import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
 
 type JsonValue = Record<string, unknown> | null;
 
+/**
+ * PyWebOSTV / OS: Verbindungs-Timeout oder Gegenstelle reagiert nicht → TV typischerweise aus oder offline.
+ * (z. B. WinError 10060 unter Windows)
+ */
+function isLgTvUnreachableOutput(text: string): boolean {
+  const s = text.toLowerCase();
+  return (
+    s.includes("10060") ||
+    s.includes("winerror") ||
+    s.includes("timed out") ||
+    s.includes("timeouterror") ||
+    s.includes("etimedout") ||
+    s.includes("econnrefused") ||
+    s.includes("connection refused") ||
+    s.includes("no route to host") ||
+    s.includes("host is down") ||
+    s.includes("network is unreachable") ||
+    s.includes("nicht reagiert") ||
+    s.includes("verbindungsversuch")
+  );
+}
+
 export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, DeviceTV> {
   private deviceCallbacks = new Map<string, (event: LGEvent) => void>();
   private processes = new Map<string, ChildProcess | null>();
@@ -48,22 +70,22 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     logger.info({ address: tv.address }, "powerOn() fuer LGTV: "+tv.address);
     if (!tv.macAddress) return;
     const params = `{"mac":"${tv.macAddress}"}`;
-    await this.callController(tv.address, tv.clientKey, "wol", params);
+    await this.callController(tv.address, tv.clientKey, "wol", params, tv);
   }
 
   async powerOff(tv: LGTV) {
     logger.info({ address: tv.address }, "powerOff() fuer LGTV: "+tv.address);
-    await this.callController(tv.address, tv.clientKey, "system.power_off", null);
+    await this.callController(tv.address, tv.clientKey, "system.power_off", null, tv);
   }
 
   async screenOn(tv: LGTV) {
     logger.info({ address: tv.address }, "screenOn() fuer LGTV");
-    await this.callController(tv.address, tv.clientKey, "system.screen_on", null);
+    await this.callController(tv.address, tv.clientKey, "system.screen_on", null, tv);
   }
 
   async screenOff(tv: LGTV) {
     logger.info({ address: tv.address }, "screenOff() fuer LGTV");
-    await this.callController(tv.address, tv.clientKey, "system.screen_off", null);
+    await this.callController(tv.address, tv.clientKey, "system.screen_off", null, tv);
   }
 
   async setVolume(tv: LGTV, volume: number) {
@@ -76,7 +98,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       logger.warn({ volume }, "setVolume() abgebrochen: Volume ausserhalb Bereich (1-100)");
       return;
     }
-    await this.callController(tv.address, tv.clientKey, "media.set_volume", String(volume));
+    await this.callController(tv.address, tv.clientKey, "media.set_volume", String(volume), tv);
   }
 
   async getVolume(tv: LGTV) {
@@ -85,7 +107,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       logger.warn("getVolume() abgebrochen: Client-Key fehlt");
       return null;
     }
-    const response = await this.callController(tv.address, tv.clientKey, "media.get_volume", null);
+    const response = await this.callController(tv.address, tv.clientKey, "media.get_volume", null, tv);
     if (!response){
       tv.power = false;
       return 0;
@@ -108,7 +130,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return;
     }
     const escaped = channelId.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
-    await this.callController(tv.address, tv.clientKey, "tv.set_channel_with_id", `"${escaped}"`);
+    await this.callController(tv.address, tv.clientKey, "tv.set_channel_with_id", `"${escaped}"`, tv);
   }
 
   async startApp(tv: LGTV, appId: string) {
@@ -118,7 +140,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return;
     }
     const escaped = appId.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
-    await this.callController(tv.address, tv.clientKey, "application.launch", `"${escaped}"`);
+    await this.callController(tv.address, tv.clientKey, "application.launch", `"${escaped}"`, tv);
   }
 
   async notify(tv: LGTV, message: string) {
@@ -128,7 +150,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return;
     }
     const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
-    await this.callController(tv.address, tv.clientKey, "system.notify", `{"message":"${escaped}"}`);
+    await this.callController(tv.address, tv.clientKey, "system.notify", `{"message":"${escaped}"}`, tv);
   }
 
   async getChannels(tv: LGTV) {
@@ -137,7 +159,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       logger.warn("getChannels() abgebrochen: Client-Key fehlt");
       return null;
     }
-    const response = await this.callController(tv.address, tv.clientKey, "tv.channel_list", null);
+    const response = await this.callController(tv.address, tv.clientKey, "tv.channel_list", null, tv);
     console.log("getChannels() response: "+JSON.stringify(response));
     return this.parseChannels(response);
   }
@@ -148,7 +170,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       logger.warn("getApps() abgebrochen: Client-Key fehlt");
       return null;
     }
-    const response = await this.callController(tv.address, tv.clientKey, "application.list_apps", null);
+    const response = await this.callController(tv.address, tv.clientKey, "application.list_apps", null, tv);
     return this.parseApps(response);
   }
 
@@ -158,7 +180,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       logger.warn("getSelectedApp() abgebrochen: Client-Key fehlt");
       return null;
     }
-    const response = await this.callController(tv.address, tv.clientKey, "application.get_current", null);
+    const response = await this.callController(tv.address, tv.clientKey, "application.get_current", null, tv);
     if (!response){
       tv.power = false;
       return null;
@@ -176,7 +198,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       logger.warn("getSelectedChannel() abgebrochen: Client-Key fehlt");
       return null;
     }
-    const response = await this.callController(tv.address, tv.clientKey, "tv.get_current_channel", null);
+    const response = await this.callController(tv.address, tv.clientKey, "tv.get_current_channel", null, tv);
     if (!response){
       tv.power = false;
       return null;
@@ -212,6 +234,8 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
 
     this.deviceCallbacks.set(deviceId, callback);
     const scriptPath = this.resolveScriptPath("scripts", "pywebostv", "subscribe.py");
+    // Nur App- und Kanalwechsel — „volume“/„audio_output“ feuern sehr häufig und würden
+    // bei --events all den Node-Event-Loop mit Logging/Callbacks fluten (HTTP blockiert).
     const args = [
       scriptPath,
       "--ip",
@@ -219,7 +243,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       "--client-key",
       tv.clientKey,
       "--events",
-      "all"
+      "app.current,channel.current"
     ];
     const child = spawn("python", args, { windowsHide: true });
     this.processes.set(deviceId, child);
@@ -303,7 +327,8 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     address: string | undefined,
     clientKey: string | null | undefined,
     event: string,
-    params: string | null
+    params: string | null,
+    tv?: LGTV
   ): Promise<JsonValue> {
     if (!address) return null;
     if (event !== "wol" && !clientKey) return null;
@@ -318,13 +343,24 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       args.push("--params", params);
     }
     const { output, code } = await this.runPython(scriptPath, args);
+    const unreachable = isLgTvUnreachableOutput(output);
+
     if (code !== 0) {
+      if (unreachable) {
+        if (tv) {
+          tv.lastPollUnreachable = true;
+          tv.power = false;
+        }
+        logger.info({ address, event }, "LG TV nicht erreichbar (vermutlich aus)");
+        return null;
+      }
       logger.error(
         { code, output: output.trim(), args },
         "PyWebOSTV-Skript beendet mit Exit-Code fuer {}",
         address
       );
     }
+
     const lastJsonLine = output
       .split(/\r?\n/)
       .map(line => line.trim())
@@ -332,7 +368,21 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       .pop();
     if (!lastJsonLine) return null;
     try {
-      return JSON.parse(lastJsonLine) as JsonValue;
+      const parsed = JSON.parse(lastJsonLine) as JsonValue;
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        (parsed as Record<string, unknown>).status === "error" &&
+        isLgTvUnreachableOutput(String((parsed as Record<string, unknown>).message ?? ""))
+      ) {
+        if (tv) {
+          tv.lastPollUnreachable = true;
+          tv.power = false;
+        }
+        logger.info({ address, event }, "LG TV nicht erreichbar (vermutlich aus)");
+        return null;
+      }
+      return parsed;
     } catch (err) {
       logger.warn({ err }, "PyWebOSTV-Output ist kein gültiges JSON: {}", lastJsonLine);
       return null;

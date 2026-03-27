@@ -99,7 +99,7 @@ export class SonosSpeaker extends DeviceSpeaker {
     }
   }
 
-  protected async executeStopp(): Promise<void> {
+  protected async executeStop(): Promise<void> {
     if (this.sonos) {
       await this.sonos.setPlayState(this, "stop").catch(err => {
         logger.error({ err, deviceId: this.id }, "Fehler beim Stoppen");

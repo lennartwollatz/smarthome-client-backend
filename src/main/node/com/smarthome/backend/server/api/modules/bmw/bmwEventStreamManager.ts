@@ -1,11 +1,11 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { BMWDeviceController } from "./bmwDeviceController.js";
 import { BMWEvent } from "./bmwEvent.js";
 import { BMWMODULE } from "./bmwModule.js";
 import { BMWCar } from "./devices/bmwCar.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class BMWEventStreamManager extends ModuleEventStreamManager<BMWDeviceController, BMWEvent> {
   private pollingInterval: NodeJS.Timeout | null = null;
@@ -15,9 +15,9 @@ export class BMWEventStreamManager extends ModuleEventStreamManager<BMWDeviceCon
     managerId: string,
     moduleId: string,
     controller: BMWDeviceController,
-    actionManager: ActionManager
+    deviceManager: DeviceManager
   ) {
-    super(managerId, moduleId, controller, actionManager);
+    super(managerId, moduleId, controller, deviceManager);
   }
 
   protected async startEventStream(callback: (event: BMWEvent) => void): Promise<void> {
@@ -42,7 +42,7 @@ export class BMWEventStreamManager extends ModuleEventStreamManager<BMWDeviceCon
   }
 
   private async pollAllCars(callback: (event: BMWEvent) => void): Promise<void> {
-    const devices = this.actionManager.getDevices();
+    const devices = this.deviceManager.getDevices();
     for (const device of devices) {
       if (device.moduleId !== BMWMODULE.id) continue;
       if (device.type !== DeviceType.CAR) continue;
@@ -91,10 +91,10 @@ export class BMWEventStreamManager extends ModuleEventStreamManager<BMWDeviceCon
 
   protected async handleEvent(event: BMWEvent): Promise<void> {
     if (!event.deviceid || !event.data) return;
-    const device = this.actionManager.getDevice(event.deviceid);
+    const device = this.deviceManager.getDevice(event.deviceid);
     if (!device || !(device instanceof BMWCar)) return;
     if (event.data.type === "StatusChanged") {
-      this.actionManager.saveDevice(device);
+      this.deviceManager.saveDevice(device);
     }
   }
 }

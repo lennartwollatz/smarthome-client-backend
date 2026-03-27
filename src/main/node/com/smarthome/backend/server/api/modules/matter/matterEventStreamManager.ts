@@ -1,19 +1,18 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { MatterDeviceController } from "./matterDeviceController.js";
 import { MatterEvent } from "./matterEvent.js";
-import { Device } from "../../../../model/devices/Device.js";
 import { MATTERMODULE } from "./matterModule.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class MatterEventStreamManager extends ModuleEventStreamManager<MatterDeviceController, MatterEvent> {
 
-  constructor(managerId: string, controller: MatterDeviceController, actionManager: ActionManager) {
-    super(managerId, MATTERMODULE.id, controller, actionManager);
+  constructor(managerId: string, controller: MatterDeviceController, deviceManager: DeviceManager) {
+    super(managerId, MATTERMODULE.id, controller, deviceManager);
   }
 
   protected async startEventStream(callback: (event: MatterEvent) => void): Promise<void> {
-    let devices = this.actionManager.getDevicesForModule(MATTERMODULE.id);
+    let devices = this.deviceManager.getDevicesForModule(MATTERMODULE.id);
     for (const device of devices) {
       try {
         await this.controller.startEventStream(device, callback);
@@ -25,7 +24,7 @@ export class MatterEventStreamManager extends ModuleEventStreamManager<MatterDev
   }
 
   protected async stopEventStream(): Promise<void> {
-    let devices = this.actionManager.getDevicesForModule(MATTERMODULE.id);
+    let devices = this.deviceManager.getDevicesForModule(MATTERMODULE.id);
     for (const device of devices) {
       try {
         await this.controller.stopEventStream(device);
@@ -42,13 +41,13 @@ export class MatterEventStreamManager extends ModuleEventStreamManager<MatterDev
 
     if (nodeId != null) {
       const deviceId = `matter-${nodeId}`;
-      const device = this.actionManager.getDevice(deviceId);
+      const device = this.deviceManager.getDevice(deviceId);
       if (device) {
         const payload = event.payload ?? {};
         
         //TODO: auf die events reagieren und die Eigenschaften im device setzen.
         
-        this.actionManager.saveDevice(device);
+        this.deviceManager.saveDevice(device);
       }
     }
 

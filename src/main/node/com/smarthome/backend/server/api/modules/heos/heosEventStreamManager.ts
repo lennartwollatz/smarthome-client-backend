@@ -1,5 +1,4 @@
 import { logger } from "../../../../logger.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { HeosDeviceController } from "./heosDeviceController.js";
 import { HeosEvent } from "./heosEvent.js";
@@ -7,15 +6,16 @@ import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
 import { HeosSpeaker } from "./devices/heosSpeaker.js";
 import { HEOSMODULE } from "./heosModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceController, HeosEvent> {
 
-  constructor(managerId: string, moduleId:string, controller: HeosDeviceController, actionManager: ActionManager) {
-    super(managerId, moduleId, controller, actionManager);
+  constructor(managerId: string, moduleId:string, controller: HeosDeviceController, deviceManager: DeviceManager) {
+    super(managerId, moduleId, controller, deviceManager);
   }
 
   protected async startEventStream(callback: (event: HeosEvent) => void): Promise<void> {
-    let devices = this.actionManager.getDevices();
+    let devices = this.deviceManager.getDevices();
     for (const device of devices) {
       if (device.moduleId === HEOSMODULE.id && device.type === DeviceType.SPEAKER) {
         await this.controller.startEventStream(device as HeosSpeaker, callback);
@@ -24,7 +24,7 @@ export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceC
   }
 
   protected async stopEventStream(): Promise<void> {
-    let devices = this.actionManager.getDevices();
+    let devices = this.deviceManager.getDevices();
     for (const device of devices) {
       if (device.moduleId === HEOSMODULE.id && device.type === DeviceType.SPEAKER) {
         await this.controller.stopEventStream(device as HeosSpeaker);
@@ -64,7 +64,7 @@ export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceC
 
   private async handleVolumeChange(deviceId: string, eventData: Record<string, unknown>) {
     try {
-      const device = this.actionManager.getDevice(deviceId);
+      const device = this.deviceManager.getDevice(deviceId);
       if (!device || !(device instanceof HeosSpeaker)) {
         return;
       }
@@ -74,7 +74,7 @@ export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceC
         const level = eventData.level;
         if (typeof level === "number") {
           device.setVolume(level, false);
-          this.actionManager.saveDevice(device);
+          this.deviceManager.saveDevice(device);
           logger.debug({ deviceId, volume: level }, "Volume aktualisiert");
         }
       }
@@ -85,7 +85,7 @@ export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceC
 
   private async handlePlayStateChange(deviceId: string, eventData: Record<string, unknown>) {
     try {
-      const device = this.actionManager.getDevice(deviceId);
+      const device = this.deviceManager.getDevice(deviceId);
       if (!device || !(device instanceof HeosSpeaker)) {
         return;
       }
@@ -105,10 +105,10 @@ export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceC
                 device.pause(false);
                 break;
               default:
-                device.stopp(false);
+                device.stop(false);
                 break;
             }
-            this.actionManager.saveDevice(device);
+            this.deviceManager.saveDevice(device);
             logger.debug({ deviceId, playState: mappedState, originalState: state }, "PlayState aktualisiert");
           }
         }
@@ -120,7 +120,7 @@ export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceC
 
   private async handleMuteChange(deviceId: string, eventData: Record<string, unknown>) {
     try {
-      const device = this.actionManager.getDevice(deviceId);
+      const device = this.deviceManager.getDevice(deviceId);
       if (!device || !(device instanceof HeosSpeaker)) {
         return;
       }
@@ -131,7 +131,7 @@ export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceC
         if (typeof mute === "string") {
           const isMuted = mute === "on";
           device.setMute(isMuted, false);
-          this.actionManager.saveDevice(device);
+          this.deviceManager.saveDevice(device);
           logger.debug({ deviceId, muted: isMuted }, "Mute aktualisiert");
         }
       }

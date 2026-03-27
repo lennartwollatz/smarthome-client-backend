@@ -15,6 +15,16 @@ export abstract class DeviceFanLightDimmer extends DeviceFanLight {
     this.type = DeviceType.FAN_LIGHT_DIMMER;
   }
 
+  isBrightnessEquals(brightness: number): boolean {
+    return this.lightBrightness === brightness;
+  }
+  isBrightnessLess(brightness: number): boolean {
+    return (this.lightBrightness ?? 0) < brightness;
+  }
+  isBrightnessGreater(brightness: number): boolean {
+    return (this.lightBrightness ?? 0) > brightness;
+  }
+
   async setLightBrightness(brightness: number, execute: boolean, trigger: boolean = true) {
     let deviceBefore = { ...this };
     this.lightBrightness = brightness;

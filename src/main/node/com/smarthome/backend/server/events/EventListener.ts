@@ -1,8 +1,8 @@
 import { Event } from "./events/Event.js";
-import { ActionRunnable } from "../actions/runnable/ActionRunnable.js";
-import { ActionRunnableManualBased } from "../actions/runnable/ActionRunnableManualBased.js";
-import { ActionRunnableEventBased } from "../actions/runnable/ActionRunnableEventBased.js";
-import { ActionRunnableTimeBased } from "../actions/runnable/ActionRunnableTimeBased.js";
+import { ActionRunnable } from "../api/entities/actions/runnable/ActionRunnable.js";
+import { ActionRunnableManualBased } from "../api/entities/actions/runnable/ActionRunnableManualBased.js";
+import { ActionRunnableEventBased } from "../api/entities/actions/runnable/ActionRunnableEventBased.js";
+import { ActionRunnableTimeBased } from "../api/entities/actions/runnable/ActionRunnableTimeBased.js";
 
 export class EventListener {
     listenerId: string;
@@ -17,31 +17,22 @@ export class EventListener {
 
     public run(){
         if( this.runnable.type === "manual" ){
-            return (this.runnable as ActionRunnableManualBased).run({ environment: new Map <string, any>() }).then(response => {
-                if( !response.success ){
-                    console.log(response.error);
-                }
-                if( response.warning ){
-                    console.log(response.warning);
-                }
-            });
+            return (this.runnable as ActionRunnableManualBased).run({ environment: new Map <string, any>() });
         } else if( this.runnable.type === "event" ){
-            return (this.runnable as ActionRunnableEventBased).run({ environment: new Map <string, any>() }).then(response => {
-                if( !response.success ){
-                    console.log(response.error);
-                }
-                if( response.warning ){
-                    console.log(response.warning);
-                }
-            });
+            return (this.runnable as ActionRunnableEventBased).run({ environment: new Map <string, any>() });
         } else if( this.runnable.type === "time" ){
             return (this.runnable as ActionRunnableTimeBased).run();
         }
     }
     
-    public checkedRun(event: Event){
-        if( event.matchesListener(this) ){
-            this.run();
+    /**
+     * @returns true wenn matchesListener true war und run() aufgerufen wurde
+     */
+    public checkedRun(event: Event): boolean {
+        if (!event.matchesListener(this)) {
+            return false;
         }
+        this.run();
+        return true;
     }
 }

@@ -1,5 +1,4 @@
 import type { DatabaseManager } from "../../../db/database.js";
-import type { ActionManager } from "../../../actions/ActionManager.js";
 import type { EventManager } from "../../../events/EventManager.js";
 import { APPLECALENDARCONFIG, APPLECALENDARMODULE } from "./appleCalendarModule.js";
 import { AppleCalendarEventStreamManager } from "./appleCalendarEventStreamManager.js";
@@ -10,6 +9,7 @@ import type { AppleCalendarEvent } from "./appleCalendarEvent.js";
 import { Device } from "../../../../model/devices/Device.js";
 import { CalendarConfig, DEFAULT_CALENDAR_DEVICE_ID, DEFAULT_CALENDAR_MODULE_ID, DeviceCalendar, type CalendarSubModule, type DeviceCalendarEntry } from "../../../../model/devices/DeviceCalendar.js";
 import { ModuleManager } from "../moduleManager.js";
+import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class AppleCalendarModuleManager extends ModuleManager<
   AppleCalendarEventStreamManager,
@@ -23,12 +23,12 @@ export class AppleCalendarModuleManager extends ModuleManager<
 
   constructor(
     databaseManager: DatabaseManager,
-    actionManager: ActionManager,
+    deviceManager: DeviceManager,
     eventManager: EventManager
   ) {
     const deviceDiscover = new AppleCalendarDeviceDiscover(databaseManager);
     const deviceController = new AppleCalendarDeviceController(databaseManager, deviceDiscover);
-    super(databaseManager, actionManager, eventManager, deviceController, deviceDiscover);
+    super(databaseManager, deviceManager, eventManager, deviceController, deviceDiscover);
   }
 
 
@@ -45,7 +45,7 @@ export class AppleCalendarModuleManager extends ModuleManager<
   }
 
   protected createEventStreamManager(): AppleCalendarEventStreamManager {
-    return new AppleCalendarEventStreamManager(this.getManagerId(), this.getModuleId(), this.deviceController, this.actionManager);
+    return new AppleCalendarEventStreamManager(this.getManagerId(), this.getModuleId(), this.deviceController, this.deviceManager);
   }
 
   // Credentials APIs
@@ -70,31 +70,31 @@ export class AppleCalendarModuleManager extends ModuleManager<
 
   public deleteCredentials(credentialId: string) {
     this.deviceDiscover.deleteCredentials(credentialId);
-    const calendarDevices = this.actionManager.getDevicesForModule(DEFAULT_CALENDAR_MODULE_ID);
+    const calendarDevices = this.deviceManager.getDevicesForModule(DEFAULT_CALENDAR_MODULE_ID);
     calendarDevices.forEach(device => {
       if (!(device instanceof DeviceCalendar)) return;
       const filteredCalendars = device.calendars
         .filter(c => String((c?.properties as any)?.credentialId ?? "").trim() !== credentialId || c?.moduleId !== this.getModuleId());
       device.calendars = filteredCalendars;
-      this.actionManager.saveDevice(device);
+      this.deviceManager.saveDevice(device);
     });
   }
 
   public async initCalendars(credentialId: string): Promise<CalendarConfig[]> {
     const data = await this.deviceController.getCalendarsWithEntriesForCredentialId(credentialId);
     const withEntries = data.map(i => this.deviceController.toDeviceCalendarCalendarWithEntries(i.calendar, i.credentialId, i.entries.map(e => this.deviceController.toDeviceCalendarEntry(e, i.calendar.id, i.calendar.displayName, i.credentialId))));
-    const device = this.actionManager.getDevice(DEFAULT_CALENDAR_DEVICE_ID);
+    const device = this.deviceManager.getDevice(DEFAULT_CALENDAR_DEVICE_ID);
     if( device ) {
       const remaining = (device as DeviceCalendar).calendars.filter(c => {
         const cred = String((c?.properties as any)?.credentialId ?? "").trim();
         return !(c.moduleId === this.getModuleId() && cred === credentialId);
       });
       (device as DeviceCalendar).calendars = [...remaining, ...withEntries];
-      this.actionManager.saveDevice(device);
+      this.deviceManager.saveDevice(device);
     } else {
       const deviceNew = new DeviceCalendar();
       deviceNew.setCalendars(withEntries);
-      this.actionManager.saveDevice(deviceNew);
+      this.deviceManager.saveDevice(deviceNew);
     }
 
 
@@ -108,7 +108,7 @@ export class AppleCalendarModuleManager extends ModuleManager<
   }
 
   async initializeDeviceControllers(): Promise<void> {
-    const devices = this.actionManager.getDevicesForModule(DEFAULT_CALENDAR_MODULE_ID);
+    const devices = this.deviceManager.getDevicesForModule(DEFAULT_CALENDAR_MODULE_ID);
     for (const device of devices) {
       if (device instanceof DeviceCalendar) {
         device.addModule(this);
