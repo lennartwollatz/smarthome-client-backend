@@ -5,6 +5,7 @@ import { createDenonModuleRouter } from "./modules/denonModule.service.js";
 import { createHueModuleRouter } from "./modules/hueModule.service.js";
 import { createLGModuleRouter } from "./modules/lgModule.service.js";
 import { createMatterModuleRouter } from "./modules/matterModule.service.js";
+import { createSonoffModuleRouter } from "./modules/sonoffModule.service.js";
 import { createSonosModuleRouter } from "./modules/sonosModule.service.js";
 import { createWACLightingModuleRouter } from "./modules/waclightingModule.service.js";
 import { createXiaomiModuleRouter } from "./modules/xiaomiModule.service.js";
@@ -66,7 +67,7 @@ export function createModuleRouter(deps: ServerDeps) {
   router.put("/:moduleId/settings", (req, res) => {
     const module = getOrCreateModule(moduleRepository, req.params.moduleId);
     moduleRepository.save(req.params.moduleId, module);
-    res.status(200).json(module);
+    res.status(200).json(removeSensitiveDataFromModule(module));
   });
 
   router.get("/:moduleId", (req, res) => {
@@ -77,17 +78,31 @@ export function createModuleRouter(deps: ServerDeps) {
     }
     const fallback = defaultModuleById(req.params.moduleId);
     if (fallback) {
-      res.status(200).json(fallback);
+      res.status(200).json(removeSensitiveDataFromModule(fallback));
     } else {
       res.status(404).json({ error: "Module not found" });
     }
   });
 
   router.put("/:moduleId", (req, res) => {
-    const module = req.body as ModuleModel;
-    module.id = req.params.moduleId;
-    moduleRepository.save(req.params.moduleId, module);
-    res.status(200).json(module);
+    const incoming = req.body as ModuleModel;
+    incoming.id = req.params.moduleId;
+    const existing = moduleRepository.findById(req.params.moduleId);
+    if (incoming.id === "sonoff" && existing?.moduleData && incoming.moduleData && typeof incoming.moduleData === "object") {
+      const exMd = existing.moduleData as Record<string, unknown>;
+      const incMd = incoming.moduleData as Record<string, unknown>;
+      const pwd = incMd.ewelinkPassword;
+      if (typeof pwd !== "string" || pwd.trim().length === 0) {
+        if (typeof exMd.ewelinkPassword === "string" && exMd.ewelinkPassword.length > 0) {
+          incMd.ewelinkPassword = exMd.ewelinkPassword;
+        } else {
+          delete incMd.ewelinkPassword;
+        }
+      }
+    }
+    moduleRepository.save(req.params.moduleId, incoming);
+    const saved = moduleRepository.findById(req.params.moduleId);
+    res.status(200).json(saved ? removeSensitiveDataFromModule(saved) : removeSensitiveDataFromModule(incoming));
   });
 
   router.post("/:moduleId", (req, res) => {
@@ -119,6 +134,7 @@ export function createModuleRouter(deps: ServerDeps) {
   router.use("/calendar-apple", createAppleCalendarModuleRouter(deps));
   router.use("/denon", createDenonModuleRouter(deps));
   router.use("/matter", createMatterModuleRouter(deps));
+  router.use("/sonoff", createSonoffModuleRouter(deps));
   router.use("/hue", createHueModuleRouter(deps));
   router.use("/lg", createLGModuleRouter(deps));
   router.use("/sonos", createSonosModuleRouter(deps));
@@ -168,6 +184,18 @@ function removeSensitiveDataFromModule(module: ModuleModel) {
         ...module.moduleData,
         password: undefined
       }
+    };
+  }
+  if (module.id === "sonoff" && module.moduleData && typeof module.moduleData === "object") {
+    const raw = module.moduleData as Record<string, unknown>;
+    const hasPwd = typeof raw.ewelinkPassword === "string" && raw.ewelinkPassword.length > 0;
+    const { ewelinkPassword: _pw, ewelinkPasswordSaved: _st, ...rest } = raw;
+    return {
+      ...module,
+      moduleData: {
+        ...rest,
+        ewelinkPasswordSaved: hasPwd,
+      },
     };
   }
   return module;

@@ -4,6 +4,12 @@ import { MatterDeviceController } from "./matterDeviceController.js";
 import { MatterEvent } from "./matterEvent.js";
 import { MATTERMODULE } from "./matterModule.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
+import { LevelControl, OnOff, Thermostat } from "@matter/main/clusters";
+import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceSwitch } from "../../../../model/devices/DeviceSwitch.js";
+import { DeviceSwitchEnergy } from "../../../../model/devices/DeviceSwitchEnergy.js";
+import { DeviceSwitchDimmer } from "../../../../model/devices/DeviceSwitchDimmer.js";
+import { DeviceThermostat } from "com/smarthome/backend/model/devices/DeviceThermostat.js";
 
 export class MatterEventStreamManager extends ModuleEventStreamManager<MatterDeviceController, MatterEvent> {
 
@@ -36,22 +42,64 @@ export class MatterEventStreamManager extends ModuleEventStreamManager<MatterDev
   }
 
   protected async handleEvent(event: MatterEvent): Promise<void> {
-    const nodeId = event.nodeId ?? event.deviceId;
-    const eventName = event.event ?? event.name ?? "unknown";
+    const device = this.deviceManager.getDevice(event.deviceId);
+    if (!device) return;
 
-    if (nodeId != null) {
-      const deviceId = `matter-${nodeId}`;
-      const device = this.deviceManager.getDevice(deviceId);
-      if (device) {
-        const payload = event.payload ?? {};
-        
-        //TODO: auf die events reagieren und die Eigenschaften im device setzen.
-        
-        this.deviceManager.saveDevice(device);
+    const path = event.payload.path as { attributeName?: string } | undefined;
+    const attrName = path?.attributeName;
+
+    if (event.event === OnOff.Complete.id && attrName === "onOff") {
+      const on = Boolean(event.payload.value);
+
+      if (device.type === DeviceType.SWITCH) {
+        const switchDevice = device as DeviceSwitch;
+        const trigger = switchDevice.buttons?.[event.buttonId!.toString()]?.on !== on;
+        if( !trigger) return;
+        if (on) await switchDevice.on(event.buttonId!.toString(), false, true);
+        else await switchDevice.off(event.buttonId!.toString(), false, true);
+      } else if (device.type === DeviceType.SWITCH_DIMMER) {
+        const switchDevice = device as DeviceSwitchDimmer;
+        const trigger = switchDevice.buttons?.[event.buttonId!.toString()]?.on !== on;
+        if( !trigger) return;
+        if (on) await switchDevice.on(event.buttonId!.toString(), false, true);
+        else await switchDevice.off(event.buttonId!.toString(), false, true);
+      } else if (device.type === DeviceType.SWITCH_ENERGY) {
+        const switchDevice = device as DeviceSwitchEnergy;
+        const trigger = switchDevice.buttons?.[event.buttonId!.toString()]?.on !== on;
+        if( !trigger) return;
+        if (on) await switchDevice.on(event.buttonId!.toString(), false, true);
+        else await switchDevice.off(event.buttonId!.toString(), false, true);
+      }
+    } else if (event.event === LevelControl.Complete.id && attrName === "currentLevel") {
+      if (device.type === DeviceType.SWITCH_DIMMER) {
+        const switchDevice = device as DeviceSwitchDimmer;
+        const matterLevel = event.payload.value;
+        if (typeof matterLevel === "number" && !Number.isNaN(matterLevel)) {
+          const percent = this.controller.mapIntensityMatterLevelToPercent(matterLevel, {});
+          const bid = event.buttonId!.toString();
+          const trigger = switchDevice.buttons?.[bid]?.brightness !== percent;
+          if( !trigger) return;
+          await switchDevice.setBrightness(bid, percent, false, true);
+        }
+      }
+    } else if (event.event === Thermostat.Complete.id) {
+      if (device.type === DeviceType.THERMOSTAT) {
+        const thermostatDevice = device as DeviceThermostat;
+        if( attrName === "localTemperature" || attrName === "measuredValue") {
+          const temperature = event.payload.value / 100;
+          const trigger = thermostatDevice.temperature !== temperature;
+          await thermostatDevice.setTemperature(temperature, false, trigger);
+        }
+        else if( attrName === "occupiedHeatingSetpoint") {
+          const temperature = event.payload.value / 100;
+          const trigger = thermostatDevice.temperatureGoal !== temperature;
+          if( !trigger) return;
+          await thermostatDevice.setTemperatureGoal(temperature, false, true);
+        }
       }
     }
 
-    logger.debug({ eventName, nodeId }, "Matter Event verarbeitet");
+    this.deviceManager.saveDevice(device);
   }
 }
 

@@ -22,6 +22,7 @@ export type MotionStatus = {
   motion: boolean;
   lastChanged: string;
   sensitivity: number;
+  sensitivity_max: number;
 };
 
 export type LightLevelStatus = {
@@ -248,7 +249,7 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
       const report = (resource?.temperature as Record<string, unknown> | undefined)
         ?.temperature_report as Record<string, unknown> | undefined;
       const temperature = report?.temperature as number | undefined;
-      return typeof temperature === "number" ? { temperature: temperature } : null;
+      return temperature === undefined ? null : { temperature: temperature };
     } catch (err) {
       logger.error({ err }, "Fehler beim Abrufen der Temperatur");
       return null;
@@ -258,10 +259,10 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
   async getLightLevel(bridgeId: string, resourceId: string) : Promise<LightLevelStatus | null>{
     try {
       const resource = await this.fetchSingleResource(bridgeId, "light_level", resourceId);
-      const report = (resource?.light as Record<string, unknown> | undefined)
-        ?.light_level_report as Record<string, unknown> | undefined;
-      const level = report?.light_level as number | undefined;
-      return typeof level === "number" ? { lightLevel: level } : null;
+      const level = ((resource?.light as Record<string, unknown> | undefined)
+        ?.light_level_report as Record<string, unknown> | undefined)
+        ?.light_level as number | undefined;
+      return level === undefined ? null : { lightLevel: level };
     } catch (err) {
       logger.error({ err }, "Fehler beim Abrufen des Helligkeitswerts");
       return null;
@@ -271,13 +272,19 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
   async getMotion(bridgeId: string, resourceId: string): Promise<MotionStatus | null> {
     try {
       const resource = await this.fetchSingleResource(bridgeId, "motion", resourceId);
-      const report = (resource?.motion as Record<string, unknown> | undefined)
-        ?.motion_report as Record<string, unknown> | undefined;
-      const motion = report?.motion as boolean | undefined ?? false;
-      const lastChanged = report?.changed as string | undefined ?? Date.now().toString();
+      const report = ((resource?.motion as Record<string, unknown> | undefined)
+        ?.motion_report as Record<string, unknown> | undefined);
+      
+      const motion = report?.motion as boolean | undefined;
+      const lastChanged = report?.changed as string | undefined;
+      
       if (motion == null && lastChanged == null) return null;
+
       const reportSensitivity = (resource?.sensitivity as Record<string, unknown> | undefined)
-      return { motion, lastChanged, sensitivity: reportSensitivity?.sensitivity as number ?? 0 };
+      const sensitivity = reportSensitivity?.sensitivity as number | undefined ?? 0;
+      const sensitivity_max = reportSensitivity?.sensitivity_max as number | undefined ?? 0;
+      
+      return motion === undefined || lastChanged === undefined ? null : { motion, lastChanged, sensitivity: sensitivity, sensitivity_max };
     } catch (err) {
       logger.error({ err }, "Fehler beim Abrufen des Bewegungsstatus");
       return null;

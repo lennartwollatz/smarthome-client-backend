@@ -81,12 +81,9 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
   async setMotion(motion: boolean, motion_last_detect: string, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.motion = motion;
-    if (motion) {
+    if (motion_last_detect) {
       this.motion_last_detect = motion_last_detect;
-    }
-    if (execute) {
-      await this.executeSetMotion(motion, motion_last_detect);
-    }
+    } 
     if (trigger) {
       this.eventManager?.triggerEvent(new EventMotionStatusChanged(this.id, deviceBefore, {...this}));
       if (motion) {
@@ -99,15 +96,10 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
     }
   }
 
-  protected abstract executeSetMotion(motion: boolean, motion_last_detect: string): Promise<void>;
-
 
   async setLightLevel(lightLevel: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.lightLevel = lightLevel;
-    if (execute) {
-      await this.executeSetLightLevel(lightLevel);
-    }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventLightLevelStatusChanged(this.id, deviceBefore, {...this}));
       this.eventManager?.triggerEvent(new EventLightLevelDark(this.id, deviceBefore, lightLevel));
@@ -117,15 +109,10 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
     }
   }
 
-  protected abstract executeSetLightLevel(lightLevel: number): Promise<void>;
-
 
   async setTemperature(temperature: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.temperature = temperature;
-    if (execute) {
-      await this.executeSetTemperature(temperature);
-    }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventTemperatureChanged(this.id, deviceBefore, temperature));
       this.eventManager?.triggerEvent(new EventTemperatureEquals(this.id, deviceBefore, temperature));
@@ -134,5 +121,4 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
     }
   }
 
-  protected abstract executeSetTemperature(temperature: number): Promise<void>;
 }

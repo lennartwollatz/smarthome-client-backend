@@ -1,3 +1,4 @@
+import { DeviceSpeakerReceiver } from "com/smarthome/backend/model/devices/DeviceSpeakerReceiver.js";
 import { logger } from "../../../../../logger.js";
 import { DeviceSpeaker } from "../../../../../model/devices/DeviceSpeaker.js";
 import { SonosDeviceController } from "../sonosDeviceController.js";
@@ -144,6 +145,20 @@ export class SonosSpeaker extends DeviceSpeaker {
       await this.sonos.playTextAsSpeech(this, text).catch(err => {
         logger.error({ err, deviceId: this.id, text }, "Fehler beim Abspielen von Text als Sprache");
       });
+    }
+  }
+
+  protected async executeGroupWith(devices: (DeviceSpeaker | DeviceSpeakerReceiver)[]): Promise<void> {
+    if (this.sonos) {
+      await this.sonos.groupSpeakers(this, devices).catch(err => {
+        logger.error({ err, deviceId: this.id, devices }, "Fehler beim Gruppieren");
+      });
+    }
+  }
+
+  protected async executeLeaveSpeakerGroup(): Promise<void> {
+    if (this.sonos) {
+      await this.sonos.leaveSpeakerGroup(this);
     }
   }
 }

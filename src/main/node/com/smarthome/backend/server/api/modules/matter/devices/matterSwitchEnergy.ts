@@ -1,5 +1,5 @@
 import { logger } from "../../../../../logger.js";
-import { DeviceSwitchEnergy, Energy } from "../../../../../model/devices/DeviceSwitchEnergy.js";
+import { DeviceSwitchEnergy } from "../../../../../model/devices/DeviceSwitchEnergy.js";
 import { MatterDeviceController } from "../matterDeviceController.js";
 import { MatterDeviceButtoned } from "./matterDevice.js";
 import { NodeId } from "@matter/types";
@@ -24,8 +24,11 @@ export class MatterSwitchEnergy extends DeviceSwitchEnergy implements MatterDevi
   }
 
   async updateValues(): Promise<void> {
-    logger.info("Update die Werte fuer {}", this.id);
-    // Matter Device Controller in Node ist aktuell stubbed.
+    this.matterController?.updateOnOffValues(this);
+  }
+
+  async delete(): Promise<void> {
+    await this.matterController?.unpairDevice(this);
   }
 
   protected async executeToggle(buttonId: string): Promise<void> {
@@ -38,26 +41,6 @@ export class MatterSwitchEnergy extends DeviceSwitchEnergy implements MatterDevi
 
   protected async executeSetOff(buttonId: string): Promise<void> {
     await this.matterController?.setOff(this, buttonId);
-  }
-
-  protected async executeDoublePress(buttonId: string): Promise<void> {
-    logger.debug("executeDoublePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
-  }
-
-  protected async executeTriplePress(buttonId: string): Promise<void> {
-    logger.debug("executeTriplePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
-  }
-
-  protected async executeSetIntensity(buttonId: string, intensity: number): Promise<void> {
-    logger.debug(
-      "executeSetIntensity fuer Button {} - wird ueber Event-Stream verarbeitet",
-      buttonId,
-      intensity
-    );
-  }
-
-  protected async executeSetEnergyUsage(_energyUsage: Energy): Promise<void> {
-    logger.debug("executeSetEnergyUsage - wird ueber Event-Stream verarbeitet");
   }
 
   getNodeId(): NodeId {

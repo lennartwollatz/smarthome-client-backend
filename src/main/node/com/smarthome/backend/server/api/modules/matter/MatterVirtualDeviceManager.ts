@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { ServerNode, Endpoint, VendorId, DeviceTypeId } from "@matter/main";
+import { rm } from "node:fs/promises";
+import { Environment, ServerNode, Endpoint, VendorId, DeviceTypeId, StorageService } from "@matter/main";
 import { OnOffPlugInUnitDevice } from "@matter/main/devices";
 import { OnOffServer } from "@matter/main/behaviors/on-off";
 import { UserLabelServer } from "@matter/main/behaviors/user-label";
@@ -30,6 +31,7 @@ import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { VoiceAssistantTrigger } from "../../entities/actions/action/VoiceAssistantTrigger.js";
 import type { User } from "../../entities/users/User.js";
 import { UserManager } from "../../entities/users/userManager.js";
+import { MATTERCONFIG } from "./matterModule.js";
 
 const PRESENCE_MODULE_ID = "presence";
 const PRESENCE_BASE_PORT = 5550;
@@ -40,6 +42,10 @@ const VA_MODULE_ID = "voice-assistant";
 const VA_BASE_PORT = 5600;
 const VA_VENDOR_ID = 0xfff1;
 const VA_PRODUCT_ID = 0x8006;
+
+/** Virtueller Matter-Schalter (Server auf diesem Rechner), Modul-ID wie gekoppelte Matter-Geräte: {@link MATTERCONFIG.id} */
+const MATTER_HOST_BASE_PORT = 5700;
+const MATTER_HOST_PRODUCT_ID = 0x8007;
 
 const OnOffPlugInWithUserLabel = OnOffPlugInUnitDevice.with(UserLabelServer);
 
@@ -87,6 +93,31 @@ interface VoiceAssistantDeviceStored {
   actionType?: VoiceAssistantCommandAction;
 }
 
+interface MatterHostSwitchDeviceData {
+  deviceId: string;
+  displayName: string;
+  pairingCode: string;
+  qrPairingCode: string;
+  port: number;
+  passcode: number;
+  discriminator: number;
+}
+
+interface MatterHostSwitchDeviceStored {
+  deviceId: string;
+  displayName: string;
+  port: number;
+  passcode: number;
+  discriminator: number;
+}
+
+interface MatterHostServerInfo {
+  server: ServerNode;
+  endpoints: Record<string, Endpoint>;
+  port: number;
+  deviceId: string;
+}
+
 function snapshotDevice(device: Device): Device {
   return JSON.parse(JSON.stringify(device)) as Device;
 }
@@ -94,8 +125,10 @@ function snapshotDevice(device: Device): Device {
 export class MatterVirtualDeviceManager {
   private presenceServers = new Map<string, PresenceServerInfo>();
   private vaServers = new Map<string, VoiceAssistantServerInfo>();
+  private matterHostServers = new Map<string, MatterHostServerInfo>();
   private deviceDataMap = new Map<string, VoiceAssistantDeviceData>();
   private persistRepository: JsonRepository<VoiceAssistantDeviceStored> | null = null;
+  private matterHostRepository: JsonRepository<MatterHostSwitchDeviceStored> | null = null;
   private eventManager: EventManager | null = null;
   private matterPulseSuppress = new Set<string>();
 
@@ -103,6 +136,10 @@ export class MatterVirtualDeviceManager {
     this.persistRepository = new JsonRepository<VoiceAssistantDeviceStored>(
     databaseManager,
     "VoiceAssistantDevice"
+    );
+    this.matterHostRepository = new JsonRepository<MatterHostSwitchDeviceStored>(
+      databaseManager,
+      "MatterHostSwitchDevice"
     );
     this.eventManager = eventManager;
     void this.initialize().catch(err => {
@@ -117,7 +154,7 @@ export class MatterVirtualDeviceManager {
    * und Commissioning-Daten; Matter-Event-Handler loesen dieselben Events aus wie bei Neuanlage.
    */
   private async initialize(): Promise<void> {
-    if (!this.eventManager || !this.persistRepository) {
+    if (!this.eventManager || !this.persistRepository || !this.matterHostRepository) {
       return;
     }
 
@@ -140,6 +177,19 @@ export class MatterVirtualDeviceManager {
         await this.restoreVoiceAssistantFromStorage(data);
       } catch (err) {
         logger.error({ err, deviceId: data.deviceId }, "Voice-Assistant Matter-Server: Wiederherstellung fehlgeschlagen");
+      }
+    }
+
+    for (const row of this.matterHostRepository.findAll()) {
+      const data = this.storedRowToMatterHostData(row);
+      if (!data) {
+        logger.warn({ row }, "MatterHostSwitchDevice: Eintrag unvollstaendig, uebersprungen");
+        continue;
+      }
+      try {
+        await this.restoreMatterHostFromStorage(data);
+      } catch (err) {
+        logger.error({ err, deviceId: data.deviceId }, "Matter-Host-Schalter: Wiederherstellung fehlgeschlagen");
       }
     }
   }
@@ -327,8 +377,123 @@ export class MatterVirtualDeviceManager {
       this.deviceDataMap.delete(deviceId);
       this.persistRepository?.deleteById(deviceId);
       this.deviceManager.removeDevice(deviceId);
+      await this.eraseVaMatterPersistence(deviceId);
       return true;
     })();
+  }
+
+  async createMatterHostSwitch(trimmedName: string): Promise<{
+    deviceId: string;
+    pairingCode: string;
+    qrPairingCode: string;
+    port: number;
+  } | null> {
+    this.ensureRuntime();
+    const displayName = trimmedName.trim() || "Matter Schalter";
+    const deviceId = `mhs-${randomUUID()}`;
+    const passcode = this.generatePasscode();
+    const discriminator = Math.floor(Math.random() * 4096);
+    const port = this.getNextMatterHostPort();
+    const pairingCode = ManualPairingCodeCodec.encode({ discriminator, passcode });
+    const qrPairingCode = this.encodeHostQrPairingCode(discriminator, passcode);
+    const { storageId: matterNodeId } = this.matterHostCommissioningIds(deviceId);
+
+    const device = new MatterSwitch(
+      displayName,
+      deviceId,
+      matterNodeId,
+      [VA_MATTER_BTN_ONOFF],
+      {
+        moduleId: MATTERCONFIG.id,
+        quickAccess: false,
+        isVirtualMatterHost: true,
+      }
+    );
+    device.isConnected = false;
+    device.isPairingMode = true;
+    (device as unknown as Record<string, unknown>).typeLabel = "deviceType.switch";
+    this.applyMatterHostPairingFields(device, { pairingCode, qrPairingCode });
+    const swBtn = device.getButton(VA_MATTER_BTN_ONOFF);
+    if (swBtn) {
+      swBtn.name = `${displayName} · An/Aus`;
+    }
+    this.deviceManager.saveDevice(device);
+
+    const data: MatterHostSwitchDeviceData = {
+      deviceId,
+      displayName,
+      pairingCode,
+      qrPairingCode,
+      port,
+      passcode,
+      discriminator,
+    };
+    this.matterHostRepository!.save(deviceId, {
+      deviceId,
+      displayName,
+      port,
+      passcode,
+      discriminator,
+    });
+
+    await this.startMatterHostServer(data);
+    return { deviceId, pairingCode, qrPairingCode, port };
+  }
+
+  async removeMatterHostSwitch(deviceId: string): Promise<boolean> {
+    const info = this.matterHostServers.get(deviceId);
+    if (info) {
+      try {
+        await info.server.close();
+      } catch (err) {
+        logger.error({ err, deviceId }, "Matter-Host-Server stoppen fehlgeschlagen");
+      }
+      this.matterHostServers.delete(deviceId);
+    }
+    this.matterHostRepository?.deleteById(deviceId);
+    await this.eraseMatterHostPersistence(deviceId);
+    return true;
+  }
+
+  async hostSwitchSetEndpointState(deviceId: string, buttonId: string, on: boolean): Promise<boolean> {
+    const info = this.matterHostServers.get(deviceId);
+    if (!info) return false;
+    const ep = info.endpoints[buttonId];
+    if (!ep) return false;
+    try {
+      await ep.act(`matter-host-set-${buttonId}-${on}`, agent => {
+        if (on) {
+          agent.get(OnOffServer).on();
+        } else {
+          agent.get(OnOffServer).off();
+        }
+      });
+    } catch (err) {
+      logger.error({ err, deviceId, buttonId, on }, "Matter-Host: Endpoint-Zustand setzen fehlgeschlagen");
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Entfernt den Matter-Persistenzordner bzw. die SQLite-Datei für diesen VA-Server (`ServerNode`-id = storageId).
+   * Betrifft nicht die Paarliste des CommissioningControllers (gekoppelte Fremdgeräte).
+   */
+  private async eraseVaMatterPersistence(deviceId: string): Promise<void> {
+    const { storageId } = this.matterCommissioningIds(deviceId);
+    try {
+      const storageService = Environment.default.get(StorageService);
+      if (!storageService.factory || !storageService.location) {
+        return;
+      }
+      const fileDir = storageService.resolve(storageId);
+      const sqliteFile = storageService.resolve(`${storageId}.db`);
+      await rm(fileDir, { recursive: true, force: true });
+      await rm(sqliteFile, { force: true });
+      logger.info({ deviceId, storageId }, "Voice-Assistant: Matter-Speicher für Knoten entfernt");
+    } catch (err) {
+      logger.warn({ err, deviceId, storageId }, "Voice-Assistant: Matter-Speicher konnte nicht entfernt werden");
+    }
   }
 
   async createVoiceAssistantDevice(
@@ -408,7 +573,7 @@ export class MatterVirtualDeviceManager {
   }
 
   private ensureRuntime(): void {
-    if (!this.eventManager || !this.persistRepository) {
+    if (!this.eventManager || !this.persistRepository || !this.matterHostRepository) {
       throw new Error("MatterVirtualDeviceManager: bindMatterRuntime nicht aufgerufen");
     }
   }
@@ -567,6 +732,20 @@ export class MatterVirtualDeviceManager {
     ]);
   }
 
+  private encodeHostQrPairingCode(discriminator: number, passcode: number): string {
+    return QrPairingCodeCodec.encode([
+      {
+        version: 0,
+        vendorId: VendorId(VA_VENDOR_ID),
+        productId: MATTER_HOST_PRODUCT_ID,
+        flowType: CommissioningFlowType.Standard,
+        discriminator,
+        passcode,
+        discoveryCapabilities: DiscoveryCapabilitiesSchema.encode({ onIpNetwork: true }),
+      },
+    ]);
+  }
+
   private matterCommissioningIds(deviceId: string): {
     storageId: string;
     matterUniqueId: string;
@@ -578,6 +757,214 @@ export class MatterVirtualDeviceManager {
     const storageId =
       safe.length > 0 && safe.length <= 64 ? safe : `va_${matterUniqueId.slice(0, 24)}`;
     return { storageId, matterUniqueId, matterSerial };
+  }
+
+  private matterHostCommissioningIds(deviceId: string): {
+    storageId: string;
+    matterUniqueId: string;
+    matterSerial: string;
+  } {
+    const matterUniqueId = createHash("sha256").update(deviceId, "utf8").digest("hex").slice(0, 32);
+    const matterSerial = `h${matterUniqueId}`.slice(0, 32);
+    const safe = deviceId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const storageId =
+      safe.length > 0 && safe.length <= 64 ? safe : `mhs_${matterUniqueId.slice(0, 24)}`;
+    return { storageId, matterUniqueId, matterSerial };
+  }
+
+  private storedRowToMatterHostData(row: MatterHostSwitchDeviceStored): MatterHostSwitchDeviceData | null {
+    if (!row?.deviceId?.trim() || row.port == null || row.passcode == null || row.discriminator == null) {
+      return null;
+    }
+    const { discriminator, passcode } = row;
+    const displayName = row.displayName?.trim() || "Matter Schalter";
+    return {
+      deviceId: row.deviceId.trim(),
+      displayName,
+      pairingCode: ManualPairingCodeCodec.encode({ discriminator, passcode }),
+      qrPairingCode: this.encodeHostQrPairingCode(discriminator, passcode),
+      port: row.port,
+      passcode,
+      discriminator,
+    };
+  }
+
+  private resolveMatterHostDisplayName(data: MatterHostSwitchDeviceData): string {
+    const dev = this.deviceManager.getDevice(data.deviceId);
+    const fromDevice = dev?.name?.trim();
+    if (fromDevice) return fromDevice;
+    return data.displayName.trim();
+  }
+
+  private applyMatterHostPairingFields(
+    device: MatterSwitch,
+    data: Pick<MatterHostSwitchDeviceData, "pairingCode" | "qrPairingCode">
+  ): void {
+    const r = device as unknown as Record<string, unknown>;
+    r.pairingCode = data.pairingCode;
+    r.qrPairingCode = data.qrPairingCode;
+  }
+
+  private async restoreMatterHostFromStorage(data: MatterHostSwitchDeviceData): Promise<void> {
+    const existing = this.deviceManager.getDevice(data.deviceId);
+    const { storageId: matterNodeId } = this.matterHostCommissioningIds(data.deviceId);
+
+    if (existing instanceof MatterSwitch && existing.isVirtualMatterHost) {
+      this.applyMatterHostPairingFields(existing, data);
+      const swBtn = existing.getButton(VA_MATTER_BTN_ONOFF);
+      if (swBtn) {
+        swBtn.name = `${this.resolveMatterHostDisplayName(data)} · An/Aus`;
+      }
+      this.deviceManager.saveDevice(existing);
+    } else {
+      const device = new MatterSwitch(
+        data.displayName,
+        data.deviceId,
+        matterNodeId,
+        [VA_MATTER_BTN_ONOFF],
+        { moduleId: MATTERCONFIG.id, quickAccess: false, isVirtualMatterHost: true }
+      );
+      if (existing) {
+        if (existing.name) device.name = existing.name;
+        if (existing.room !== undefined) device.room = existing.room;
+        device.quickAccess = existing.quickAccess ?? false;
+        const icon = (existing as { icon?: string }).icon;
+        if (icon) (device as unknown as { icon?: string }).icon = icon;
+      }
+      device.isConnected = false;
+      device.isPairingMode = false;
+      (device as unknown as Record<string, unknown>).typeLabel = "deviceType.switch";
+      const swBtnNew = device.getButton(VA_MATTER_BTN_ONOFF);
+      if (swBtnNew) {
+        swBtnNew.name = `${this.resolveMatterHostDisplayName({ ...data, displayName: device.name ?? data.displayName })} · An/Aus`;
+      }
+      this.applyMatterHostPairingFields(device, data);
+      this.deviceManager.saveDevice(device);
+    }
+    await this.startMatterHostServer(data);
+  }
+
+  private async startMatterHostServer(data: MatterHostSwitchDeviceData): Promise<void> {
+    if (this.matterHostServers.has(data.deviceId)) return;
+
+    const { storageId, matterUniqueId, matterSerial } = this.matterHostCommissioningIds(data.deviceId);
+    const matterDeviceType = DeviceTypeId(OnOffPlugInUnitDevice.deviceType);
+    const nodeDisplayName = this.truncateMatterNodeLabel(this.resolveMatterHostDisplayName(data));
+
+    const server = await ServerNode.create({
+      id: storageId,
+      network: { port: data.port },
+      commissioning: { passcode: data.passcode, discriminator: data.discriminator },
+      productDescription: {
+        name: nodeDisplayName,
+        deviceType: matterDeviceType,
+      },
+      basicInformation: {
+        vendorName: "SmartHome",
+        vendorId: VendorId(VA_VENDOR_ID),
+        nodeLabel: nodeDisplayName,
+        productName: nodeDisplayName,
+        productLabel: nodeDisplayName,
+        productId: MATTER_HOST_PRODUCT_ID,
+        serialNumber: matterSerial,
+        uniqueId: matterUniqueId,
+      },
+    });
+
+    const endpoints: Record<string, Endpoint> = {};
+    const bid = VA_MATTER_BTN_ONOFF;
+    const endpointLabel = this.truncateMatterUserLabelValue(
+      `${this.resolveMatterHostDisplayName(data)} · An/Aus`
+    );
+    const ep = new Endpoint(
+      OnOffPlugInWithUserLabel.set({
+        userLabel: {
+          labelList: [{ label: "name", value: endpointLabel }],
+        },
+      }),
+      { id: bid }
+    );
+    await server.add(ep);
+    endpoints[bid] = ep;
+
+    const deviceId = data.deviceId;
+    const ev = ep.events as {
+      onOff: { onOff$Changed: { on: (fn: (isOn: boolean, wasOn?: boolean) => void) => void } };
+    };
+    ev.onOff.onOff$Changed.on((isOn: boolean) => {
+      this.updateMatterHostButtons(deviceId, { [bid]: isOn });
+      const d = this.deviceManager.getDevice(deviceId);
+      if (!d) return;
+      const snap = snapshotDevice(d);
+      if (isOn) {
+        void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, bid));
+      } else {
+        void this.eventManager!.triggerEvent(new EventSwitchButtonOff(deviceId, snap, bid));
+      }
+    });
+
+    server.run().catch(err => {
+      logger.error({ err, deviceId }, "Matter-Host-Server beendet mit Fehler");
+    });
+
+    this.matterHostServers.set(deviceId, {
+      server,
+      endpoints,
+      port: data.port,
+      deviceId,
+    });
+    logger.info({ deviceId, port: data.port }, "Matter-Host-Schalter gestartet");
+  }
+
+  private updateMatterHostButtons(deviceId: string, patch: Record<string, boolean>): void {
+    const device = this.deviceManager.getDevice(deviceId) as (Device & {
+      buttons?: Record<string, { on: boolean; setOn?: (v: boolean) => void }>;
+    }) | null;
+    if (!device?.buttons) return;
+    device.isConnected = true;
+    device.isPairingMode = false;
+    for (const [bid, on] of Object.entries(patch)) {
+      const b = device.buttons[bid];
+      if (b?.setOn) b.setOn(on);
+      else if (b) b.on = on;
+    }
+    this.deviceManager.saveDevice(device);
+  }
+
+  private getNextMatterHostPort(): number {
+    const usedPorts = new Set<number>();
+    for (const info of this.matterHostServers.values()) {
+      usedPorts.add(info.port);
+    }
+    if (this.matterHostRepository) {
+      for (const row of this.matterHostRepository.findAll()) {
+        if (row?.port != null) {
+          usedPorts.add(row.port);
+        }
+      }
+    }
+    let port = MATTER_HOST_BASE_PORT;
+    while (usedPorts.has(port)) {
+      port++;
+    }
+    return port;
+  }
+
+  private async eraseMatterHostPersistence(deviceId: string): Promise<void> {
+    const { storageId } = this.matterHostCommissioningIds(deviceId);
+    try {
+      const storageService = Environment.default.get(StorageService);
+      if (!storageService.factory || !storageService.location) {
+        return;
+      }
+      const fileDir = storageService.resolve(storageId);
+      const sqliteFile = storageService.resolve(`${storageId}.db`);
+      await rm(fileDir, { recursive: true, force: true });
+      await rm(sqliteFile, { force: true });
+      logger.info({ deviceId, storageId }, "Matter-Host: Matter-Speicher entfernt");
+    } catch (err) {
+      logger.warn({ err, deviceId, storageId }, "Matter-Host: Matter-Speicher konnte nicht entfernt werden");
+    }
   }
 
   private toStoredFromData(data: VoiceAssistantDeviceData): VoiceAssistantDeviceStored {

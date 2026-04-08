@@ -16,6 +16,9 @@ export class Device {
   batteryLevel: number = 0;
   quickAccess: boolean = false;
 
+  /** LAN-IPv4 (z. B. bekannt nach Matter-Pairing), optional fuer Duplikat-Hinweise mit anderen Modulen. */
+  lanIpv4?: string;
+
   constructor(init?: Partial<Device>) {
     if (init) {
       this.assignInit(init);
@@ -58,4 +61,6 @@ export class Device {
     const ms = Date.parse(time);
     return Number.isNaN(ms) ? null : ms;
   }
+
+  async delete(): Promise<void> {};
 }

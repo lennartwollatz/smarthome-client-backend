@@ -3,6 +3,15 @@ import argparse
 import json
 import sys
 import threading
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+try:
+    from cryptography.utils import CryptographyDeprecationWarning
+except ImportError:
+    pass
+else:
+    warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
 
 from pywebostv.connection import WebOSClient
 from pywebostv.controls import ApplicationControl, MediaControl, SystemControl, TvControl

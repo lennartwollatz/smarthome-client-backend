@@ -11,6 +11,9 @@ import { EventStop } from "../../server/events/events/EventStop.js";
 import { EventMute } from "../../server/events/events/EventMute.js";
 import { EventNext } from "../../server/events/events/EventNext.js";
 import { EventPrevious } from "../../server/events/events/EventPrevious.js";
+import { EventSpeakerGrouped } from "../../server/events/events/EventSpeakerGrouped.js";
+import { DeviceSpeakerReceiver } from "./DeviceSpeakerReceiver.js";
+import { EventSpeakerUngrouped } from "../../server/events/events/EventSpeakerUngrouped.js";
 
 export abstract class DeviceSpeaker extends Device {
   static PlayState = {
@@ -22,6 +25,7 @@ export abstract class DeviceSpeaker extends Device {
   playState?: string;
   volume?: number;
   muted?: boolean;
+  groupedWith?: string[]; //DeviceIDs
 
   constructor(init?: Partial<DeviceSpeaker>) {
     super();
@@ -174,4 +178,42 @@ export abstract class DeviceSpeaker extends Device {
   }
 
   protected abstract executePlayTextAsSound(text: string): Promise<void>;
+
+  async groupWith(devices: (DeviceSpeaker | DeviceSpeakerReceiver)[], execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    const deviceIds = devices.map(device => device.id);
+    this.groupedWith = deviceIds;
+    
+    if (execute && deviceIds[0] === this.id) {
+      await this.executeGroupWith(devices);
+      for (const device of devices) {
+        if (device.id !== this.id) {
+          await device.groupWith(devices, false, trigger);
+        }
+      }
+    }
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerGrouped(this.id, deviceBefore, deviceIds));
+    }
+  }
+
+  protected abstract executeGroupWith(devices: (DeviceSpeaker | DeviceSpeakerReceiver)[]): Promise<void>;
+
+  async ungroup(devices: (DeviceSpeaker | DeviceSpeakerReceiver)[], execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    this.groupedWith = [];
+    this.playState = DeviceSpeaker.PlayState.STOP;
+    const filteredDevices = devices.filter(device => device.id !== this.id)
+    if (execute && filteredDevices.length > 1) {
+      const mainDevice = filteredDevices[0];
+      await mainDevice.groupWith(filteredDevices, true, false);
+    } else if (execute && filteredDevices.length == 1) {
+      await this.groupWith([this], true, false);
+      const mainDevice = filteredDevices[0];
+      await mainDevice.ungroup([], false, false);
+    }
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSpeakerUngrouped(this.id, deviceBefore, { ...this }));
+    }
+  }
 }

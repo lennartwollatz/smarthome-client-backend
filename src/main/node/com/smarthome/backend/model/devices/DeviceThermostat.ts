@@ -35,6 +35,8 @@ export abstract class DeviceThermostat extends DeviceTemperature {
     this.type = DeviceType.THERMOSTAT;
   }
 
+  abstract delete(): Promise<void>;
+
   isTemperatureGoalReached(): boolean {
     if (this.state === 'cooling') {
       return (this.temperature ?? 0) <= (this.temperatureGoal ?? 0);
@@ -73,9 +75,6 @@ export abstract class DeviceThermostat extends DeviceTemperature {
     const deviceBefore = { ...this };
     this.temperature = temperature;
     this.addTemperatureToHistory(temperature);
-    if (execute) {
-      await this.executeSetTemperature(temperature);
-    }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventTemperatureChanged(this.id, deviceBefore, temperature));
       this.eventManager?.triggerEvent(new EventTemperatureEquals(this.id, deviceBefore, temperature));

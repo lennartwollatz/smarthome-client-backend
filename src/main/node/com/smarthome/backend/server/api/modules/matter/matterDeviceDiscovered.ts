@@ -5,8 +5,8 @@ export type MatterDeviceDiscoveredInit = {
   name: string;
   address: string;
   port?: number;
-  vendorId?: number;
-  productId?: number;
+  vendorId?: string;
+  productId?: string;
   discriminator?: number;
   deviceType?: number;
   instanceName?: string;
@@ -43,8 +43,8 @@ export class MatterDeviceDiscovered implements ModuleDeviceDiscovered {
   name: string;
   address: string;
   port: number;
-  vendorId?: number;
-  productId?: number;
+  vendorId?: string;
+  productId?: string;
   discriminator?: number;
   deviceType?: number;
   instanceName?: string;

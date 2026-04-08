@@ -1,5 +1,8 @@
 import { logger } from "../../../../logger.js";
 import { Device } from "../../../../model/devices/Device.js";
+import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
+import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceVacuumCleaner } from "../../../../model/devices/DeviceVacuumCleaner.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { JsonRepository } from "../../../db/jsonRepository.js";
 import { EventManager } from "../../../events/EventManager.js";
@@ -59,6 +62,10 @@ export class DeviceManager implements EntityManager {
     }
   }
 
+  getModuleManager(moduleId: string): ModuleManager<any, any, any, any, any, any, any> | undefined {
+    return this.moduleManagers.get(moduleId);
+  }
+
   removeRoomFromDevices(roomId: string): void {
     if (!roomId) return;
     this.devices.forEach(device => {
@@ -91,6 +98,7 @@ export class DeviceManager implements EntityManager {
     this.eventManager.removeListenerForDevice(deviceId);
     this.devices.delete(deviceId);
     this.deviceRepository.deleteById(deviceId);
+    device?.delete();
     //TODO: prüfen, ob das einfluss auf die Actions hat.
     if (!isVoiceAssistant) {
       this.liveUpdateService?.emit("device:removed", { deviceId });
@@ -112,18 +120,51 @@ export class DeviceManager implements EntityManager {
     return true;
   }
 
+  private parseCleanSequenceFromPatch(raw: unknown): string[] | undefined {
+    if (!Array.isArray(raw)) return undefined;
+    const out: string[] = [];
+    for (const el of raw) {
+      if (typeof el === "string" && el.trim() !== "") {
+        out.push(el.trim());
+      } else if (typeof el === "number" && Number.isFinite(el)) {
+        out.push(String(Math.round(el)));
+      } else {
+        return undefined;
+      }
+    }
+    return out;
+  }
+
+  private cleanSequencesEqual(a: string[], b: string[]): boolean {
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => v === b[i]);
+  }
+
   /**
    * Wendet den JSON-Body von PUT /api/devices/:id an (Metadaten, Buttons, Koordinaten).
    * `temperatureGoal` ist nicht erlaubt (nur über das Matter-Modul).
+   * Bei Staubsaugern wird geänderte `cleanSequence` per {@link DeviceVacuumCleaner.setCleanSequence} an das Gerät gesendet.
    * @returns aktualisiertes Gerät oder `null`, wenn kein Gerät existiert oder der Patch ungültig ist.
    */
-  updateDeviceSettings(deviceId: string, patch: Record<string, unknown>): Device | null {
+  async updateDeviceSettings(deviceId: string, patch: Record<string, unknown>): Promise<Device | null> {
     const existing = this.getDevice(deviceId);
     if (!existing) {
       return null;
     }
     if ("temperatureGoal" in patch) {
       return null;
+    }
+
+    if ("cleanSequence" in patch && existing instanceof DeviceVacuumCleaner) {
+      const seq = this.parseCleanSequenceFromPatch(patch["cleanSequence"]);
+      if (seq !== undefined && !this.cleanSequencesEqual(existing.cleanSequence, seq)) {
+        try {
+          await existing.setCleanSequence(seq, true, true);
+        } catch (err) {
+          logger.error({ err, deviceId }, "setCleanSequence fehlgeschlagen");
+          throw err;
+        }
+      }
     }
 
     this.applyApiPatchToDevice(existing, patch);
@@ -150,7 +191,13 @@ export class DeviceManager implements EntityManager {
       next.longitude = patch.longitude;
     }
     if ("roomMapping" in patch && typeof patch.roomMapping === "object" && patch.roomMapping !== null) {
-      next.roomMapping = patch.roomMapping as Record<string, string>;
+      next.roomMapping = patch.roomMapping as Record<string, { name: string; id: string; segmentId?: string }>;
+    }
+    if ("cleanSequence" in patch && device instanceof DeviceVacuumCleaner) {
+      const seq = this.parseCleanSequenceFromPatch(patch["cleanSequence"]);
+      if (seq !== undefined) {
+        device.cleanSequence = [...seq];
+      }
     }
     if ("buttons" in patch && typeof patch.buttons === "object" && patch.buttons !== null) {
       const incomingButtons = patch.buttons as Record<string, unknown>;
@@ -188,6 +235,104 @@ export class DeviceManager implements EntityManager {
 
   getDevicesForModule(moduleId: string): Device[] {
     return Array.from(this.getDevices()).filter(device => device.moduleId === moduleId);
+  }
+
+  /**
+   * Gruppiert Lautsprecher desselben Moduls. `speakerIds[0]` ist der Koordinator/Anführer,
+   * die übrigen IDs werden der Gruppe zugeordnet (Reihenfolge wie übergeben).
+   */
+  async groupSpeakersByIds(speakerIds: string[]): Promise<Device[]> {
+    if (!Array.isArray(speakerIds) || speakerIds.length < 2) {
+      throw new Error("Mindestens zwei Lautsprecher-IDs sind erforderlich.");
+    }
+    const uniqueCheck = new Set(speakerIds);
+    if (uniqueCheck.size !== speakerIds.length) {
+      throw new Error("Doppelte Geräte-IDs in der Gruppe sind nicht erlaubt.");
+    }
+    const resolved: Device[] = [];
+    for (const id of speakerIds) {
+      const d = this.getDevice(id);
+      if (!d) {
+        throw new Error(`Gerät nicht gefunden: ${id}`);
+      }
+      resolved.push(d);
+    }
+    const moduleId = resolved[0].moduleId;
+    if (!moduleId || !resolved.every(d => d.moduleId === moduleId)) {
+      throw new Error("Alle Geräte müssen demselben Modul angehören.");
+    }
+    if (!resolved.every(d => d.type === DeviceType.SPEAKER || d.type === DeviceType.SPEAKER_RECEIVER)) {
+      throw new Error("Nur Lautsprecher und AV-Receiver (Speaker-Module) können gruppiert werden.");
+    }
+    const speakers = await this.ensureDeviceSpeakerInstances(resolved);
+    const leader = speakers[0];
+    await leader.groupWith(speakers, true, true);
+    for (const d of speakers) {
+      this.saveDevice(d);
+    }
+    return speakers;
+  }
+
+  /**
+   * Löst ein Gerät aus seiner Lautsprecher-Gruppe: Hardware-Leave, `groupedWith` des Aufrufers leer.
+   * Verbleibende Mitglieder: ein Gerät → `groupedWith` leer; sonst {@link DeviceSpeaker#groupWith}
+   * mit neuer Reihenfolge (erste verbleibende ID = Anführer).
+   */
+  async ungroupSpeakerById(deviceId: string): Promise<Device[]> {
+    const raw = this.getDevice(deviceId);
+    if (!raw) {
+      throw new Error(`Gerät nicht gefunden: ${deviceId}`);
+    }
+    if (raw.type !== DeviceType.SPEAKER && raw.type !== DeviceType.SPEAKER_RECEIVER) {
+      throw new Error("Nur Lautsprecher und AV-Receiver können aus Gruppen gelöst werden.");
+    }
+    const [device] = await this.ensureDeviceSpeakerInstances([raw]);
+    const groupedIds = device.groupedWith ?? [];
+    const resolved: Device[] = [];
+    for (const id of groupedIds) {
+      const d = this.getDevice(id);
+      if (!d) {
+        throw new Error(`Gerät nicht gefunden: ${id}`);
+      }
+      resolved.push(d);
+    }
+    const speakersGroup = await this.ensureDeviceSpeakerInstances(resolved);
+    await device.ungroup(speakersGroup, true, true);
+    return resolved;
+  }
+
+  /**
+   * Stellt sicher, dass Geräte echte {@link DeviceSpeaker}-Subklassen sind (Methoden, Controller).
+   * Roh-JSON aus der DB hat keinen Prototyp – `instanceof DeviceSpeaker` schlägt fehl, bis das Modul
+   * konvertiert hat; teils liegt die Konvertierung noch aus oder ein Gerät war noch nicht ersetzt.
+   */
+  private async ensureDeviceSpeakerInstances(devices: Device[]): Promise<DeviceSpeaker[]> {
+    const speakers: DeviceSpeaker[] = [];
+    for (const d of devices) {
+      if (d instanceof DeviceSpeaker) {
+        speakers.push(d);
+        continue;
+      }
+      const mid = d.moduleId;
+      if (!mid) {
+        throw new Error(`Gerät ${d.id} hat keine moduleId – Gruppierung nicht möglich.`);
+      }
+      const mgr = this.moduleManagers.get(mid);
+      if (!mgr) {
+        throw new Error(`Kein Modul-Manager für „${mid}“ registriert – Gerät ${d.id} kann nicht gruppiert werden.`);
+      }
+      const converted = await mgr.convertDeviceFromDatabase(d);
+      if (!converted || !(converted instanceof DeviceSpeaker)) {
+        throw new Error(
+          `Gerät „${d.name ?? d.id}“ (${d.id}) kann für diese Modul-Integration nicht als Lautsprecher instanziiert werden.`
+        );
+      }
+      if (converted.id) {
+        this.devices.set(converted.id, converted);
+      }
+      speakers.push(converted);
+    }
+    return speakers;
   }
 
   addDevicesForModule(moduleId: string): void {

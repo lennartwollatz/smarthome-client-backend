@@ -473,11 +473,11 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     if (motionStatus) {
       const motion = motionStatus.motion;
       const changed = motionStatus.lastChanged;
-      if (motion && changed) {
+      if (motion !== undefined && changed !== undefined) {
         sensor.setMotion(motion, changed, false);
       }
       const sensitivity = motionStatus.sensitivity;
-      if (sensitivity) {
+      if (sensitivity !== undefined) {
         sensor.setSensibility(sensitivity, false);
       }
     } else {
@@ -488,7 +488,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     const lightLevelStatus: LightLevelStatus | null = await this.hueController.getLightLevel(bridgeId, lightLevelRid);
     if (lightLevelStatus) {
       const lightLevel = lightLevelStatus.lightLevel;
-      if (lightLevel) {
+      if (lightLevel !== undefined) {
         sensor.setLightLevel(lightLevel, false);
       }
     } 
@@ -497,7 +497,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
     const temperatureStatus: TemperatureStatus | null = await this.hueController.getTemperature(bridgeId, temperatureRid);
     if (temperatureStatus) {
       const temperature = temperatureStatus.temperature;
-      if (temperature) {
+      if (temperature !== undefined) {
         sensor.setTemperature(temperature, false);
       }
     } 
@@ -506,7 +506,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
       const batteryStatus: BatteryStatus | null = await this.hueController.getBattery(bridgeId, batteryRid);
       if ( batteryStatus ) {
         const batteryLevel = batteryStatus.batteryLevel;
-        if (batteryLevel) {
+        if (batteryLevel !== undefined) {
           sensor.hasBattery = true;
           sensor.batteryLevel = batteryLevel;
         } else {

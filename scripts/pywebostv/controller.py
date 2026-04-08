@@ -5,6 +5,15 @@ import json
 import socket
 import sys
 import time
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+try:
+    from cryptography.utils import CryptographyDeprecationWarning
+except ImportError:
+    pass
+else:
+    warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
 
 from pywebostv.connection import WebOSClient
 from pywebostv.controls import (
@@ -39,7 +48,8 @@ def _serialize_value(value):
 
 
 def _emit_json(payload):
-    sys.stdout.write(json.dumps(_serialize_value(payload)))
+    # Zeilenende: Node-Parser kann sonst stdout mit anderem Text zuverlässiger splitten.
+    sys.stdout.write(json.dumps(_serialize_value(payload)) + "\n")
     sys.stdout.flush()
 
 
@@ -52,8 +62,8 @@ def _parse_params(params_raw):
         raise ValueError(f"params must be valid JSON: {exc}") from exc
 
 
-def _send_wol(mac, broadcast="255.255.255.255", port=9):
-    cleaned = mac.replace(":", "").replace("-", "")
+def _send_wol(mac, broadcast="192.168.178.255", port=9):
+    cleaned = mac.replace(":", "").replace("-", "").strip()
     if len(cleaned) != 12:
         raise ValueError("mac must be 12 hex chars (e.g. AA:BB:CC:DD:EE:FF)")
     data = "FF" * 6 + cleaned * 16
@@ -64,6 +74,31 @@ def _send_wol(mac, broadcast="255.255.255.255", port=9):
         sock.sendto(packet, (broadcast, port))
     finally:
         sock.close()
+
+
+# WebOS antwortet oft mit returnValue=false / „500 Application error“, wenn die API hier
+# nicht anwendbar ist (z. B. kein TV-Tuner: HDMI, Streaming-App, Home). Das ist kein Verbindungsfehler.
+_BENIGN_500_APPLICATION_EVENTS = frozenset({
+    "tv.get_current_channel",
+    "tv.get_current_program",
+})
+
+
+def _benign_webos_application_500(event: str, exc: BaseException) -> bool:
+    ev = (event or "").strip()
+    if ev not in _BENIGN_500_APPLICATION_EVENTS:
+        return False
+    return "500 application error" in str(exc).lower()
+
+
+def _should_retry_connection_after_delay(message: str) -> bool:
+    """Nur transient network; nicht WebOS „500 Application error“ (Retry würde sinnlos erneut scheitern)."""
+    if "[WinError 10054]" in message:
+        return True
+    lower = message.lower()
+    if "500 application error" in lower:
+        return False
+    return "500" in message
 
 
 def _call_event(client, event, params):
@@ -117,7 +152,7 @@ def main():
         if args.event.strip().lower() == "wol":
             if not isinstance(params, dict) or "mac" not in params:
                 raise ValueError("params must be JSON object with key 'mac'")
-            broadcast = params.get("broadcast", "255.255.255.255")
+            broadcast = params.get("broadcast", "192.168.178.255")
             port = int(params.get("port", 9))
             _send_wol(params["mac"], broadcast=broadcast, port=port)
             _emit_json({"status": "ok", "result": "wol_sent"})
@@ -144,13 +179,19 @@ def main():
     try:
         _run_once()
     except Exception as exc:
+        if _benign_webos_application_500(args.event, exc):
+            _emit_json({"status": "ok", "result": None})
+            return
         message = str(exc)
-        if "[WinError 10054]" in message or "500" in message:
+        if _should_retry_connection_after_delay(message):
             time.sleep(10)
             try:
                 _run_once()
                 return
             except Exception as retry_exc:
+                if _benign_webos_application_500(args.event, retry_exc):
+                    _emit_json({"status": "ok", "result": None})
+                    return
                 _emit_json({"status": "error", "message": str(retry_exc)})
                 sys.exit(1)
         _emit_json({"status": "error", "message": message})

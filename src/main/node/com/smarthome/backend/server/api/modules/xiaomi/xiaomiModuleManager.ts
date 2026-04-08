@@ -4,7 +4,7 @@ import { ModuleManager } from "../moduleManager.js";
 import { XiaomiDeviceController } from "./xiaomiDeviceController.js";
 import { XiaomiDeviceDiscovered } from "./xiaomiDeviceDiscovered.js";
 import { XiaomiDeviceDiscover } from "./xiaomiDeviceDiscover.js";
-import { DeviceVacuumCleaner } from "../../../../model/devices/DeviceVacuumCleaner.js";
+import { DEVICE_MODE, DeviceVacuumCleaner, WIPER_INTENSITY } from "../../../../model/devices/DeviceVacuumCleaner.js";
 import { XiaomiVacuumCleaner } from "./devices/xiaomiVacuumCleaner.js";
 import { XiaomiEvent } from "./xiaomiEvent.js";
 import { Device } from "../../../../model/devices/Device.js";
@@ -13,6 +13,20 @@ import { EventManager } from "../../../events/EventManager.js";
 import { XIAOMICONFIG } from "./xiaomiModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
+
+export type StartCleaningRoomOptions = {
+  cleaningMode?: number;
+  vacuumIntensity?: number;
+  wiperIntensity?: string;
+  repeatTimes?: number;
+};
+
+function coerceWiperIntensity(raw: unknown): WIPER_INTENSITY | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim().toLowerCase();
+  const vals = Object.values(WIPER_INTENSITY) as string[];
+  return vals.includes(v) ? (v as WIPER_INTENSITY) : undefined;
+}
 
 export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager, XiaomiDeviceController, XiaomiDeviceController, XiaomiEvent, DeviceVacuumCleaner, XiaomiDeviceDiscover, XiaomiDeviceDiscovered> {
 
@@ -180,11 +194,84 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
     const vacuum = await this.getVacuumCleaner(deviceId);
     if (!vacuum) return false;
     try {
-      await vacuum.resumeCleaning(true, true);
+      const mode = vacuum.deviceState.mode;
+      if (mode === DEVICE_MODE.CLEANING_ROOM_PAUSED) {
+        await vacuum.resumeCleaningRoom(true, true);
+      } else if (mode === DEVICE_MODE.CLEANING_ZONED_PAUSED) {
+        await vacuum.resumeCleaningZones(true, true);
+      } else {
+        await vacuum.resumeCleaning(true, true);
+      }
       this.deviceManager.saveDevice(vacuum);
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Fortsetzen der Reinigung");
+      return false;
+    }
+  }
+
+  /**
+   * Reinigungsoptionen sofort am Gerät ausführen und persistieren (ohne Raumsegment starten).
+   */
+  async applyCleaningRoomOptions(deviceId: string, options: StartCleaningRoomOptions): Promise<boolean> {
+    if (options == null || Object.keys(options).length === 0) return false;
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum) return false;
+    try {
+      await this.applyStartCleaningRoomOptionsToVacuum(vacuum, options);
+      this.deviceManager.saveDevice(vacuum);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler beim Anwenden der Reinigungsoptionen");
+      return false;
+    }
+  }
+
+  private async applyStartCleaningRoomOptionsToVacuum(vacuum: DeviceVacuumCleaner, options: StartCleaningRoomOptions): Promise<void> {
+    const noTrigger = false;
+    if (typeof options.repeatTimes === "number" && Number.isFinite(options.repeatTimes)) {
+      const rt = Math.max(1, Math.min(3, Math.round(options.repeatTimes)));
+      await vacuum.changeRepeatTimes(rt, true, noTrigger);
+    }
+    if (typeof options.vacuumIntensity === "number" && Number.isFinite(options.vacuumIntensity)) {
+      await vacuum.setFanSpeed(options.vacuumIntensity, true, noTrigger);
+    }
+    const wiper = coerceWiperIntensity(options.wiperIntensity);
+    if (wiper != null) {
+      await vacuum.setWiperLevel(wiper, true, noTrigger);
+    }
+    if (typeof options.cleaningMode === "number" && Number.isFinite(options.cleaningMode)) {
+      const m = Math.round(options.cleaningMode);
+      if (m === 1 || m === 2 || m === 3) {
+        await vacuum.setCleaningMode(m, true, noTrigger);
+      }
+    }
+  }
+
+  /**
+   * Raumreinigung: `roomIds` typisch Staubsauger-Raum-IDs (Schlüssel von roomMapping);
+   * Optionen werden am Gerät ausgeführt, in `deviceState` gesetzt und per saveDevice persistiert.
+   */
+  async startCleaningRoom(deviceId: string, roomIds: string[], options?: StartCleaningRoomOptions): Promise<boolean> {
+    const ids = roomIds?.map(String).filter(Boolean) ?? [];
+    if (ids.length === 0) return false;
+    logger.info({ deviceId, roomCount: ids.length }, "Starte Raumreinigung");
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum) return false;
+    const segmentIds = vacuum.resolveSegmentIdsForRoomCleaning(ids);
+    if (segmentIds.length === 0) {
+      logger.warn({ deviceId, ids }, "startCleaningRoom: keine Segment-IDs aus roomMapping");
+      return false;
+    }
+    try {
+      if (options != null) {
+        await this.applyStartCleaningRoomOptionsToVacuum(vacuum, options);
+      }
+      await vacuum.startCleaningRoom(segmentIds, true, true);
+      this.deviceManager.saveDevice(vacuum);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler beim Starten der Raumreinigung");
       return false;
     }
   }
@@ -199,6 +286,92 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
       return true;
     } catch (err) {
       logger.error({ err, deviceId }, "Fehler beim Senden zur Docking-Station");
+      return false;
+    }
+  }
+
+  async findMe(deviceId: string): Promise<boolean> {
+    logger.info({ deviceId }, "Find-Me / Akustisches Signal am Staubsauger");
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum) return false;
+    try {
+      await vacuum.findMe(true);
+      this.deviceManager.saveDevice(vacuum);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler bei findMe");
+      return false;
+    }
+  }
+
+  /**
+   * Reinigungsreihenfolge per {@link DeviceVacuumCleaner.setCleanSequence} setzen (MiIO + Persistenz).
+   */
+  async setCleanSequenceForDevice(deviceId: string, sequence: string[]): Promise<DeviceVacuumCleaner | null> {
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum) return null;
+    try {
+      await vacuum.setCleanSequence([...sequence], true, true);
+      this.deviceManager.saveDevice(vacuum);
+      return vacuum;
+    } catch (err) {
+      logger.error({ err, deviceId }, "setCleanSequenceForDevice fehlgeschlagen");
+      throw err;
+    }
+  }
+
+  async startWash(deviceId: string): Promise<boolean> {
+    logger.info({ deviceId }, "Dock: Waschen starten");
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum) return false;
+    try {
+      await vacuum.startWash(true, true);
+      this.deviceManager.saveDevice(vacuum);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler bei startWash");
+      return false;
+    }
+  }
+
+  async stopWash(deviceId: string): Promise<boolean> {
+    logger.info({ deviceId }, "Dock: Waschen stoppen");
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum) return false;
+    try {
+      await vacuum.stopWash(true, true);
+      this.deviceManager.saveDevice(vacuum);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler bei stopWash");
+      return false;
+    }
+  }
+
+  async startDustCollection(deviceId: string): Promise<boolean> {
+    logger.info({ deviceId }, "Dock: Absaugen starten");
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum) return false;
+    try {
+      await vacuum.startDustCollection(true, true);
+      this.deviceManager.saveDevice(vacuum);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler bei startDustCollection");
+      return false;
+    }
+  }
+
+  async stopDustCollection(deviceId: string): Promise<boolean> {
+    logger.info({ deviceId }, "Dock: Absaugen stoppen");
+    const vacuum = await this.getVacuumCleaner(deviceId);
+    if (!vacuum) return false;
+    try {
+      await vacuum.stopDustCollection(true, true);
+      this.deviceManager.saveDevice(vacuum);
+      return true;
+    } catch (err) {
+      logger.error({ err, deviceId }, "Fehler bei stopDustCollection");
       return false;
     }
   }

@@ -50,17 +50,6 @@ export class HueLightLevelMotionTemperature extends DeviceLightLevelMotionTemper
     await this.hueDeviceController.setSensitivity(this.id, sensitivity);
   }
 
-  protected async executeSetMotion(_motion: boolean, _motion_last_detect: string): Promise<void> {
-    // Motion wird von der Bridge automatisch aktualisiert
-  }
-
-  protected async executeSetLightLevel(_lightLevel: number): Promise<void> {
-    // Light Level wird von der Bridge automatisch aktualisiert
-  }
-
-  protected async executeSetTemperature(_temperature: number): Promise<void> {
-    // Temperature wird von der Bridge automatisch aktualisiert
-  }
 
   setHueDeviceController(hueDeviceController: HueDeviceController) {
     this.hueDeviceController = hueDeviceController;

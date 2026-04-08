@@ -1,3 +1,4 @@
+import { LevelControlClient } from "@matter/main/behaviors/level-control";
 import { logger } from "../../../../../logger.js";
 import { DeviceSwitchDimmer } from "../../../../../model/devices/DeviceSwitchDimmer.js";
 import { MatterDeviceController } from "../matterDeviceController.js";
@@ -24,8 +25,12 @@ export class MatterSwitchDimmer extends DeviceSwitchDimmer implements MatterDevi
   }
 
   async updateValues(): Promise<void> {
-    logger.info("Update die Werte fuer {}", this.id);
-    // TODO: Matter Device Controller Anbindung für Status/Subscribe
+    this.matterController?.updateOnOffValues(this);
+    this.matterController?.updateLevelValues(this);
+  }
+
+  async delete(): Promise<void> {
+    await this.matterController?.unpairDevice(this);
   }
 
   protected async executeToggle(buttonId: string): Promise<void> {
@@ -38,14 +43,6 @@ export class MatterSwitchDimmer extends DeviceSwitchDimmer implements MatterDevi
 
   protected async executeSetOff(buttonId: string): Promise<void> {
     await this.matterController?.setOff(this, buttonId);
-  }
-
-  protected async executeDoublePress(buttonId: string): Promise<void> {
-    logger.debug("executeDoublePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
-  }
-
-  protected async executeTriplePress(buttonId: string): Promise<void> {
-    logger.debug("executeTriplePress fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
   }
 
   protected async executeSetBrightness(buttonId: string, brightness: number): Promise<void> {

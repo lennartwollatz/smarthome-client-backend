@@ -12,6 +12,7 @@ import { EntityManager } from "../EntityManager.js";
 import { MatterModuleManager } from "../../modules/matter/matterModuleManager.js";
 import { VoiceAssistantTrigger } from "./action/VoiceAssistantTrigger.js";
 import { VoiceAssistantCommandAction } from "../../modules/matter/voiceAssistantCommandMapping.js";
+import type { ActionRunnableResponse } from "./runnable/ActionRunnableResponse.js";
 
 
 export class ActionManager implements EntityManager {
@@ -69,10 +70,11 @@ export class ActionManager implements EntityManager {
 
   addAction(action: Action): Action | null {
     if (!action?.actionId) return null;
-    const instance = action instanceof Action ? action : new Action(action);
-    if (this.actions.has(instance.actionId)) {
-      return this.updateAction(instance);
+    if (this.actions.has(action.actionId)) {
+      return this.updateAction(action);
     }
+    const instance = new Action(action);
+    console.log(instance);
     if(instance.triggerType === "voice_assistant") {
       this.createVoiceAssistantForAction(instance, instance.getVoiceAssistantTriggerKeyword(), instance.getVoiceAssistantTriggerActionType(), instance.getVoiceAssistantTriggerDeviceId() ?? undefined);
     }
@@ -85,12 +87,13 @@ export class ActionManager implements EntityManager {
     return instance;
   }
 
-  updateAction(instance: Action): Action | null {
+  updateAction(instanceRaw: Action): Action | null {
+    const instance = new Action(instanceRaw);
     const action = this.actions.get(instance.actionId);
     if (!action) return null;
-    this.eventManager.removeListenerForAction(instance.actionId);
+    this.eventManager.removeListenerForAction(action.actionId);
     if( instance.triggerType !== "voice_assistant" ) {
-      this.removeVoiceAssistantDevice(instance.actionId, action.getVoiceAssistantTriggerDeviceId() ?? "");
+      this.removeVoiceAssistantDevice(action.actionId, action.getVoiceAssistantTriggerDeviceId() ?? "");
     } else if( action.triggerType === "voice_assistant" && instance.triggerType === "voice_assistant" && action.getVoiceAssistantTriggerDeviceId() !== instance.getVoiceAssistantTriggerDeviceId()) {
       this.removeVoiceAssistantDevice(action.actionId, action.getVoiceAssistantTriggerDeviceId() ?? "");
       this.createVoiceAssistantForAction(instance, instance.getVoiceAssistantTriggerKeyword(), instance.getVoiceAssistantTriggerActionType(), instance.getVoiceAssistantTriggerDeviceId() ?? undefined);
@@ -153,6 +156,23 @@ export class ActionManager implements EntityManager {
     const action = this.actions.get(actionId);
     if (!action || !action.isAiSuggested) return false;
     return this.deleteAction(actionId);
+  }
+
+  /**
+   * Führt eine Aktion sofort aus (Workflow ab Startknoten), unabhängig vom Trigger-Typ.
+   */
+  runActionIgnoringTrigger(actionId: string): Promise<ActionRunnableResponse> {
+    const action = this.actions.get(actionId);
+    if (!action) {
+      return Promise.resolve({
+        success: false,
+        error: "Action not found",
+        environment: { environment: new Map() }
+      });
+    }
+    const devices = this.deviceManager.getDevicesMap();
+    const scenes = this.sceneManager.getScenesMap();
+    return action.runWorkflowIgnoringTrigger(devices, scenes, this.eventManager);
   }
 
   acceptAiSuggestion(actionId: string): Action | null {

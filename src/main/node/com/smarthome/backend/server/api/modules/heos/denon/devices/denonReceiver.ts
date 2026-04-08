@@ -2,6 +2,7 @@ import { logger } from "../../../../../../logger.js";
 import { DeviceSpeakerReceiver } from "../../../../../../model/devices/DeviceSpeakerReceiver.js";
 import { HeosDeviceController } from "../../heosDeviceController.js";
 import { HeosSpeaker } from "../../devices/heosSpeaker.js";
+import { DeviceSpeaker } from "com/smarthome/backend/model/devices/DeviceSpeaker.js";
 
 export class DenonReceiver extends DeviceSpeakerReceiver {
   address?: string;
@@ -58,9 +59,9 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       this.zones = await this.heos.getDenonZones(this);
       this.sources = await this.heos.getDenonSourcesList(this);
       this.subwoofers = await this.heos.getDenonSubwoofers(this);
-      const [volumeStart, volumeMax] = await this.heos.getDenonVolumeConfig(this);
-      this.volumeStart = volumeStart;
-      this.volumeMax = volumeMax;
+      const {limit, powerOn} = await this.heos.getDenonVolumeConfig(this);
+      this.volumeStart = powerOn;
+      this.volumeMax = limit;
       this.isConnected = true;
     } catch (err) {
       this.isConnected = false;
@@ -128,6 +129,10 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
     if (selected) {
       await this.heos?.setDenonSource(this, sourceIndex, true);
     }
+  }
+
+  protected async executeGroupWith(devices: (DeviceSpeaker | DeviceSpeakerReceiver)[]): Promise<void> {
+    await this.heos?.groupSpeakers(this.toHeosSpeaker(), devices);
   }
 
   private toHeosSpeaker() {

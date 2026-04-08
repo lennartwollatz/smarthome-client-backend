@@ -2,11 +2,10 @@ import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { WeatherDeviceController } from "./weatherDeviceController.js";
 import { WeatherEvent } from "./weatherEvent.js";
 import { WEATHERMODULE } from "./weatherModule.js";
-import { DeviceWeather } from "../../../../model/devices/DeviceWeather.js";
-import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
-import type { ActionManager } from "../../entities/actions/ActionManager.js";
+import { DEFAULT_WEATHER_DEVICE_ID } from "../../../../model/devices/DeviceWeather.js";
 import { logger } from "../../../../logger.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
+import { WeatherDevice } from "./devices/WeatherDevice.js";
 
 const POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 Minuten
 
@@ -18,41 +17,36 @@ export class WeatherEventStreamManager extends ModuleEventStreamManager<WeatherD
   }
 
   protected handleEvent(event: WeatherEvent): void {
-    return;
+    if (event.deviceid !== DEFAULT_WEATHER_DEVICE_ID) {
+      return;
+    }
+    const device = this.deviceManager.getDevice(event.deviceid);
+    if(!device) return;
+    (device as WeatherDevice).updateValuesFromPayload(event.data, true);
+    this.deviceManager.saveDevice(device);
   }
 
   protected async startEventStream(callback: (event: WeatherEvent) => void): Promise<void> {
-    const devices = this.deviceManager.getDevicesForModule(WEATHERMODULE.id);
-    const weatherDevices = devices.filter(
-      (d): d is DeviceWeather => d?.type === DeviceType.WEATHER
-    );
-
-    if (weatherDevices.length === 0) {
-      logger.debug("Weather EventStream: Keine Weather-Devices, Polling wird übersprungen");
+    const device = this.deviceManager.getDevice(DEFAULT_WEATHER_DEVICE_ID) as WeatherDevice | undefined;
+    if (!device || device.moduleId !== WEATHERMODULE.id) {
+      logger.debug("Weather EventStream: Kein zentrales Weather-Gerät, Polling wird übersprungen");
       return;
     }
 
     const poll = async () => {
-      const currentDevices = this.deviceManager.getDevicesForModule(WEATHERMODULE.id).filter(
-        (d): d is DeviceWeather => d?.type === DeviceType.WEATHER
-      );
-      for (const device of currentDevices) {
-        if (typeof device.latitude !== "number" || typeof device.longitude !== "number") {
-          logger.debug({ deviceId: device.id }, "Weather Device ohne Koordinaten, überspringe");
-          continue;
-        }
-        try {
-          const success = await this.controller.fetchWeather(device);
-          if (success) {
-            this.deviceManager.saveDevice(device);
-            callback({
-              deviceid: device.id!,
-              data: { type: "weather.updated", value: device }
-            });
-          }
-        } catch (err) {
-          logger.error({ err, deviceId: device.id }, "Fehler beim Weather-API-Abruf");
-        }
+      const current = this.deviceManager.getDevice(DEFAULT_WEATHER_DEVICE_ID) as WeatherDevice | undefined;
+      if (!current || current.moduleId !== WEATHERMODULE.id) {
+        return;
+      }
+      try {
+        const data = await this.controller.fetchWeather(current);
+        if (!data) return;
+        callback({
+          deviceid: DEFAULT_WEATHER_DEVICE_ID,
+          data,
+        });
+      } catch (err) {
+        logger.error({ err, deviceId: DEFAULT_WEATHER_DEVICE_ID }, "Fehler beim Weather-API-Abruf");
       }
     };
 
@@ -67,4 +61,7 @@ export class WeatherEventStreamManager extends ModuleEventStreamManager<WeatherD
       this.pollIntervalId = null;
     }
   }
+
+
+  
 }

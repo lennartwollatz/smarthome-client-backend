@@ -1,0 +1,6 @@
+# Abhängigkeiten wie upstream pysonofflan (V3-Firmware)
+Click>=7.0
+click_log
+pycryptodome
+requests
+zeroconf>=0.24.5

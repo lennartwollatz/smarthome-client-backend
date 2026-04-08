@@ -162,8 +162,8 @@ export function createDenonModuleRouter(deps: ServerDeps) {
       }
       const raw = (req.body ?? {}).volumeStart;
       const volumeStart = typeof raw === "number" ? raw : (typeof raw === "string" ? Number(raw) : NaN);
-      if (Number.isNaN(volumeStart) || volumeStart < 0 || volumeStart > 100) {
-        res.status(400).json({ error: "Parameter volumeStart fehlt oder ungültig (0–100)" });
+      if (Number.isNaN(volumeStart) || volumeStart < 0 || volumeStart > 50) {
+        res.status(400).json({ error: "Parameter volumeStart fehlt oder ungültig (0–50)" });
         return;
       }
       const success = await denonModule.setVolumeStart(deviceId, volumeStart);
@@ -183,8 +183,8 @@ export function createDenonModuleRouter(deps: ServerDeps) {
       }
       const raw = (req.body ?? {}).volumeMax;
       const volumeMax = typeof raw === "number" ? raw : (typeof raw === "string" ? Number(raw) : NaN);
-      if (Number.isNaN(volumeMax) || volumeMax < 0 || volumeMax > 100) {
-        res.status(400).json({ error: "Parameter volumeMax fehlt oder ungültig (0–100)" });
+      if (Number.isNaN(volumeMax) || volumeMax < 40 || volumeMax > 98) {
+        res.status(400).json({ error: "Parameter volumeMax fehlt oder ungültig (40–98)" });
         return;
       }
       const success = await denonModule.setVolumeMax(deviceId, volumeMax);
@@ -236,6 +236,57 @@ export function createDenonModuleRouter(deps: ServerDeps) {
     } catch (error) {
       logger.error({ error }, "Fehler beim Setzen der Zonen-Power");
       res.status(500).json({ error: "Fehler beim Setzen der Zonen-Power" });
+    }
+  });
+
+  router.post("/devices/:deviceId/setSubwooferPower", async (req, res) => {
+    try {
+      const deviceId = req.params.deviceId;
+      if (!deviceId) {
+        res.status(400).json({ error: "Ungültige Device ID" });
+        return;
+      }
+      const subwooferId = String((req.body ?? {}).subwooferId ?? "").trim();
+      const rawPower = (req.body ?? {}).power;
+      let power: boolean | null = null;
+      if (typeof rawPower === "boolean") {
+        power = rawPower;
+      } else if (typeof rawPower === "string") {
+        if (rawPower === "true" || rawPower === "false") {
+          power = rawPower === "true";
+        }
+      }
+      if (!subwooferId || power == null) {
+        res.status(400).json({ error: "Parameter subwooferId oder power fehlt bzw. ungültig" });
+        return;
+      }
+      const success = await denonModule.setSubwooferPower(deviceId, subwooferId, power);
+      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
+    } catch (error) {
+      logger.error({ error }, "Fehler beim Setzen der Subwoofer-Power");
+      res.status(500).json({ error: "Fehler beim Setzen der Subwoofer-Power" });
+    }
+  });
+
+  router.post("/devices/:deviceId/setSubwooferLevel", async (req, res) => {
+    try {
+      const deviceId = req.params.deviceId;
+      if (!deviceId) {
+        res.status(400).json({ error: "Ungültige Device ID" });
+        return;
+      }
+      const subwooferId = String((req.body ?? {}).subwooferId ?? "").trim();
+      const rawLevel = (req.body ?? {}).level;
+      const level = typeof rawLevel === "number" ? rawLevel : (typeof rawLevel === "string" ? Number(rawLevel) : NaN);
+      if (!subwooferId || Number.isNaN(level)) {
+        res.status(400).json({ error: "Parameter subwooferId oder level fehlt bzw. ungültig" });
+        return;
+      }
+      const success = await denonModule.setSubwooferLevel(deviceId, subwooferId, level);
+      res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Gerät nicht gefunden" });
+    } catch (error) {
+      logger.error({ error }, "Fehler beim Setzen des Subwoofer-Pegels");
+      res.status(500).json({ error: "Fehler beim Setzen des Subwoofer-Pegels" });
     }
   });
 

@@ -204,7 +204,11 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
     const displayName = sanitizeDiscoveredName(instanceName);
 
     // Commissioning-Felder (aus _matterc._udp)
-    const [vendorId, productId] = parseVendorProduct(getTxtValue(txt, ["VP", "vp"]) ?? "");
+    const vpTxtRaw = getTxtValue(txt, ["VP", "vp"]) ?? "";
+    const [vendorId, productId] = parseVendorProduct(vpTxtRaw);
+    if (vendorId != null && productId != null) {
+      console.log("[Matter mDNS] vendorId=%d productId=%d (VP-TXT: %s)", vendorId, productId, vpTxtRaw || "—");
+    }
     const discriminator = parseNumber(getTxtValue(txt, ["D", "d", "discriminator"]));
     const deviceType = parseNumber(getTxtValue(txt, ["DT", "dt", "deviceType"]));
     const pairingHint = getTxtValue(txt, ["PH", "ph", "pairingHint"]);
@@ -292,7 +296,21 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
     if (!existing) return;
 
     // Commissioning-Felder nachtraeglich ergaenzen (falls noch leer)
-    const [vendorId, productId] = parseVendorProduct(getTxtValue(txt, ["VP", "vp"]) ?? "");
+    const mergeVpRaw = getTxtValue(txt, ["VP", "vp"]) ?? "";
+    const [vendorId, productId] = parseVendorProduct(mergeVpRaw);
+    if (
+      vendorId != null &&
+      productId != null &&
+      (existing.vendorId == null || existing.productId == null)
+    ) {
+      console.log(
+        "[Matter mDNS merge] vendorId=%d productId=%d (VP-TXT: %s) ipv4=%s",
+        vendorId,
+        productId,
+        mergeVpRaw || "—",
+        ipv4
+      );
+    }
     if (vendorId != null && existing.vendorId == null) existing.vendorId = vendorId;
     if (productId != null && existing.productId == null) existing.productId = productId;
 
@@ -396,7 +414,7 @@ function getTxtValue(txt: Record<string, string>, keys: string[]) {
 function parseVendorProduct(value: string) {
   if (!value) return [null, null] as const;
   const [vendor, product] = value.split("+");
-  return [parseNumber(vendor), parseNumber(product)] as const;
+  return [vendor, product] as const;
 }
 
 function parseNumber(value?: string | null) {

@@ -1,0 +1,2 @@
+# Sinnvoll: Python 3.10+ (3.7 wird von cryptography/pyOpenSSL nur noch mit Warnung unterstützt).
+pywebostv>=0.8.9

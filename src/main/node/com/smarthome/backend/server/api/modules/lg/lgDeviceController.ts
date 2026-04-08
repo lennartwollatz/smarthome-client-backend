@@ -36,6 +36,8 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
   private deviceCallbacks = new Map<string, (event: LGEvent) => void>();
   private processes = new Map<string, ChildProcess | null>();
   private outputBuffers = new Map<string, string>();
+
+
   async register(tv: LGTV) {
     if (tv.clientKey) return true;
     if (!tv.address) return false;
@@ -44,18 +46,18 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     const scriptPath = this.resolveScriptPath("scripts", "pywebostv", "register.py");
     const args = ["CONNECT", "--ip", tv.address];
     try{
-      const { output, code } = await this.runPython(scriptPath, args);
-    
-      const keyMatch = output.match(/'client_key'\s*:\s*'([^']+)'/);
+      const { stdout, stderr, code } = await this.runPython(scriptPath, args);
+
+      const keyMatch = stdout.match(/'client_key'\s*:\s*'([^']+)'/);
       if (keyMatch?.[1]) {
         tv.clientKey = keyMatch[1];
         tv.isConnected = true;
       }
       if (code !== 0) {
         logger.error(
-          { code, output: output.trim() },
-          "PyWebOSTV-Skript beendet mit Exit-Code fuer {}",
-          tv.address
+          { code, stdout: stdout.trim(), stderr: stderr.trim() },
+          "PyWebOSTV-Skript beendet mit Exit-Code für %s",
+          tv.address ?? "?"
         );
         tv.power = false;
       }
@@ -67,7 +69,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
   }
 
   async powerOn(tv: LGTV) {
-    logger.info({ address: tv.address }, "powerOn() fuer LGTV: "+tv.address);
+    logger.info({ address: tv.address }, "powerOn() fuer LGTV: "+tv.address + ": "+tv.macAddress);
     if (!tv.macAddress) return;
     const params = `{"mac":"${tv.macAddress}"}`;
     await this.callController(tv.address, tv.clientKey, "wol", params, tv);
@@ -101,8 +103,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     await this.callController(tv.address, tv.clientKey, "media.set_volume", String(volume), tv);
   }
 
-  async getVolume(tv: LGTV) {
-    logger.info({ address: tv.address }, "getVolume() fuer LGTV");
+  async getVolume(tv: LGTV): Promise<number | null> {
     if (!tv.clientKey) {
       logger.warn("getVolume() abgebrochen: Client-Key fehlt");
       return null;
@@ -110,7 +111,9 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     const response = await this.callController(tv.address, tv.clientKey, "media.get_volume", null, tv);
     if (!response){
       tv.power = false;
-      return 0;
+      return null;
+    } else {
+      tv.power = true;
     }
     if ((response as Record<string, unknown>)?.status === "error") {
       logger.warn({ response }, "getVolume() fehlgeschlagen");
@@ -120,7 +123,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       | Record<string, unknown>
       | undefined;
     const volume = volumeStatus?.volume;
-    return typeof volume === "number" ? volume : null;
+    return Number(volume) ?? null;
   }
 
   async setChannel(tv: LGTV, channelId: string) {
@@ -154,18 +157,15 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
   }
 
   async getChannels(tv: LGTV) {
-    logger.info({ address: tv.address }, "getChannels() fuer LGTV");
     if (!tv.clientKey) {
       logger.warn("getChannels() abgebrochen: Client-Key fehlt");
       return null;
     }
     const response = await this.callController(tv.address, tv.clientKey, "tv.channel_list", null, tv);
-    console.log("getChannels() response: "+JSON.stringify(response));
     return this.parseChannels(response);
   }
 
   async getApps(tv: LGTV) {
-    logger.info({ address: tv.address }, "getApps() fuer LGTV");
     if (!tv.clientKey) {
       logger.warn("getApps() abgebrochen: Client-Key fehlt");
       return null;
@@ -174,8 +174,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     return this.parseApps(response);
   }
 
-  async getSelectedApp(tv: LGTV) {
-    logger.info({ address: tv.address }, "getSelectedApp() fuer LGTV");
+  async getSelectedApp(tv: LGTV): Promise<string | null | undefined> {
     if (!tv.clientKey) {
       logger.warn("getSelectedApp() abgebrochen: Client-Key fehlt");
       return null;
@@ -183,17 +182,18 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     const response = await this.callController(tv.address, tv.clientKey, "application.get_current", null, tv);
     if (!response){
       tv.power = false;
-      return null;
+      return undefined;
+    } else {
+      tv.power = true;
     }
     if ((response as Record<string, unknown>)?.status === "error") {
       logger.warn({ response }, "getSelectedApp() fehlgeschlagen");
       return null;
     }
-    return typeof response?.result === "string" ? response?.result : null;
+    return this.parseForegroundAppId(response?.result);
   }
 
-  async getSelectedChannel(tv: LGTV) {
-    logger.info({ address: tv.address }, "getSelectedChannel() fuer LGTV");
+  async getSelectedChannel(tv: LGTV): Promise<string | null> {
     if (!tv.clientKey) {
       logger.warn("getSelectedChannel() abgebrochen: Client-Key fehlt");
       return null;
@@ -207,9 +207,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       logger.warn({ response }, "getSelectedChannel() fehlgeschlagen");
       return null;
     }
-    const result = response?.result as Record<string, unknown> | undefined;
-    const channelId = result?.channelId;
-    return typeof channelId === "string" ? channelId : null;
+    return this.parseCurrentChannelId(response?.result);
   }
 
   public async startEventStream(device: DeviceTV, callback: (event: LGEvent) => void): Promise<void> {
@@ -342,8 +340,13 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     if (params != null) {
       args.push("--params", params);
     }
-    const { output, code } = await this.runPython(scriptPath, args);
-    const unreachable = isLgTvUnreachableOutput(output);
+    const { stdout, stderr, code } = await this.runPython(scriptPath, args);
+    const combinedForDiagnostics = stdout + stderr;
+    const unreachable = isLgTvUnreachableOutput(combinedForDiagnostics);
+
+    if (stderr.trim()) {
+      logger.debug({ stderr: stderr.trim().slice(0, 800) }, "PyWebOSTV controller.py stderr");
+    }
 
     if (code !== 0) {
       if (unreachable) {
@@ -355,20 +358,15 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
         return null;
       }
       logger.error(
-        { code, output: output.trim(), args },
-        "PyWebOSTV-Skript beendet mit Exit-Code fuer {}",
-        address
+        { code, stdout: stdout.trim(), stderr: stderr.trim(), args },
+        "PyWebOSTV-Skript beendet mit Exit-Code für %s",
+        address ?? "?"
       );
     }
 
-    const lastJsonLine = output
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(line => line.startsWith("{") && line.endsWith("}"))
-      .pop();
-    if (!lastJsonLine) return null;
+    const parsed = this.parsePywebosStdoutJson(stdout);
+    if (!parsed) return null;
     try {
-      const parsed = JSON.parse(lastJsonLine) as JsonValue;
       if (
         parsed &&
         typeof parsed === "object" &&
@@ -384,9 +382,70 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       }
       return parsed;
     } catch (err) {
-      logger.warn({ err }, "PyWebOSTV-Output ist kein gültiges JSON: {}", lastJsonLine);
+      logger.warn({ err }, "PyWebOSTV-Output ist kein gültiges JSON (stdout): %s", stdout.trim().slice(0, 500));
       return null;
     }
+  }
+
+  /** WebOS liefert je nach Firmware/pywebostv-Version string oder Objekt mit appId/id. */
+  private parseForegroundAppId(result: unknown): string | null {
+    if (result == null) return null;
+    if (typeof result === "string") {
+      const t = result.trim();
+      return t || null;
+    }
+    if (typeof result === "number") return String(result);
+    if (typeof result === "object" && !Array.isArray(result)) {
+      const o = result as Record<string, unknown>;
+      const id = o.appId ?? o.id;
+      if (typeof id === "string" && id.trim()) return id.trim();
+      if (typeof id === "number") return String(id);
+    }
+    return null;
+  }
+
+  private parseCurrentChannelId(result: unknown): string | null {
+    if (result == null) return null;
+    if (typeof result === "string") {
+      const t = result.trim();
+      return t || null;
+    }
+    if (typeof result === "object" && !Array.isArray(result)) {
+      const o = result as Record<string, unknown>;
+      const id = o.channelId ?? o.channelNumber;
+      if (typeof id === "string" && id.trim()) return id.trim();
+      if (typeof id === "number") return String(id);
+    }
+    return null;
+  }
+
+  /**
+   * controller.py schreibt eine JSON-Zeile nach stdout; bei Prefix-Text trotzdem robust parsen.
+   */
+  private parsePywebosStdoutJson(stdout: string): JsonValue | null {
+    const t = stdout.trim();
+    if (!t) return null;
+    const lineCandidates = t
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line.startsWith("{") && line.endsWith("}"));
+    for (let i = lineCandidates.length - 1; i >= 0; i -= 1) {
+      try {
+        return JSON.parse(lineCandidates[i]!) as JsonValue;
+      } catch {
+        /* nächste Zeile */
+      }
+    }
+    const start = t.indexOf("{");
+    const end = t.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(t.slice(start, end + 1)) as JsonValue;
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   private parseChannels(response: JsonValue) {
@@ -431,17 +490,24 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
   }
 
   private async runPython(scriptPath: string, args: string[]) {
-    return new Promise<{ output: string; code: number | null }>(resolve => {
-      const child = spawn("python", [scriptPath, ...args], { windowsHide: true });
-      let output = "";
+    return new Promise<{ stdout: string; stderr: string; code: number | null }>(resolve => {
+      const env = {
+        ...process.env,
+        PYTHONUNBUFFERED: "1",
+        // Cryptography & Co. warnen unter alten Python-Versionen auf stderr und vermischen sich sonst optisch mit Fehlern.
+        PYTHONWARNINGS: [process.env.PYTHONWARNINGS, "ignore::DeprecationWarning"].filter(Boolean).join(",")
+      };
+      const child = spawn("python", [scriptPath, ...args], { windowsHide: true, env });
+      let stdout = "";
+      let stderr = "";
       child.stdout.on("data", chunk => {
-        output += chunk.toString("utf8");
+        stdout += chunk.toString("utf8");
       });
       child.stderr.on("data", chunk => {
-        output += chunk.toString("utf8");
+        stderr += chunk.toString("utf8");
       });
       child.on("close", code => {
-        resolve({ output, code });
+        resolve({ stdout, stderr, code });
       });
     });
   }

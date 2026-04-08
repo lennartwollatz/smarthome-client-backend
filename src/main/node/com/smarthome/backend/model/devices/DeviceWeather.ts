@@ -35,7 +35,7 @@ export type WeatherHourlyEntry = {
   precipitationProbability?: number;
 };
 
-export class DeviceWeather extends Device {
+export abstract class DeviceWeather extends Device {
   latitude?: number;
   longitude?: number;
   temperature?: number;
@@ -88,9 +88,7 @@ export class DeviceWeather extends Device {
     this.type = DeviceType.WEATHER;
   }
 
-  async updateValues(): Promise<void> {
-    // Wird vom WeatherDeviceController über Open-Meteo API befüllt
-  }
+  abstract updateValues(): Promise<void>;
 
     /** Regen aus WMO-Code (51-67, 80-82) */
     isRaining(): boolean {

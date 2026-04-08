@@ -5,7 +5,7 @@ import { Event } from "./Event.js";
 import crypto from "crypto";
 
 export class EventVacuumZoneLeft extends Event {
-  constructor(deviceId: string, deviceBefore: object, zoneId: string, eventId: string = crypto.randomUUID()) {
+  constructor(deviceId: string, deviceBefore: object, coordinate: { x: number; y: number }, eventId: string = crypto.randomUUID()) {
     const eventCondition: EventCondition = {
       id: 0,
       name: "device",
@@ -14,9 +14,9 @@ export class EventVacuumZoneLeft extends Event {
     };
     const resultCondition: EventCondition = {
       id: 0,
-      name: "zoneId",
-      type: "str",
-      value: zoneId
+      name: "coordinate",
+      type: "obj",
+      value: coordinate
     };
     super(eventId, deviceId, Date.now(), EventType.VACUUM_ZONE_LEFT, [eventCondition], [], [resultCondition]);
   }

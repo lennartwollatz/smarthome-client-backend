@@ -1,5 +1,6 @@
 import { DENONMODULE } from "./heos/denon/denonModule.js";
 import { MATTERMODULE } from "./matter/matterModule.js";
+import { SONOFFMODULE } from "./sonoff/sonoffModule.js";
 import { HUEMODULE } from "./hue/hueModule.js";
 import { LGMODULE } from "./lg/lgModule.js";
 import { SONOSMODULE } from "./sonos/sonosModule.js";
@@ -44,6 +45,7 @@ const DEFAULTS: ModuleModel[] = [
   WEATHERMODULE,
   DENONMODULE,
   MATTERMODULE,
+  SONOFFMODULE,
   HUEMODULE,
   LGMODULE,
   SONOSMODULE,

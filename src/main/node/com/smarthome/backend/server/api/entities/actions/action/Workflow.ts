@@ -6,6 +6,9 @@ export class Workflow {
 
   constructor(init?: Partial<Workflow>) {
     Object.assign(this, init);
+    if( this.nodes ){
+      this.nodes = this.nodes.map(node => new Node(node));
+    }
   }
 
   getTriggerNode() {

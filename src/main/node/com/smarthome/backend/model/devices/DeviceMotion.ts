@@ -56,9 +56,6 @@ export abstract class DeviceMotion extends Device {
     if (motion) {
       this.motion_last_detect = motion_last_detect;
     }
-    if (execute) {
-      await this.executeSetMotion(motion, motion_last_detect);
-    }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventMotionStatusChanged(this.id, deviceBefore, { ...this }));
       if (motion) {
@@ -70,6 +67,4 @@ export abstract class DeviceMotion extends Device {
       }
     }
   }
-
-  protected abstract executeSetMotion(motion: boolean, motion_last_detect: string): Promise<void>;
 }

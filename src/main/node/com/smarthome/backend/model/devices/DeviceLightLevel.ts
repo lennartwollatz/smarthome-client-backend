@@ -33,9 +33,6 @@ export abstract class DeviceLightLevel extends Device {
   async setLightLevel(lightLevel: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.lightLevel = lightLevel;
-    if (execute) {
-      await this.executeSetLightLevel(lightLevel);
-    }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventLightLevelStatusChanged(this.id, deviceBefore, {...this}));
       this.eventManager?.triggerEvent(new EventLightLevelDark(this.id, deviceBefore, lightLevel));
@@ -45,5 +42,4 @@ export abstract class DeviceLightLevel extends Device {
     }
   }
 
-  protected abstract executeSetLightLevel(lightLevel: number): Promise<void>;
 }

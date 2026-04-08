@@ -121,6 +121,26 @@ export function createActionRouter(deps: ServerDeps) {
     }
   });
 
+  /** Workflow direkt starten (Trigger wird ignoriert), z. B. zum Testen aus der Aktionsliste. */
+  router.post("/:actionId/run-now", async (req, res) => {
+    try {
+      const result = await deps.actionManager.runActionIgnoringTrigger(req.params.actionId);
+      const payload = {
+        success: result.success,
+        error: result.error,
+        warning: result.warning
+      };
+      if (!result.success && result.error === "Action not found") {
+        res.status(404).json(payload);
+        return;
+      }
+      res.status(result.success ? 200 : 400).json(payload);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ success: false, error: msg });
+    }
+  });
+
   return router;
 }
 

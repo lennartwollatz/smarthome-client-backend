@@ -3,7 +3,7 @@ import https from "node:https";
 import { logger } from "../../../../logger.js";
 import type { HeosSpeaker } from "./devices/heosSpeaker.js";
 import type { DenonReceiver } from "./denon/devices/denonReceiver.js";
-import { Source, Subwoofer, Zone } from "../../../../model/devices/DeviceSpeakerReceiver.js";
+import { DeviceSpeakerReceiver, Source, Subwoofer, Zone } from "../../../../model/devices/DeviceSpeakerReceiver.js";
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
 import { HeosEvent } from "./heosEvent.js";
 import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
@@ -15,12 +15,15 @@ type HeosResponse = {
   payload?: Record<string, unknown> | Array<Record<string, unknown>>;
 };
 
+/** Nur der öffnende Tag muss dieses Attribut mit exakt diesem Wert tragen (in Anführungszeichen). */
+type ParseTagAttributeFilter = { attribute: string; value: string };
+
 export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent, DeviceSpeaker> {
   private eventHandlers = new Map<string, Map<string, (...args: any[]) => void>>();
   private connections = new Map<string, Connection>();
 
   createTemporaryConnection(address: string) {
-    return new Connection(address);
+    return new Connection(address, { autoReconnect: false });
   }
 
   async setVolume(speaker: HeosSpeaker, volume: number) {
@@ -57,6 +60,12 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     return;
   }
 
+  async getPlayers(speaker: HeosSpeaker): Promise<Record<string, unknown>[]> {
+    const conn = this.getOrCreateConnection(speaker.address ?? "");
+    await conn.connect();
+    return await conn.playerGetPlayers();
+  }
+
   async setMute(speaker: HeosSpeaker, mute: boolean) {
     const conn = this.getOrCreateConnection(speaker.address ?? "");
     await conn.connect();
@@ -81,6 +90,18 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     await conn.playerPlayPrevious(speaker.pid ?? 0);
   }
 
+  async groupSpeakers(speaker: HeosSpeaker, devices: (DeviceSpeaker | DeviceSpeakerReceiver)[]) {
+    const conn = this.getOrCreateConnection(speaker.address ?? "");
+    await conn.connect();
+    await conn.playerGroupSpeakers(devices.map(device => (device as HeosSpeaker).pid ?? null).filter(pid => pid !== null));
+  }
+
+  async getGroups(speaker: HeosSpeaker): Promise<string[][]> {
+    const conn = this.getOrCreateConnection(speaker.address ?? "");
+    await conn.connect();
+    return await conn.playerGetGroups();
+  }
+
   disconnectAll() {
     for (const connection of this.connections.values()) {
       connection.disconnect().catch(err => {
@@ -90,13 +111,12 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     this.connections.clear();
   }
 
-  public async startEventStream(device: DeviceSpeaker, callback: (event: HeosEvent) => void): Promise<void> {
+  public async startEventStream(device: DeviceSpeaker | DeviceSpeakerReceiver, callback: (event: HeosEvent) => void): Promise<void> {
     const deviceId = device.id ?? "";
     if (!deviceId) {
       throw new Error("Device ID ist erforderlich für EventStreamListener");
     }
-    
-    const speaker = device as HeosSpeaker;
+    const speaker = device as HeosSpeaker | DenonReceiver;
     const address = speaker.address ?? "";
     if (!address) {
       logger.warn({ deviceId }, "Keine Adresse für EventStream");
@@ -106,22 +126,44 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     try {
       const conn = this.getOrCreateConnection(address);
       await conn.connect();
-      
       // Registriere für Change Events
-      await conn.systemRegisterForChangeEvents(true);
-      
+      conn.systemRegisterForChangeEvents(true);
       // Erstelle Handler für Events
       const handlers = new Map<string, (event: Record<string, unknown>) => void>();
       
       const eventHandler = (event: Record<string, unknown>) => {
-        logger.debug({ deviceId, event }, "Heos Event empfangen");
-        callback({
-          deviceid: deviceId,
-          data: {
-            type: event.command as string ?? "unknown",
-            value: event
+        const rawStr = event?.raw;
+        if (typeof rawStr !== "string" || !rawStr.trim()) {
+          return;
+        }
+        for (const line of splitHeosRawLines(rawStr)) {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(line);
+          } catch (err) {
+            logger.warn({ err, deviceId, line }, "HEOS Event: JSON.parse fehlgeschlagen");
+            continue;
           }
-        });
+          if (
+            !parsed ||
+            typeof parsed !== "object" ||
+            !("heos" in parsed) ||
+            typeof (parsed as { heos: unknown }).heos !== "object" ||
+            (parsed as { heos: { command?: unknown } }).heos === null
+          ) {
+            logger.warn({ deviceId, line }, "HEOS Event: unerwartete JSON-Struktur");
+            continue;
+          }
+          const heos = (parsed as { heos: { command?: unknown } }).heos;
+          if (typeof heos.command !== "string") {
+            logger.warn({ deviceId, line }, "HEOS Event: heos.command fehlt oder ist kein String");
+            continue;
+          }
+          callback({
+            deviceid: deviceId,
+            data: parsed as HeosEvent["data"]
+          });
+        }
       };
       
       conn.onEvent(eventHandler);
@@ -197,15 +239,17 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
 
   async setDenonSubwooferPower(_receiver: DenonReceiver, _power: boolean) {
     const receiver = _receiver;
-    const data = `<SurroundParameter><Subwoofer>${_power ? "1" : "0"}</Subwoofer></SurroundParameter>`;
-    const path = `/ajax/audio/set_config?type=4&data=${this.urlEncode(data)}`;
+    const subwoofers = receiver.subwoofers?.length ?? 0;
+    const data = `<Speaker index="2">${_power ? String(subwoofers + 1) : "1"}</Speaker>`;
+    const path = `/ajax/speakers/set_config?type=3&data=${this.urlEncode(data)}`;
     await this.sendDenonGet(receiver.address, path);
   }
 
   async setDenonSubwooferLevel(_receiver: DenonReceiver, _subwooferId: string, _level: number) {
     const receiver = _receiver;
     const levelTag = this.resolveSubwooferTag(receiver, _subwooferId);
-    const data = `<${levelTag}>${_level}</${levelTag}>`;
+    const dbLevel = this.mapSubwooferLevelUiToDenonDb(_level);
+    const data = `<${levelTag}>${dbLevel}</${levelTag}>`;
     const path = `/ajax/audio/set_config?type=3&data=${this.urlEncode(data)}`;
     await this.sendDenonGet(receiver.address, path);
   }
@@ -219,7 +263,7 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
   }
 
   async getDenonSubwooferPowerConfig(_receiver: DenonReceiver) {
-    return this.sendDenonGet(_receiver.address, "/ajax/audio/get_config?type=4");
+    return this.sendDenonGet(_receiver.address, "/ajax/speakers/get_config?type=3");
   }
 
   async getDenonVolumeConfig(_receiver: DenonReceiver) {
@@ -267,14 +311,14 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     const template = receiver.subwoofers ?? [];
 
     levelMap.forEach((db, index) => {
-      let id = String(index);
       let name = `Subwoofer ${index}`;
+      let id = String(index);
       if (template[index - 1]) {
         const sw = template[index - 1];
         if (sw?.id) id = sw.id;
         if (sw?.name) name = sw.name;
       }
-      result.push(new Subwoofer(id, name, globalPower, db));
+      result.push(new Subwoofer(id, name, globalPower, this.mapSubwooferLevelDenonDbToUi(db)));
     });
     return result;
   }
@@ -340,6 +384,22 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     return "SubwooferLevel1";
   }
 
+  /** UI-Skala 0…100 → Denon dB −120…+120, gerundet auf 5er-Schritte. */
+  private mapSubwooferLevelUiToDenonDb(level0to100: number): number {
+    const clamped = Math.min(100, Math.max(0, level0to100));
+    const linear = -120 + (clamped / 100) * 240;
+    const stepped = Math.round(linear / 5) * 5;
+    return Math.min(120, Math.max(-120, stepped));
+  }
+
+  /** Denon dB −120…+120 → UI 0…100, ganzzahlig gerundet. */
+  private mapSubwooferLevelDenonDbToUi(db: number): number {
+    if (!Number.isFinite(db)) return 0;
+    const clamped = Math.min(120, Math.max(-120, db));
+    const ui = ((clamped + 120) / 240) * 100;
+    return Math.min(100, Math.max(0, Math.round(ui)));
+  }
+
   private mapZoneTag(zoneName?: string) {
     if (!zoneName) return "MainZone";
     const normalized = zoneName.toLowerCase();
@@ -356,24 +416,40 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     return "1";
   }
 
-  private parseTagValue(xml: string, tag: string) {
-    const regex = new RegExp(`<${tag}>(.*?)</${tag}>`, "i");
+  private escapeRegExpFragment(s: string) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  /**
+   * Liest den Textinhalt des ersten passenden Elements {@code tag}.
+   * Der öffnende Tag darf Attribute enthalten. Optional: nur Elemente, deren öffnender Tag
+   * {@code attribute} mit {@code value} (String, einfache oder doppelte Anführungszeichen) setzt.
+   */
+  private parseTagValue(xml: string, tag: string, attrFilter?: ParseTagAttributeFilter) {
+    const t = this.escapeRegExpFragment(tag);
+    const regex = attrFilter
+      ? new RegExp(
+          `<${t}\\b(?=[^>]*\\b${this.escapeRegExpFragment(attrFilter.attribute)}\\s*=\\s*(?:"${this.escapeRegExpFragment(attrFilter.value)}"|'${this.escapeRegExpFragment(attrFilter.value)}'))[^>]*>([\\s\\S]*?)</${t}>`,
+          "i",
+        )
+      : new RegExp(`<${t}\\b[^>]*>([\\s\\S]*?)</${t}>`, "i");
     const match = xml.match(regex);
     return match?.[1] ?? "";
   }
 
-  private parseVolumeLimits(xml: string): [number, number] {
+  private parseVolumeLimits(xml: string): { limit: number, powerOn: number } {
     const limitStr = this.parseTagValue(xml, "Limit");
     const powerOnStr = this.parseTagValue(xml, "PowerOnLevel");
     const limit = Number(limitStr);
     const powerOn = Number(powerOnStr);
-    return [Number.isNaN(limit) ? 0 : limit, Number.isNaN(powerOn) ? 0 : powerOn];
+    return { limit: (Number.isNaN(limit) ? 0 : limit), powerOn: (Number.isNaN(powerOn) ? 0 : powerOn)};
   }
 
   private parseSubwooferLevels(xml: string) {
     const map = new Map<number, number>();
-    for (let idx = 1; idx <= 2; idx += 1) {
-      const value = this.parseTagValue(xml, `SubwooferLevel${idx}`);
+    const indices = [1, 2];
+    for (const idx of indices) {
+      const value = this.parseTagValue(xml, `SubwooferLevel${idx}`, { attribute: "display", value: "3" });
       if (value) {
         const db = Number(value.trim());
         if (!Number.isNaN(db)) {
@@ -384,9 +460,17 @@ export class HeosDeviceController extends ModuleDeviceControllerEvent<HeosEvent,
     return map;
   }
 
+  /**
+   * Subwoofer-Zustand aus SpeakerConfig-Knoten {@code Speaker index="3"} / {@code Value}:
+   * 1 = aus, 2 = erster Sub an, 3 = beide an → hier {@code true}, sobald mindestens einer an ist.
+   */
   private parseSubwooferPowerFlag(xml: string) {
-    const value = this.parseTagValue(xml, "Subwoofer");
-    return value === "1";
+    const speakerBlock = this.parseTagValue(xml, "Speaker", { attribute: "index", value: "3" });
+    if (!speakerBlock.trim()) {
+      return false;
+    }
+    const raw = this.parseTagValue(speakerBlock, "Value").trim();
+    return raw === "2" || raw === "3";
   }
 
   private parseZonePower(xml: string) {
@@ -458,9 +542,19 @@ export class Connection {
   private eventListeners: Array<(event: Record<string, unknown>) => void> = [];
   private readonly connectTimeoutMs = 5000;
   private readonly disconnectTimeoutMs = 1000;
+  /** Nach Netzwerkabbruch: erneuter Verbindungsversuch mit wachsendem Abstand (Cap 5 min). */
+  private readonly autoReconnect: boolean;
+  private closedByUser = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private changeEventsEnabled = false;
+  private socketLossHandled = false;
+  private static readonly RETRY_BASE_MS = 1000;
+  private static readonly RETRY_MAX_MS = 5 * 60 * 1000;
 
-  constructor(address: string) {
+  constructor(address: string, options?: { autoReconnect?: boolean }) {
     this.address = address;
+    this.autoReconnect = options?.autoReconnect !== false;
   }
 
   getAddress() {
@@ -497,6 +591,8 @@ export class Connection {
     if (this.socket && !this.socket.destroyed) {
       return;
     }
+    this.closedByUser = false;
+    this.socketLossHandled = false;
     this.setState("connecting");
     this.socket = new net.Socket();
     try {
@@ -541,15 +637,95 @@ export class Connection {
       this.setState("disconnected");
       throw err;
     }
-    this.socket.on("data", chunk => {
+    const activeSocket = this.socket;
+    activeSocket.on("data", chunk => {
       this.buffer += chunk.toString("utf8");
       this.emitEvent({ raw: chunk.toString("utf8") });
     });
+    activeSocket.on("error", (err: Error) => {
+      this.handleSocketEnded("error", err);
+    });
+    activeSocket.on("close", () => {
+      this.handleSocketEnded("close");
+    });
+    this.reconnectAttempt = 0;
     this.setState("connected");
+    if (this.changeEventsEnabled) {
+      try {
+        await this.send("system/register_for_change_events", { enable: "on" });
+      } catch (regErr) {
+        logger.warn({ err: regErr, address: this.address }, "HEOS: Change-Events nach Reconnect erneut anmelden fehlgeschlagen");
+      }
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer != null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.autoReconnect || this.closedByUser || this.reconnectTimer != null) {
+      return;
+    }
+    const delay = Math.min(
+      Connection.RETRY_MAX_MS,
+      Connection.RETRY_BASE_MS * Math.pow(2, this.reconnectAttempt)
+    );
+    this.reconnectAttempt += 1;
+    logger.info(
+      { address: this.address, delayMs: delay, attempt: this.reconnectAttempt },
+      "HEOS: Verbindungsabbruch — erneuter Verbindungsversuch geplant"
+    );
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect().catch(err => {
+        logger.warn({ err, address: this.address }, "HEOS: Reconnect fehlgeschlagen, nächster Versuch nach Backoff");
+        if (this.autoReconnect && !this.closedByUser) {
+          this.scheduleReconnect();
+        }
+      });
+    }, delay);
+  }
+
+  private handleSocketEnded(reason: string, err?: Error): void {
+    if (this.socketLossHandled) {
+      return;
+    }
+    this.socketLossHandled = true;
+
+    const sock = this.socket;
+    this.socket = undefined;
+    if (sock) {
+      try {
+        sock.removeAllListeners();
+        sock.destroy();
+      } catch {
+        // ignore
+      }
+    }
+    this.setState("disconnected");
+    if (err) {
+      logger.warn({ err, address: this.address, reason }, "HEOS TCP Verbindung verloren");
+    } else {
+      logger.info({ address: this.address, reason }, "HEOS TCP getrennt");
+    }
+    if (this.autoReconnect && !this.closedByUser) {
+      this.scheduleReconnect();
+    }
   }
 
   async disconnect() {
-    if (!this.socket) return;
+    this.closedByUser = true;
+    this.socketLossHandled = true;
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    if (!this.socket) {
+      this.setState("disconnected");
+      return;
+    }
     const socket = this.socket;
     this.socket = undefined;
     this.setState("disconnecting");
@@ -602,8 +778,9 @@ export class Connection {
       Object.entries(queryParams).map(([key, value]) => [key, String(value)])
     ).toString();
     const message = `heos://${command}${query ? `?${query}` : ""}\r\n`;
-    this.socket.write(message, "utf8");
-    return this.waitForResponse();
+    this.socket.write(message.replaceAll("%2C", ","), "utf8");
+    const response = await this.waitForResponse();
+    return response;
   }
 
   async playerGetPlayers() {
@@ -620,8 +797,12 @@ export class Connection {
 
   async playerGetPlayState(pid: number) {
     const response = await this.send("player/get_play_state", { pid });
-    const payload = response?.payload as { state?: string } | undefined;
-    return String(payload?.state ?? "");
+    const payload = (response as Record<string, unknown>)?.heos as { command:string, result:string, message: string } | undefined;
+    const message = payload?.message as string | undefined;
+    if( message === undefined ){
+      return "stop";
+    }
+    return message.split("state=")[1] ?? "stop";
   }
 
   async playerSetPlayState(pid: number, state: string) {
@@ -634,9 +815,12 @@ export class Connection {
 
   async playerGetVolume(pid: number) {
     const response = await this.send("player/get_volume", { pid });
-    const payload = response?.payload as { level?: string | number } | undefined;
-    const volume = Number(payload?.level ?? 0);
-    return Number.isNaN(volume) ? 0 : volume;
+    const payload = (response as Record<string, unknown>)?.heos as { command:string, result:string, message: string } | undefined;
+    const volume = payload?.message as string | undefined;
+    if( volume === undefined ){
+      return 0;
+    }
+    return Number(volume.split("level=")[1] ?? 0);
   }
 
   async playerSetVolume(pid: number, level: number) {
@@ -645,9 +829,12 @@ export class Connection {
 
   async playerGetMute(pid: number) {
     const response = await this.send("player/get_mute", { pid });
-    const payload = response?.payload as { state?: string } | undefined;
-    const muted = String(payload?.state ?? "off");
-    return muted === "on";
+    const payload = (response as Record<string, unknown>)?.heos as { command:string, result:string, message: string } | undefined;
+    const message = payload?.message as string | undefined;
+    if( message === undefined ){
+      return false;
+    }
+    return message.split("state=")[1] === "on";
   }
 
   async playerSetMute(pid: number, mute: boolean) {
@@ -668,12 +855,28 @@ export class Connection {
 
   async playerGetPlayMode(pid: number) {
     const response = await this.send("player/get_play_mode", { pid });
-    const payload = response?.payload as { repeat?: string } | undefined;
-    return String(payload?.repeat ?? "");
+    const payload = (response as Record<string, unknown>)?.heos as { command:string, result:string, message: string } | undefined;
+    const message = payload?.message as string | undefined;
+    if( message === undefined ){
+      return 0;
+    }
+    return message.split("repeat=")[1] ?? "";
   }
 
   async playerSetPlayMode(pid: number, shuffle: boolean, repeat: string) {
     await this.send("player/set_play_mode", { pid, shuffle, repeat });
+  }
+
+  async playerGroupSpeakers(pids: number[]) {
+    await this.send("group/set_group", { pid:pids.join(",") });
+  }
+
+  async playerGetGroups(): Promise<string[][]> {
+    const response = await this.send("group/get_groups");
+    if( response && response.payload ){
+      return (response.payload as Record<string, unknown>[]).map((group: Record<string, unknown>) => ((group.players as Record<string, unknown>[]) ?? []).reduce((acc: string[], player: Record<string, unknown>) => acc.concat(player.pid as string), []) as string[]) as string[][];
+    }
+    return [];
   }
 
   async browseGetMusicSources() {
@@ -697,7 +900,8 @@ export class Connection {
   }
 
   async systemRegisterForChangeEvents(enabled: boolean) {
-    await this.send("system/register_for_change_events", { enable: enabled ? "on" : "off" });
+    this.changeEventsEnabled = enabled;
+    this.send("system/register_for_change_events", { enable: enabled ? "on" : "off" });
   }
 
   private async waitForResponse(): Promise<HeosResponse> {
@@ -727,5 +931,14 @@ export class Connection {
   private emitEvent(event: Record<string, unknown>) {
     this.eventListeners.forEach(listener => listener(event));
   }
+}
+
+/** Mehrere HEOS-JSON-Objekte können in einem `raw`-String durch `\r\n` aneinandergereiht sein. */
+function splitHeosRawLines(raw: string): string[] {
+  return raw
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 

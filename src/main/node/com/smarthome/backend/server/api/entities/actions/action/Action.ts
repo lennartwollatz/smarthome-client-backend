@@ -27,6 +27,41 @@ function stripParensBase(name: string): string {
   return i >= 0 ? name.slice(0, i) : name;
 }
 
+/**
+ * Frontend liefert Parameter als `{ value, manual }`; ältere Daten können
+ * EventParameter oder Rohwerte sein. Für Geräteaufrufe werden die
+ * tatsächlichen Argumentwerte benötigt.
+ */
+function normalizeWorkflowArgValue(entry: unknown): unknown {
+  if (entry === null || typeof entry !== "object") return entry;
+  const o = entry as Record<string, unknown>;
+  if ("manual" in o && "value" in o) return o.value;
+  if ("value" in o && "name" in o && "id" in o) return o.value;
+  return entry;
+}
+
+function normalizeWorkflowArgList(values: unknown[] | undefined): unknown[] {
+  if (!values?.length) return [];
+  return values.map(normalizeWorkflowArgValue);
+}
+
+/** Werte aus Wait-/Device-Trigger (Frontend ParameterValue) in EventParameter für Runnable-Events. */
+function workflowTriggerValuesToEventParameters(raw?: unknown[]): EventParameter[] | undefined {
+  if (!raw?.length) return undefined;
+  return raw.map((entry, i) => {
+    if (entry !== null && typeof entry === "object" && "manual" in entry && "value" in entry) {
+      const v = (entry as { value: unknown }).value;
+      return {
+        id: i,
+        name: `p${i}`,
+        type: "str",
+        value: v as string | number | boolean | string[] | number[] | boolean[],
+      };
+    }
+    return entry as EventParameter;
+  });
+}
+
 function getDeviceMethodExact(
   device: object,
   methodNameWithOptionalParens: string
@@ -61,6 +96,9 @@ export class Action {
 
   constructor(init?: Partial<Action>) {
     Object.assign(this, init);
+    if( init?.workflow ){
+      this.workflow = new Workflow(init.workflow);
+    }
   }
 
   /** Nur persistierbare Felder — vermeidet Zirkelverweise bei JSON (API, DB). */
@@ -177,11 +215,16 @@ export class Action {
     });
   }
 
-  private getTriggerEvent():DeviceTrigger | null{
+  private getTriggerEvent(): DeviceTrigger | null {
     const startNode = this.resolveStartNode(this.workflow);
-    if( startNode.triggerConfig?.type == "device"){
-      return startNode.triggerConfig?.device ?? null;
-    } 
+    if (startNode.triggerConfig?.type === "device") {
+      const d = startNode.triggerConfig?.device;
+      if (!d) return null;
+      return new DeviceTrigger({
+        ...d,
+        triggerValues: workflowTriggerValuesToEventParameters(d.triggerValues as unknown[] | undefined),
+      });
+    }
     return null;
   }
 
@@ -191,6 +234,19 @@ export class Action {
       return startNode.triggerConfig?.time ?? null;
     } 
     return null;
+  }
+
+  /**
+   * Führt den Workflow direkt aus (z. B. Test aus der UI), ohne den registrierten Trigger (Gerät/Zeit/Sprache).
+   */
+  runWorkflowIgnoringTrigger(
+    devices: DeviceMap,
+    scenes: SceneMap,
+    eventManager: EventManager
+  ): Promise<ActionRunnableResponse> {
+    return this.executeWorkflow(devices, scenes, eventManager, {
+      environment: new Map<string, unknown>()
+    });
   }
 
   private async executeWorkflow(
@@ -213,7 +269,7 @@ export class Action {
         logger.warn({ actionId: this.actionId }, "executeWorkflow: Kein ausführbarer Workflow (zu wenige Knoten)");
         return {
           success: true,
-          warning: "Kein Startknoten fuer Action gefunden",
+          warning: "Kein ausführbarer Workflow (zu wenige Knoten)",
           environment: environment
         };
       }
@@ -228,16 +284,15 @@ export class Action {
         };
       }
 
-      const response = await this.executeNode(startNode, devices, scenes, eventManager, environment);
-      this.isExecuting = false;
-      return response;
+      return await this.executeNode(startNode, devices, scenes, eventManager, environment);
     } catch (error) {
-      this.isExecuting = false;
       return {
         success: false,
         error: error as string ?? "Unbekannter Fehler",
         environment: environment
       };
+    } finally {
+      this.isExecuting = false;
     }
   }
 
@@ -306,7 +361,7 @@ export class Action {
 
     const actionType = actionConfig.type;
     const actionName = actionConfig.action;
-    const values = (actionConfig.values ?? []) as unknown[];
+    const values = normalizeWorkflowArgList((actionConfig.values ?? []) as unknown[]);
 
     if (actionType === "device") {
       const deviceId = actionConfig.deviceId;
@@ -322,17 +377,43 @@ export class Action {
       if (actionName) {
         this.invokeDeviceMethod(device, actionName, values);
         //TODO: wenn aus der Funktion ein Promise zurückgegeben wird, soll dieser Wert in die Environment eingefügt werden.
+        console.log("[Workflow] Geräte-Aktion ausgeführt", {
+          workflowActionId: this.actionId,
+          workflowActionName: this.name,
+          nodeId: node.nodeId,
+          nodeName: node.name,
+          deviceId,
+          method: actionName,
+          values,
+        });
       }
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     } else if (actionType === "action") {
-      if (actionName && eventManager.hasRunnable(actionName)) {
-        const action = eventManager.getRunnable(actionName);
-        if( action?.type == "manual") {
-          result = await (action as ActionRunnableManualBased).run(result.environment);
-        } 
-        result = {success: result.success, warning: `Es können nur manuelle Aktionen aufgerufen werden. Action-Node ${node.name} hat einen anderen Action-Typ: ${action?.type}`, environment: result.environment};
+      const nestedActionId = (actionConfig.actionId ?? actionName ?? "").trim();
+      if (!nestedActionId || !eventManager.hasRunnable(nestedActionId)) {
+        result = {
+          success: result.success,
+          warning: `Action ${nestedActionId || "(leer)"} nicht gefunden fuer Action-Node ${node.name}`,
+          environment: result.environment,
+        };
       } else {
-        result = {success: result.success, warning: `Action ${actionName} nicht gefunden fuer Action-Node ${node.name}`, environment: result.environment};
+        const nested = eventManager.getRunnable(nestedActionId);
+        if (nested?.type === "manual") {
+          result = await (nested as ActionRunnableManualBased).run(result.environment);
+          console.log("[Workflow] Manuelle Sub-Aktion ausgeführt", {
+            workflowActionId: this.actionId,
+            workflowActionName: this.name,
+            nodeId: node.nodeId,
+            nodeName: node.name,
+            nestedActionId,
+          });
+        } else {
+          result = {
+            success: result.success,
+            warning: `Es können nur manuelle Aktionen aufgerufen werden. Action-Node ${node.name} hat einen anderen Action-Typ: ${nested?.type}`,
+            environment: result.environment,
+          };
+        }
       }
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     } else {
@@ -343,10 +424,12 @@ export class Action {
 
   private invokeDeviceMethod(device: Device, methodName: string, values: unknown[]) {
     try {
+      values = normalizeWorkflowArgList(values);
       const baseMethodName = methodName.includes("(")
         ? methodName.slice(0, methodName.indexOf("("))
         : methodName;
       const resolved = getDeviceMethodExact(device, methodName);
+      console.log("resolved: " + JSON.stringify(resolved));
       if (!resolved) {
         logger.warn(
           { actionId: this.actionId, methodName: baseMethodName, deviceId: device.id },
@@ -358,8 +441,10 @@ export class Action {
 
       if (!values || values.length === 0) {
         if (fn.length >= 1) {
+          console.log("call with true but no params");
           fn.call(device, true);
         } else {
+          console.log("call without true but no params");
           fn.call(device);
         }
         return;
@@ -386,7 +471,15 @@ export class Action {
         return;
       }
 
-      logger.warn({ methodName: baseMethodName }, "Methoden mit mehr als 2 Parametern werden nicht unterstuetzt");
+      if (values.length > 2) {
+        if (fn.length >= 4) {
+          fn.call(device, ...values, true);
+        } else {
+          fn.call(device, ...values);
+        }
+        return;
+      }
+
     } catch (err) {
       logger.error(
         { err, methodName, deviceId: device.id },
@@ -436,7 +529,7 @@ export class Action {
   private evaluateCondition(conditionConfig: ConditionConfig, devices: DeviceMap) {
     const deviceId = conditionConfig.deviceId;
     const property = conditionConfig.property;
-    const values = (conditionConfig.values ?? []) as unknown[];
+    const values = normalizeWorkflowArgList((conditionConfig.values ?? []) as unknown[]);
     if (!deviceId || !property) return false;
     const device = this.getWorkflowDevice(deviceId, devices);
     if (!device) return false;
@@ -480,7 +573,9 @@ export class Action {
     if (waitConfig.type === "trigger") {
       const deviceId = waitConfig.deviceId;
       const triggerEvent = waitConfig.triggerEvent;
-      const triggerValues = waitConfig.triggerValues;
+      const triggerValues = workflowTriggerValuesToEventParameters(
+        waitConfig.triggerValues as unknown[] | undefined
+      );
       if (!deviceId || !triggerEvent) {
         return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
       }
@@ -494,7 +589,7 @@ export class Action {
         triggerDeviceId: deviceId,
         triggerModuleId: device.moduleId,
         triggerEvent: triggerEvent,
-        triggerValues: triggerValues
+        triggerValues: triggerValues,
       });
 
       const completionPromise = new Promise<Promise<ActionRunnableResponse>>((resolve) => {

@@ -41,24 +41,145 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
   }
 
   async discoverDevices(): Promise<Device[]> {
-    logger.info("Suche nach LG Fernsehern über SSDP (LGDiscover)");
+    logger.info("Suche nach LG Fernsehern (mDNS / AirPlay)");
     try {
-      const discoveredDevices = await this.deviceDiscover.discover(5, []);
+      const discoveredDevices = await this.deviceDiscover.startDiscovery(5);
+      await this.deviceDiscover.stopDiscovery();
       logger.info({ count: discoveredDevices.length }, "Geraete gefunden");
-      
-      const tvs = discoveredDevices.map(device =>
-        new LGTV(device.name, device.id, device.address, device.macAddress ?? null, null, this.deviceController)
-      );
 
-      this.deviceManager.saveDevices(tvs);
-      return tvs;
+      const tvs: LGTV[] = [];
+      for (const discovered of discoveredDevices) {
+        const nip = LGModuleManager.normalizeConnectionIp(discovered.address);
+        const nmac = LGModuleManager.normalizeMacAddress(discovered.macAddress);
+        const matched = this.findExistingLgTvForDiscovery(nmac, nip);
+
+        if (matched) {
+          const fromStore = this.deviceManager.getDevice(matched.id);
+          const tv =
+            fromStore && fromStore.moduleId === this.getModuleId()
+              ? (this.rehydrateDeviceSync(fromStore) ?? matched)
+              : matched;
+          this.mergeDiscoveryIntoExistingLgTv(tv, discovered);
+          tvs.push(tv);
+          this.deviceDiscover.upsertStored(tv.id, {
+            id: tv.id,
+            name: discovered.name,
+            address: discovered.address,
+            port: discovered.port,
+            serviceType: discovered.serviceType,
+            manufacturer: discovered.manufacturer,
+            integrator: discovered.integrator,
+            macAddress: discovered.macAddress
+          });
+        } else {
+          const tv = new LGTV(
+            discovered.name,
+            discovered.id,
+            discovered.address,
+            discovered.macAddress ?? null,
+            null,
+            this.deviceController
+          );
+          tvs.push(tv);
+          this.deviceDiscover.upsertStored(discovered.id, discovered);
+        }
+      }
+
+      const uniqueById = [...new Map(tvs.map(tv => [tv.id, tv])).values()];
+      this.deviceManager.saveDevices(uniqueById);
+      return uniqueById;
     } catch (err) {
       logger.error({ err }, "Fehler bei der Geraeteerkennung");
       return [];
     }
   }
 
-  async connectDevice(deviceId: string): Promise<boolean> {
+  private static normalizeConnectionIp(address: string | undefined | null): string {
+    if (address == null || address === "") {
+      return "";
+    }
+    return address.replace(/^\[|\]$/g, "").trim().toLowerCase();
+  }
+
+  private static normalizeMacAddress(mac: string | null | undefined): string {
+    if (mac == null || mac === "") {
+      return "";
+    }
+    let s = mac.trim().replace(/-/g, ":").toUpperCase();
+    if (!s.includes(":") && /^[0-9A-F]{12}$/i.test(s)) {
+      s = s.match(/.{1,2}/g)!.join(":");
+    }
+    return s;
+  }
+
+  /**
+   * Sucht ein bereits bekanntes LG-TV fuer erneute Discovery.
+   * Zuerst exakter Abgleich MAC + IP; bei geaenderter IP dasselbe Geraet ueber die MAC,
+   * damit clientKey, Verbindungs- und Laufzeitfelder erhalten bleiben.
+   */
+  private findExistingLgTvForDiscovery(normalizedMac: string, normalizedIp: string): LGTV | null {
+    const moduleDevices = this.deviceManager.getDevicesForModule(this.getModuleId());
+
+    if (normalizedMac && normalizedIp) {
+      for (const device of moduleDevices) {
+        const tv = device as LGTV;
+        if (
+          LGModuleManager.normalizeMacAddress(tv.macAddress) === normalizedMac &&
+          LGModuleManager.normalizeConnectionIp(tv.address) === normalizedIp
+        ) {
+          return this.rehydrateDeviceSync(device);
+        }
+      }
+    }
+
+    if (!normalizedMac) {
+      return null;
+    }
+
+    const macMatches: Device[] = [];
+    for (const device of moduleDevices) {
+      const tv = device as LGTV;
+      if (LGModuleManager.normalizeMacAddress(tv.macAddress) === normalizedMac) {
+        macMatches.push(device);
+      }
+    }
+    if (macMatches.length === 0) {
+      return null;
+    }
+    if (macMatches.length > 1) {
+      logger.warn(
+        { count: macMatches.length, mac: normalizedMac },
+        "Mehrere LG-TVs mit gleicher MAC in der DB; waehle nach Verbindung/IP-Prioritaet"
+      );
+    }
+    const ranked = [...macMatches].sort((a, b) => {
+      const da = a as LGTV;
+      const db = b as LGTV;
+      const score = (d: LGTV) =>
+        (d.clientKey ? 4 : 0) +
+        (d.isConnected ? 2 : 0) +
+        (normalizedIp && LGModuleManager.normalizeConnectionIp(d.address) === normalizedIp ? 1 : 0);
+      return score(db) - score(da);
+    });
+    return this.rehydrateDeviceSync(ranked[0]);
+  }
+
+  /**
+   * Nur Discovery-Felder (Adresse/MAC). Ungeraehrt bleiben u.a. clientKey, isConnected,
+   * power, screen, volume, selectedChannel/selectedApp, lastPollUnreachable, Kanaele/Apps inkl. Sortierung,
+   * Name und Raum.
+   */
+  private mergeDiscoveryIntoExistingLgTv(existing: LGTV, discovered: LGDeviceDiscovered): void {
+    existing.setLGController(this.deviceController);
+    if (discovered.address) {
+      existing.address = discovered.address;
+    }
+    if (discovered.macAddress != null && discovered.macAddress !== "") {
+      existing.macAddress = discovered.macAddress;
+    }
+  }
+
+  async connectDevice(deviceId: string): Promise<LGTV | null> {
     logger.info({ deviceId }, "Verbinde mit LG TV");
     let device = this.deviceDiscover.getStored(deviceId);
     if( !device ) {
@@ -71,20 +192,40 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
     
     if (!device) {
       logger.warn({ deviceId }, "LG TV nicht gefunden");
-      return false;
+      return null;
     }
     const tv = new LGTV(device.name, device.id, device.address, device.macAddress ?? null, null, this.deviceController);
     const connected = await tv.register();
     if (!connected) {
       logger.warn({ deviceId }, "Verbindung zu LG TV nicht erfolgreich");
-      return false;
+      return null;
     }
     await tv.updateValues();
-    await tv.updateChannels();
-    await tv.updateApps();
+    await this.loadTvChannelAndAppListsWithRetry(tv);
     this.deviceManager.saveDevice(tv);
     this.initialiseEventStreamManager();
-    return true;
+    return tv;
+  }
+
+  /** Mehrfach Versuch mit Pause, bis Sender oder Apps geliefert werden (oder Versuche erschöpft). */
+  private async loadTvChannelAndAppListsWithRetry(tv: LGTV): Promise<void> {
+    const maxAttempts = 2;
+    const pauseMs = 1500;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await new Promise(r => setTimeout(r, pauseMs));
+        logger.info({ attempt, id: tv.id }, "LG TV: erneuter Versuch Sender/Apps zu laden");
+      }
+      await tv.updateChannels();
+      await tv.updateApps();
+      const ch = tv.channels?.length ?? 0;
+      const ap = tv.apps?.length ?? 0;
+      if (ch > 0 || ap > 0) {
+        logger.info({ id: tv.id, channels: ch, apps: ap }, "LG TV: Sender/Apps geladen");
+        return;
+      }
+    }
+    logger.warn({ id: tv.id }, "LG TV: Sender und Apps nach Pairing weiterhin leer");
   }
 
   async powerOn(deviceId: string): Promise<boolean> {
@@ -209,12 +350,12 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
     const device = this.deviceManager.getDevice(deviceId);
     if (!device || device.moduleId !== LGMODULE.id) {
       logger.warn({ deviceId }, "LG TV nicht gefunden oder kein LGTV");
-      return null;
+      return [];
     }
     const tv = await this.toLGTV(device);
     await tv.updateApps();
     this.deviceManager.saveDevice(tv);
-    return tv.apps ?? null;
+    return tv.apps ?? [];
   }
 
   async getSelectedApp(deviceId: string) {

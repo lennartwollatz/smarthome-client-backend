@@ -37,56 +37,12 @@ export class XiaomiEventStreamManager extends ModuleEventStreamManager<XiaomiDev
       return;
     }
 
-    logger.debug("handleEvent: " + JSON.stringify(event.data));
-    
-    // Parse the event data structure
-    const eventData = event.data;
-    switch (eventData.type) {
-      case 'Status':
-        if (typeof eventData.value === 'object') {
-          await this.handleStatusChange(event.deviceid, eventData.value as Record<string, unknown>);
-        }
-        break;
-      case 'State':
-        if (typeof eventData.value === 'string') {
-          await this.handleStateChange(event.deviceid, eventData.value);
-        }
-        break;
-      default:
-        logger.debug({ deviceId: event.deviceid, eventType: eventData.type }, "Unbehandeltes Event");
+    const device = this.deviceManager.getDevice(event.deviceid);
+    if (!device || !(device instanceof XiaomiVacuumCleaner)) {
+      return;
     }
-  }
-
-  private async handleStatusChange(deviceId: string, status: Record<string, unknown>) {
-    try {
-      const device = this.deviceManager.getDevice(deviceId);
-      if (!device || !(device instanceof XiaomiVacuumCleaner)) {
-        return;
-      }
-
-      // Update device status based on event data
-      // TODO: Implement specific status updates based on MiIO protocol
-      logger.debug({ deviceId, status }, "Status aktualisiert");
-      this.deviceManager.saveDevice(device);
-    } catch (err) {
-      logger.error({ err, deviceId }, "Fehler beim Verarbeiten von Status-Aenderung");
-    }
-  }
-
-  private async handleStateChange(deviceId: string, state: string) {
-    try {
-      const device = this.deviceManager.getDevice(deviceId);
-      if (!device || !(device instanceof XiaomiVacuumCleaner)) {
-        return;
-      }
-
-      // Update device state based on event data
-      // TODO: Implement specific state updates based on MiIO protocol
-      logger.debug({ deviceId, state }, "State aktualisiert");
-      this.deviceManager.saveDevice(device);
-    } catch (err) {
-      logger.error({ err, deviceId }, "Fehler beim Verarbeiten von State-Aenderung");
-    }
+    await device.setUpdatedData(event.data, true);
+    this.deviceManager.saveDevice(device);
   }
 }
 

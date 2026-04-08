@@ -84,5 +84,12 @@ export abstract class ModuleManager<EM extends ModuleEventStreamManager<C, E>, C
     });
   }
 
+  /**
+   * Vor dem Entfernen des Geräts aus dem {@link DeviceManager} (z. B. Matter-Host-Server stoppen).
+   */
+  public async prepareRemoveDevice(_deviceId: string): Promise<void> {
+    return;
+  }
+
 }
 

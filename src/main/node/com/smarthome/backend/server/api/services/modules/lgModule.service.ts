@@ -21,13 +21,12 @@ export function createLGModuleRouter(deps: ServerDeps) {
   router.post("/devices/:deviceId/pair", async (req, res) => {
     try {
       const deviceId = req.params.deviceId;
-      const success = await lgModule.connectDevice(deviceId);
-      if (!success) {
+      const dev = await lgModule.connectDevice(deviceId);
+      if (!dev) {
         res.status(404).json({ error: "Gerät nicht gefunden oder nicht unterstützt" });
         return;
       }
-      const device = deps.deviceManager.getDevice(deviceId);
-      res.status(200).json({ success: true, device: device ?? undefined });
+      res.status(200).json({ success: true, device: dev });
     } catch (error) {
       logger.error({ error }, "Fehler beim Pairing des LG-Geraets");
       res.status(400).json({ error: "Invalid request" });
@@ -174,11 +173,7 @@ export function createLGModuleRouter(deps: ServerDeps) {
   router.get("/devices/:deviceId/apps", async (req, res) => {
     try {
       const apps = await lgModule.getApps(req.params.deviceId);
-      if (!apps) {
-        res.status(404).json({ error: "Gerät nicht gefunden oder keine Daten" });
-        return;
-      }
-      res.status(200).json(apps);
+      res.status(200).json(Array.isArray(apps) ? apps : []);
     } catch (error) {
       logger.error({ error }, "Fehler beim Laden der Apps");
       res.status(400).json({ error: "Invalid request" });

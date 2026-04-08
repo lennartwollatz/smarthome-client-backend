@@ -1,7 +1,7 @@
 import type { DatabaseManager } from "../../../db/database.js";
 import type { EventManager } from "../../../events/EventManager.js";
 import { Device } from "../../../../model/devices/Device.js";
-import { DeviceWeather } from "../../../../model/devices/DeviceWeather.js";
+import { DEFAULT_WEATHER_DEVICE_ID, DeviceWeather } from "../../../../model/devices/DeviceWeather.js";
 import { WeatherDeviceController } from "./weatherDeviceController.js";
 import { WeatherDeviceDiscover } from "./weatherDeviceDiscover.js";
 import { WeatherDeviceDiscovered } from "./weatherDeviceDiscovered.js";
@@ -10,6 +10,7 @@ import { WeatherEvent } from "./weatherEvent.js";
 import { ModuleManager } from "../moduleManager.js";
 import { WEATHERCONFIG, WEATHERMODULE } from "./weatherModule.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
+import { WeatherDevice } from "./devices/WeatherDevice.js";
 
 export class WeatherModuleManager extends ModuleManager<
   WeatherEventStreamManager,
@@ -29,7 +30,7 @@ export class WeatherModuleManager extends ModuleManager<
       databaseManager,
       deviceManager,
       eventManager,
-      new WeatherDeviceController(eventManager),
+      new WeatherDeviceController(),
       new WeatherDeviceDiscover(databaseManager)
     );
   }
@@ -52,22 +53,13 @@ export class WeatherModuleManager extends ModuleManager<
 
   async convertDeviceFromDatabase(device: Device): Promise<Device | null> {
     if (device.moduleId !== WEATHERMODULE.id) return null;
-    return new DeviceWeather(device);
+    return new WeatherDevice(device);
   }
 
   async initializeDeviceControllers(): Promise<void> {
-    // Keine Controller-Referenz auf den Devices nötig – EventStream nutzt Controller direkt
-  }
-
-  async refreshDevice(deviceId: string): Promise<boolean> {
-    const device = this.deviceManager.getDevice(deviceId);
-    if (!device || device.moduleId !== WEATHERMODULE.id || device.type !== "weather") {
-      return false;
+    const device = this.deviceManager.getDevice(DEFAULT_WEATHER_DEVICE_ID);
+    if (device instanceof WeatherDevice && device.moduleId === WEATHERMODULE.id) {
+      device.setWeatherController(this.deviceController);
     }
-    const success = await this.deviceController.fetchWeather(device as DeviceWeather);
-    if (success) {
-      this.deviceManager.saveDevice(device);
-    }
-    return success;
   }
 }

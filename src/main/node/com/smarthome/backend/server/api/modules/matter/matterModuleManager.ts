@@ -23,6 +23,16 @@ import { VoiceAssistantCommandAction } from "./voiceAssistantCommandMapping.js";
 import { ActionManager } from "../../entities/actions/ActionManager.js";
 import { UserManager } from "../../entities/users/userManager.js";
 
+function matterPairingLanIpv4(address: string | undefined): string | undefined {
+  const s = (address ?? "").trim();
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(s) ? s : undefined;
+}
+
+function setMatterDeviceLanIpv4(device: Device, discovered: MatterDeviceDiscovered): void {
+  const ip = matterPairingLanIpv4(discovered.address);
+  if (ip) device.lanIpv4 = ip;
+}
+
 export type PairingPayload = {
   pairingCode: string;
 };
@@ -61,6 +71,14 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       }
       if (device instanceof MatterSwitch) {
         device.setMatterController(this.deviceController);
+        if (device.isVirtualMatterHost) {
+          const id = device.id;
+          device.setVirtualMatterHostExecutor({
+            setState: (buttonId, on) => this.virtualDeviceManager.hostSwitchSetEndpointState(id, buttonId, on),
+          });
+        } else {
+          device.setVirtualMatterHostExecutor(undefined);
+        }
       }
       if (device instanceof MatterSwitchDimmer) {
         device.setMatterController(this.deviceController);
@@ -102,7 +120,22 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   async removeVoiceAssistantDevice(deviceId: string): Promise<boolean> {
     return await this.virtualDeviceManager.removeVoiceAssistantDevice(deviceId);
   }
-  
+
+  async createMatterHostSwitch(name: string): Promise<{
+    deviceId: string;
+    pairingCode: string;
+    qrPairingCode: string;
+    port: number;
+  } | null> {
+    return await this.virtualDeviceManager.createMatterHostSwitch(name);
+  }
+
+  override async prepareRemoveDevice(deviceId: string): Promise<void> {
+    const d = this.deviceManager.getDevice(deviceId);
+    if (d instanceof MatterSwitch && d.isVirtualMatterHost) {
+      await this.virtualDeviceManager.removeMatterHostSwitch(deviceId);
+    }
+  }
 
 
   async discoverDevices(): Promise<MatterDeviceDiscovered[]> {
@@ -182,6 +215,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   }
 
   private async toMatterDevice(device: MatterDeviceDiscovered) {
+    console.log(device);
     const id = device.id;
     const nodeId = device.nodeId ?? "0";
     const vendorId = device.vendorId ?? undefined;
@@ -196,6 +230,8 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
         ? `${vendorInfo.vendorName} ${vendorInfo.productName}`.trim()
         : (device.name ?? "Matter Device");
 
+    console.log(vendorInfo);
+
     const typeFromVendor = toDeviceType(vendorInfo?.deviceType ?? null);
 
     // Passendes Device instanziieren
@@ -203,6 +239,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       //get Buttons for Node
       const buttons = await this.deviceController.getButtonsForDevice(device);
       const dimmer = new MatterSwitchDimmer(derivedName, id, nodeId, buttons);
+      setMatterDeviceLanIpv4(dimmer, device);
       dimmer.setMatterController(this.deviceController);
       await dimmer.updateValues();
       return dimmer;
@@ -211,6 +248,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       //get Buttons for Node
       const buttons = await this.deviceController.getButtonsForDevice(device);
       const switchDevice = new MatterSwitch(derivedName, id, nodeId, buttons);
+      setMatterDeviceLanIpv4(switchDevice, device);
       switchDevice.setMatterController(this.deviceController);
       await switchDevice.updateValues();
       return switchDevice;
@@ -219,6 +257,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       //get Buttons for Node
       const buttons = await this.deviceController.getButtonsForDevice(device);
       const switchEnergyDevice = new MatterSwitchEnergy(derivedName, id, nodeId, buttons);
+      setMatterDeviceLanIpv4(switchEnergyDevice, device);
       switchEnergyDevice.setMatterController(this.deviceController);
       await switchEnergyDevice.updateValues();
       return switchEnergyDevice;
@@ -226,18 +265,21 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
 
     if (typeFromVendor === DeviceType.THERMOSTAT) {
       const thermostatDevice = new MatterThermostat(derivedName, id, nodeId);
+      setMatterDeviceLanIpv4(thermostatDevice, device);
       thermostatDevice.setMatterController(this.deviceController);
       await thermostatDevice.updateValues();
       return thermostatDevice;
     }
 
     // Fallback: wenn Vendor/Product unbekannt oder kein Mapping existiert, generisches Device speichern
-    return new Device({
+    const fallback = new Device({
       id,
       name: derivedName,
       moduleId: MATTERCONFIG.id,
       isConnected: true
     });
+    setMatterDeviceLanIpv4(fallback, device);
+    return fallback;
   }
 
   async convertDeviceFromDatabase(device: Device): Promise<Device | null> {

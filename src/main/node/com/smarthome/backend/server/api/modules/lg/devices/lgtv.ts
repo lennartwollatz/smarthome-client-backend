@@ -44,37 +44,23 @@ export class LGTV extends DeviceTV {
     if (!this.lg) {
       return;
     }
-    this.lastPollUnreachable = false;
     try {
       if (this.clientKey) {
         const selectedApp = await this.lg.getSelectedApp(this);
-        if (this.lastPollUnreachable) {
-          this.selectedApp = undefined;
-          this.selectedChannel = undefined;
-          this.power = false;
-          return;
-        }
         this.selectedApp = selectedApp ?? undefined;
-        if (!selectedApp) {
+        if (selectedApp === null) {
           const selectedChannel = await this.lg.getSelectedChannel(this);
-          if (this.lastPollUnreachable) {
-            this.selectedChannel = undefined;
-            this.power = false;
-            return;
-          }
           this.selectedChannel = selectedChannel ?? undefined;
+        } 
+        if( selectedApp !== undefined ){
+          const vol = await this.lg.getVolume(this);
+          if (vol) {
+            this.volume = vol;
+          }
         }
-        const vol = await this.lg.getVolume(this);
-        if (this.lastPollUnreachable) {
-          this.selectedApp = undefined;
-          this.selectedChannel = undefined;
-          this.power = false;
-          return;
+        if( !this.power){
+          this.screen = false;
         }
-        if (typeof vol === "number") {
-          this.volume = vol;
-        }
-        this.power = Boolean(this.selectedChannel || this.selectedApp);
       }
     } catch {
     }
@@ -120,16 +106,12 @@ export class LGTV extends DeviceTV {
 
   protected async executeSetPowerOn() {
     if (!this.lg) return;
-    if (!this.power) {
-      await this.lg.powerOn(this);
-    } 
+    await this.lg.powerOn(this);
   }
 
   protected async executeSetPowerOff() {
     if (!this.lg) return;
-    if (this.power) {
-      await this.lg.powerOff(this);
-    } 
+    await this.lg.powerOff(this);
   }
 
   protected async executeSetPower(power: boolean) {

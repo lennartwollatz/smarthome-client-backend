@@ -10,7 +10,12 @@ import { EventListener } from "../EventListener.js";
 export type TriggerListenerShape = { runnable: ActionRunnable };
 
 function isEventParameter(x: unknown): x is EventParameter {
-  return typeof x === "object" && x !== null && "value" in x;
+  return (
+    typeof x === "object" &&
+    x !== null &&
+    "value" in x &&
+    !("manual" in x)
+  );
 }
 
 /**

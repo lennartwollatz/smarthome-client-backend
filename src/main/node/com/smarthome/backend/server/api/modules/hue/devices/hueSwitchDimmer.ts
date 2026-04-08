@@ -41,6 +41,9 @@ export class HueSwitchDimmer extends DeviceSwitchDimmer {
     }
   }
 
+  async delete(): Promise<void> {
+  }
+
   protected async executeToggle(buttonId: string): Promise<void> {
     logger.debug("executeToggle fuer Button {} - wird ueber Event-Stream verarbeitet", buttonId);
   }

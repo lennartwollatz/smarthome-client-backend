@@ -1,3 +1,4 @@
+import { DeviceSpeakerReceiver } from "com/smarthome/backend/model/devices/DeviceSpeakerReceiver.js";
 import { logger } from "../../../../../logger.js";
 import { DeviceSpeaker } from "../../../../../model/devices/DeviceSpeaker.js";
 import { HeosDeviceController } from "../heosDeviceController.js";
@@ -62,6 +63,14 @@ export class HeosSpeaker extends DeviceSpeaker {
     logger.debug({ id: this.id, heosSet: Boolean(this.heos) }, "Initialisiere Werte");
 
     try {
+      const players = await this.heos.getPlayers(this);
+      const groups = await this.heos.getGroups(this);
+      if( groups.some(group => group.includes(String(this.pid) ?? ""))){
+        const pids = groups.find(group => group.includes(String(this.pid) ?? "")) ?? [];
+        //TODO:speakerIds zu den pids ermitteln.
+      } else {
+        this.groupedWith = [];
+      }
       this.volume = await this.heos.getVolume(this);
       this.muted = await this.heos.getMute(this);
       this.playState = await this.heos.getPlayState(this);
@@ -83,7 +92,6 @@ export class HeosSpeaker extends DeviceSpeaker {
   }
 
   protected async executePlay(): Promise<void> {
-    logger.info("player play");
     await this.heos?.setPlayState(this, "play");
   }
 
@@ -113,6 +121,10 @@ export class HeosSpeaker extends DeviceSpeaker {
 
   protected async executePlayTextAsSound(text: string): Promise<void> {
     await this.heos?.playTextAsSpeech(this, text);
+  }
+
+  protected async executeGroupWith(devices: (DeviceSpeaker | DeviceSpeakerReceiver)[]): Promise<void> {
+    await this.heos?.groupSpeakers(this, devices);
   }
 }
 

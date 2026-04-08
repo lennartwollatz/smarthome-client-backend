@@ -1,5 +1,7 @@
 import { createRequire } from "node:module";
 import { logger } from "../../../../logger.js";
+import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
+import { DeviceSpeakerReceiver } from "../../../../model/devices/DeviceSpeakerReceiver.js";
 import { SonosSpeaker } from "./devices/sonosSpeaker.js";
 import { SonosEvent } from "./sonosEvent.js";
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
@@ -122,6 +124,61 @@ export class SonosDeviceController extends ModuleDeviceControllerEvent<SonosEven
     } catch (err) {
       logger.error({ err, address: speaker.address }, "Fehler beim Abspielen des vorherigen Titels");
       // Fehler nicht weiterwerfen, Server soll nicht abstürzen
+    }
+  }
+
+  public async leaveSpeakerGroup(speaker: SonosSpeaker): Promise<void> {
+    const conn = this.getOrCreateConnection(speaker.address ?? "");
+    try {
+      await conn.leaveGroup();
+    } catch (err) {
+      logger.error({ err, deviceId: speaker.id, address: speaker.address }, "Sonos leaveGroup fehlgeschlagen");
+      throw err;
+    }
+  }
+
+
+  /**
+   * Sonos: Koordinator ist `devices[0]`. Alle weiteren Player treten der Zone per joinGroup bei.
+   */
+  public async groupSpeakers(coordinator: SonosSpeaker, devices: (DeviceSpeaker | DeviceSpeakerReceiver)[]): Promise<void> {
+    const sonosList = devices.filter((d): d is SonosSpeaker => d instanceof SonosSpeaker);
+    if (!sonosList.length) {
+      return;
+    }
+    const leader = sonosList[0];
+    if (!leader?.id || leader.id !== coordinator.id) {
+      logger.warn(
+        { coordinatorId: coordinator.id, leaderId: leader?.id },
+        "groupSpeakers: devices[0] muss der Koordinator sein"
+      );
+      return;
+    }
+    let zoneName = leader.roomName?.trim() ?? "";
+    if (!zoneName && leader.address) {
+      const leaderConn = this.getOrCreateConnection(leader.address);
+      try {
+        const n = await leaderConn.getName();
+        zoneName = String(n ?? "").trim();
+      } catch (err) {
+        logger.error({ err, deviceId: leader.id }, "groupSpeakers: Konnte Zonenname nicht lesen");
+        throw err;
+      }
+    }
+    if (!zoneName) {
+      throw new Error("Sonos: Kein Zonenname für den Koordinator – roomName setzen oder Gerät erreichbar machen.");
+    }
+    for (let i = 1; i < sonosList.length; i++) {
+      const member = sonosList[i];
+      if (!member?.address || member.id === leader.id) {
+        continue;
+      }
+      const conn = this.getOrCreateConnection(member.address);
+      const out = await conn.joinGroup(zoneName);
+      if (out instanceof Error) {
+        logger.error({ err: out, memberId: member.id, zoneName }, "Sonos joinGroup fehlgeschlagen");
+        throw out;
+      }
     }
   }
 

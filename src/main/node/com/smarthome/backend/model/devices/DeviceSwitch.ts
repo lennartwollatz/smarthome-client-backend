@@ -6,10 +6,31 @@ import { EventSwitchDoublePressed } from "../../server/events/events/EventSwitch
 import { EventSwitchTriplePressed } from "../../server/events/events/EventSwitchTriplePressed.js";
 import { EventSwitchButtonOn } from "../../server/events/events/EventSwitchButtonOn.js";
 import { EventSwitchButtonOff } from "../../server/events/events/EventSwitchButtonOff.js";
-import { EventSwitchLongPressed } from "../../server/events/events/EventSwitchLongPressed.js";
+import { EventSwitchEnergyUsageChanged } from "../../server/events/events/EventSwitchEnergyUsageChanged.js";
+import { EventSwitchEnergyUsageHigher } from "../../server/events/events/EventSwitchEnergyUsageHigher.js";
+
+/**
+ * Interface für EnergyUsage (historische Energieverbrauchsdaten)
+ */
+export interface EnergyUsage {
+  time: number; // Ende des 5-Minuten-Fensters (aktuellster Messzeitpunkt im Slot)
+  value: number; // kWh in diesem 5-Minuten-Slot (Summe der Zusammenfassungen)
+}
+
+/**
+ * Interface für Energy (aktuelle und historische Energieverbrauchsdaten)
+ */
+export interface Energy {
+  now: number; // aktueller Energieverbrauch
+  tt: number; // Energieverbrauch start des Tages bis jetzt
+  wt: number; // Energieverbrauch start der Woche bis jetzt
+  mt: number; // Energieverbrauch Monat bis jetzt
+  yt: number; // Energieverbrauch Jahr bis jetzt
+}
 
 export abstract class DeviceSwitch extends Device {
-  
+    private energyBucketAnchorMs: Record<string, number> = {};
+    private static readonly ENERGY_BUCKET_MS = 5 * 60 * 1000;
 
   public static Button = class Button {
     on: boolean;
@@ -20,6 +41,8 @@ export abstract class DeviceSwitch extends Device {
     name?: string;
     connectedToLight?: boolean;
     brightness?: number;
+    energyUsage: Energy;
+    energyUsages: EnergyUsage[];
 
     constructor(
       on = false,
@@ -39,6 +62,14 @@ export abstract class DeviceSwitch extends Device {
       this.name = name;
       this.connectedToLight = connectedToLight;
       this.brightness = brightness;
+      this.energyUsage = {
+        now: 0,
+        tt: 0,
+        wt: 0,
+        mt: 0,
+        yt: 0,
+      };
+      this.energyUsages = [];
     }
 
     isOn() {
@@ -101,6 +132,8 @@ export abstract class DeviceSwitch extends Device {
   }
 
   abstract updateValues(): Promise<void>;
+
+  abstract delete(): Promise<void>;
 
 
   addButton(buttonId: string) {
@@ -239,16 +272,11 @@ export abstract class DeviceSwitch extends Device {
     button.firstPressTime = currentTime - 2500;
     button.lastPressTime = currentTime;
 
-    if (execute) {
-      await this.executeDoublePress(buttonId);
-    }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventSwitchStatusChanged(this.id, deviceBefore, { ...this }));
       this.eventManager?.triggerEvent(new EventSwitchDoublePressed(this.id, deviceBefore, buttonId));
     }
   }
-
-  protected abstract executeDoublePress(buttonId: string): Promise<void>;
 
   async triplePress(buttonId: string, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
@@ -260,21 +288,149 @@ export abstract class DeviceSwitch extends Device {
     button.firstPressTime = currentTime - 2500;
     button.lastPressTime = currentTime;
 
-    if (execute) {
-      await this.executeTriplePress(buttonId);
-    }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventSwitchStatusChanged(this.id, deviceBefore, { ...this }));
       this.eventManager?.triggerEvent(new EventSwitchTriplePressed(this.id, deviceBefore, buttonId));
     }
   }
 
-  protected abstract executeTriplePress(buttonId: string): Promise<void>;
-
   async setInitialPressed(buttonId: string) {
     const button = this.buttons?.[buttonId];
     if (!button) return;
     button.setInitialPressTime(Date.now());
+  }
+
+  /**
+   * Neuen Messpunkt setzen: `energy` ist die aktuelle Wirkleistung in Watt.
+   * kWh seit dem letzten Array-Zeitpunkt werden berechnet und in 5-Minuten-Slots zusammengefasst
+   * (Merge in das letzte Element, solange das vorletzte Element &lt; 5 Minuten zurückliegt; bei einem Eintrag gilt der Slot-Anker).
+   * @param trigger Ob Events ausgelöst werden sollen
+   */
+  async setEnergyUsage(button:string, energy:number, execute: boolean, trigger: boolean = true) {
+    const deviceBefore = { ...this };
+    const buttonButton = this.buttons[button];
+    if(!buttonButton) {
+      return;
+    }
+    buttonButton.energyUsages ??= [];
+    const usages = buttonButton.energyUsages;
+    const t = Date.now();
+
+    if (usages.length === 0) {
+      usages.push({ time: t, value: 0 });
+      this.energyBucketAnchorMs[button] = t;
+      if (trigger) {
+        this.eventManager?.triggerEvent(new EventSwitchEnergyUsageChanged(this.id, deviceBefore, buttonButton.energyUsage!));
+        this.eventManager?.triggerEvent(new EventSwitchEnergyUsageHigher(this.id, deviceBefore, buttonButton.energyUsage!));
+      }
+      return;
+    }
+
+    const last = usages[usages.length - 1];
+    const intervalStartMs = last.time;
+    const dtMs = t - intervalStartMs;
+    const incrementKwh =
+      dtMs > 0 ? energy * (dtMs / 1000) / 3_600_000 : 0;
+
+    const mergeIntoLast =
+      usages.length >= 2
+        ? t - usages[usages.length - 2].time < DeviceSwitch.ENERGY_BUCKET_MS
+        : t - (this.energyBucketAnchorMs[button] ?? usages[0].time) < DeviceSwitch.ENERGY_BUCKET_MS;
+
+    if (mergeIntoLast) {
+      last.value += incrementKwh;
+      last.time = t;
+    } else {
+      this.energyBucketAnchorMs[button] = t;
+      usages.push({ time: t, value: incrementKwh });
+    }
+
+    if (intervalStartMs < t) {
+      this.applyIncrementalEnergyKwh(button, incrementKwh, intervalStartMs, t);
+    }
+
+    if (trigger) {
+      this.eventManager?.triggerEvent(new EventSwitchEnergyUsageChanged(this.id, deviceBefore, buttonButton.energyUsage!));
+      this.eventManager?.triggerEvent(new EventSwitchEnergyUsageHigher(this.id, deviceBefore, buttonButton.energyUsage!));
+    }
+  }
+
+  /** Wirkung eines Messintervalls auf die Aggregat-Felder (inkl. Periodenwechsel), ohne energyUsages zu lesen. */
+  private applyIncrementalEnergyKwh(button: string, incrementKwh: number, fromMs: number, toMs: number): void {
+    const buttonButton = this.buttons[button];
+    if (!buttonButton?.energyUsage || toMs <= fromMs) {
+      return;
+    }
+    this.resetUsageAccumulatorsIfPeriodAdvanced(button, fromMs, toMs);
+    buttonButton.energyUsage.now = incrementKwh;
+    buttonButton.energyUsage.tt += incrementKwh;
+    buttonButton.energyUsage.wt += incrementKwh;
+    buttonButton.energyUsage.mt += incrementKwh;
+    buttonButton.energyUsage.yt += incrementKwh;
+  }
+
+  private sameLocalDay(aMs: number, bMs: number): boolean {
+    const a = new Date(aMs);
+    const b = new Date(bMs);
+    return (
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
+    );
+  }
+
+  private sameLocalMonth(aMs: number, bMs: number): boolean {
+    const a = new Date(aMs);
+    const b = new Date(bMs);
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+  }
+
+  private sameLocalYear(aMs: number, bMs: number): boolean {
+    return new Date(aMs).getFullYear() === new Date(bMs).getFullYear();
+  }
+
+  /** Montag 00:00 lokale Zeit (für Wochenvergleich). */
+  private startOfLocalWeekMs(tMs: number): number {
+    const d = new Date(tMs);
+    d.setHours(0, 0, 0, 0);
+    const day = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - day);
+    return d.getTime();
+  }
+
+  /**
+   * Wenn der neue Messpunkt in einer neuen Periode liegt, die betroffenen
+   * Akkumulatoren (nur tt / wt / mt / yt) vor dem nächsten Increment zurücksetzen.
+   */
+  private resetUsageAccumulatorsIfPeriodAdvanced(button:string, prevMs: number, lastMs: number): void {
+    if (lastMs <= prevMs) {
+      return;
+    }
+    const buttonButton = this.buttons[button];
+    if(!buttonButton || !buttonButton.energyUsage) {
+      return;
+    }
+    if (!this.sameLocalYear(prevMs, lastMs)) {
+      buttonButton.energyUsage!.yt = 0;
+      buttonButton.energyUsage!.mt = 0;
+      buttonButton.energyUsage!.wt = 0;
+      buttonButton.energyUsage!.tt = 0;
+      return;
+    }
+    if (!this.sameLocalMonth(prevMs, lastMs)) {
+      buttonButton.energyUsage!.mt = 0;
+      buttonButton.energyUsage!.wt = 0;
+      buttonButton.energyUsage!.tt = 0;
+      return;
+    }
+    if (this.startOfLocalWeekMs(prevMs) !== this.startOfLocalWeekMs(lastMs)) {
+      buttonButton.energyUsage!.wt = 0;
+      buttonButton.energyUsage!.tt = 0;
+      return;
+    }
+    if (!this.sameLocalDay(prevMs, lastMs)) {
+      buttonButton.energyUsage!.tt = 0;
+    }
   }
 
 }

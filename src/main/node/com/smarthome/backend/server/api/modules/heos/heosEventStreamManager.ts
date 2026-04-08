@@ -4,9 +4,11 @@ import { HeosDeviceController } from "./heosDeviceController.js";
 import { HeosEvent } from "./heosEvent.js";
 import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
 import { HeosSpeaker } from "./devices/heosSpeaker.js";
-import { HEOSMODULE } from "./heosModule.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
+import { DenonReceiver } from "./denon/devices/denonReceiver.js";
+import { DENONCONFIG } from "./denon/denonModule.js";
+import { DenonSpeaker } from "./denon/devices/denonSpeaker.js";
 
 export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceController, HeosEvent> {
 
@@ -15,19 +17,25 @@ export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceC
   }
 
   protected async startEventStream(callback: (event: HeosEvent) => void): Promise<void> {
-    let devices = this.deviceManager.getDevices();
+    let devices = this.deviceManager.getDevicesForModule(DENONCONFIG.id);
     for (const device of devices) {
-      if (device.moduleId === HEOSMODULE.id && device.type === DeviceType.SPEAKER) {
+      if (device.moduleId === DENONCONFIG.id && device.type === DeviceType.SPEAKER) {
         await this.controller.startEventStream(device as HeosSpeaker, callback);
+      }
+      if (device.moduleId === DENONCONFIG.id && device.type === DeviceType.SPEAKER_RECEIVER) {
+        await this.controller.startEventStream(device as DenonReceiver, callback);
       }
     }
   }
 
   protected async stopEventStream(): Promise<void> {
-    let devices = this.deviceManager.getDevices();
+    let devices = this.deviceManager.getDevicesForModule(DENONCONFIG.id);
     for (const device of devices) {
-      if (device.moduleId === HEOSMODULE.id && device.type === DeviceType.SPEAKER) {
+      if (device.moduleId === DENONCONFIG.id && device.type === DeviceType.SPEAKER) {
         await this.controller.stopEventStream(device as HeosSpeaker);
+      }
+      if (device.moduleId === DENONCONFIG.id && device.type === DeviceType.SPEAKER_RECEIVER) {
+        await this.controller.stopEventStream(device as DenonReceiver);
       }
     }
   }
@@ -37,116 +45,125 @@ export class HeosEventStreamManager extends ModuleEventStreamManager<HeosDeviceC
       return;
     }
 
-    logger.debug("handleEvent: " + JSON.stringify(event.data));
-    
-    // Parse the event data structure
-    const eventData = event.data;
-    switch (eventData.type) {
-      case 'player/volume_changed':
-        if (typeof eventData.value === 'object') {
-          await this.handleVolumeChange(event.deviceid, eventData.value as Record<string, unknown>);
-        }
+    const heos = event.data.heos;
+    if (!heos?.command) {
+      return;
+    }
+
+    const device = this.deviceManager.getDevice(event.deviceid);
+    if (!device || !(device instanceof HeosSpeaker || device instanceof DenonReceiver|| device instanceof DenonSpeaker)) {
+      return;
+    }
+
+    const data = this.parseHeosEventMessage(heos.message as string);
+
+    if( data.pid && data.pid !== device.pid ){
+      return;
+    }
+
+    switch (heos.command) {
+      case "event/player_volume_changed":
+        await this.handleVolumeChange(device, data);
         break;
-      case 'player/state_changed':
-        if (typeof eventData.value === 'object') {
-          await this.handlePlayStateChange(event.deviceid, eventData.value as Record<string, unknown>);
-        }
+      case "event/player_state_changed":
+        await this.handlePlayStateChange(device, data);
         break;
-      case 'player/mute_changed':
-        if (typeof eventData.value === 'object') {
-          await this.handleMuteChange(event.deviceid, eventData.value as Record<string, unknown>);
-        }
+      case "event/player_mute_changed":
+        await this.handleMuteChange(device, data);
+        break;
+      case "event/player_now_playing_progress":
+        //TODO: später hinzufügen.
+        break;
+      case "event/player_now_playing_changed":
+        //TODO: später hinzufügen.
         break;
       default:
-        logger.debug({ deviceId: event.deviceid, eventType: eventData.type }, "Unbehandeltes Event");
+        logger.debug({ deviceId: event.deviceid, command: heos.command }, "Unbehandeltes HEOS-Event");
     }
   }
 
-  private async handleVolumeChange(deviceId: string, eventData: Record<string, unknown>) {
-    try {
-      const device = this.deviceManager.getDevice(deviceId);
-      if (!device || !(device instanceof HeosSpeaker)) {
-        return;
+  /** HEOS liefert `message` als `key=value&…` (ähnlich wie Query-String). */
+  private parseHeosEventMessage(message: string | undefined): Record<string, unknown> {
+    if (!message) {
+      return {};
+    }
+    const out: Record<string, unknown> = {};
+    for (const part of message.split("&")) {
+      if (!part) {
+        continue;
       }
+      const eq = part.indexOf("=");
+      if (eq === -1) {
+        continue;
+      }
+      const key = part.slice(0, eq);
+      const rawVal = part.slice(eq + 1);
+      const decoded = decodeURIComponent(rawVal.replace(/\+/g, " "));
+      const asNum = Number(decoded);
+      const isIntLike = /^-?\d+$/.test(decoded);
+      out[key] = isIntLike && Number.isFinite(asNum) ? asNum : decoded;
+    }
+    return out;
+  }
 
-      const pid = eventData.pid;
-      if (typeof pid === "number" && device.pid === pid) {
-        const level = eventData.level;
-        if (typeof level === "number") {
-          device.setVolume(level, false);
-          this.deviceManager.saveDevice(device);
-          logger.debug({ deviceId, volume: level }, "Volume aktualisiert");
-        }
+  private async handleVolumeChange(device: HeosSpeaker | DenonReceiver | DenonSpeaker, data: Record<string, unknown>) {
+    try {
+      if( data.level && Number(data.level) !== device.volume ){
+        device.setVolume(Number(data.level), false);
+        this.deviceManager.saveDevice(device);
+      }
+      if( data.mute && (data.mute === "on") !== device.muted ){
+        device.setMute(data.mute === "on", false);
+        this.deviceManager.saveDevice(device);
       }
     } catch (err) {
-      logger.error({ err, deviceId }, "Fehler beim Verarbeiten von Volume-Aenderung");
+      logger.error({ err, device }, "Fehler beim Verarbeiten von Volume-Aenderung");
     }
   }
 
-  private async handlePlayStateChange(deviceId: string, eventData: Record<string, unknown>) {
+  private async handlePlayStateChange(device: HeosSpeaker | DenonReceiver | DenonSpeaker, data: Record<string, unknown>) {
     try {
-      const device = this.deviceManager.getDevice(deviceId);
-      if (!device || !(device instanceof HeosSpeaker)) {
-        return;
-      }
 
-      const pid = eventData.pid;
-      if (typeof pid === "number" && device.pid === pid) {
-        const state = eventData.state;
-        if (typeof state === "string") {
-          const mappedState = this.mapPlayState(state);
-          const currentPlayState = device.playState;
-          if (mappedState !== currentPlayState) {
-            switch(mappedState) {
-              case DeviceSpeaker.PlayState.PLAY:
-                device.play(false);
-                break;
-              case DeviceSpeaker.PlayState.PAUSE:
-                device.pause(false);
-                break;
-              default:
-                device.stop(false);
-                break;
+      if( data.state ){
+        switch(data.state){
+          case "play":
+            if( device.playState !== DeviceSpeaker.PlayState.PLAY ){
+              device.play(false);
+              this.deviceManager.saveDevice(device);
             }
-            this.deviceManager.saveDevice(device);
-            logger.debug({ deviceId, playState: mappedState, originalState: state }, "PlayState aktualisiert");
-          }
+            break;
+          case "pause":
+            if( device.playState !== DeviceSpeaker.PlayState.PAUSE ){
+              device.pause(false);
+              this.deviceManager.saveDevice(device);
+            }
+            break;
+          case "stop":
+            if( device.playState !== DeviceSpeaker.PlayState.STOP ){
+              device.stop(false);
+              this.deviceManager.saveDevice(device);
+            }
+            break;
         }
       }
     } catch (err) {
-      logger.error({ err, deviceId }, "Fehler beim Verarbeiten von PlayState-Aenderung");
+      logger.error({ err, device }, "Fehler beim Verarbeiten von PlayState-Aenderung");
     }
   }
 
-  private async handleMuteChange(deviceId: string, eventData: Record<string, unknown>) {
+  private async handleMuteChange(device: HeosSpeaker | DenonReceiver | DenonSpeaker, data: Record<string, unknown>) {
     try {
-      const device = this.deviceManager.getDevice(deviceId);
-      if (!device || !(device instanceof HeosSpeaker)) {
-        return;
-      }
 
-      const pid = eventData.pid;
-      if (typeof pid === "number" && device.pid === pid) {
-        const mute = eventData.mute;
-        if (typeof mute === "string") {
-          const isMuted = mute === "on";
-          device.setMute(isMuted, false);
-          this.deviceManager.saveDevice(device);
-          logger.debug({ deviceId, muted: isMuted }, "Mute aktualisiert");
-        }
+      if( data.level && Number(data.level) !== device.volume ){
+        device.setVolume(Number(data.level), false);
+        this.deviceManager.saveDevice(device);
+      }
+      if( data.mute && (data.mute === "on") !== device.muted ){
+        device.setMute(data.mute === "on", false);
+        this.deviceManager.saveDevice(device);
       }
     } catch (err) {
-      logger.error({ err, deviceId }, "Fehler beim Verarbeiten von Mute-Aenderung");
-    }
-  }
-
-  private mapPlayState(state: string): string {
-    if (state === "play") {
-      return DeviceSpeaker.PlayState.PLAY;
-    } else if (state === "pause") {
-      return DeviceSpeaker.PlayState.PAUSE;
-    } else {
-      return DeviceSpeaker.PlayState.STOP;
+      logger.error({ err, device }, "Fehler beim Verarbeiten von Mute-Aenderung");
     }
   }
 }

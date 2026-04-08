@@ -1,11 +1,11 @@
 import { MatterEvent } from "./matterEvent.js";
 import { Device } from "../../../../model/devices/Device.js";
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
-import { MatterDevice } from "./devices/matterDevice.js";
+import { MatterDevice, MatterDeviceButtoned, MatterDeviceTemperture } from "./devices/matterDevice.js";
 
-import { Environment, Logger, StorageService, serialize } from "@matter/main";
+import { Environment, Logger, LogLevel, StorageService } from "@matter/main";
 import { OnOffClient } from "@matter/main/behaviors/on-off";
-import { GeneralCommissioning } from "@matter/main/clusters";
+import { GeneralCommissioning, LevelControl, OnOff, TemperatureMeasurement, Thermostat } from "@matter/main/clusters";
 import { ManualPairingCodeCodec, NodeId } from "@matter/main/types";
 import { CommissioningController, NodeCommissioningOptions } from "@project-chip/matter.js";
 import { PairedNode } from "@project-chip/matter.js/device";
@@ -20,6 +20,8 @@ import { TemperatureSchedule, TemperatureScheduleTimeRange } from "../../../../m
 import { ThermostatClient } from "@matter/main/behaviors/thermostat";
 
 const logger = Logger.get("MatterDeviceController");
+/** Matter.js-Stack (CommissioningController, Protokoll, …): INFO/DEBUG sonst sehr gesprächig */
+Logger.level = LogLevel.NOTICE;
 const environment = Environment.default;
 const storageService = environment.get(StorageService);
 const environmentId = "1668012345678";
@@ -31,6 +33,10 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   private commissioningControllerStarted = false;
   /** Mutex: Verhindert Race Conditions bei parallelen Aufrufen von getCommissioningController */
   private initControllerPromise: Promise<CommissioningController | null> | null = null;
+  /** Pro Gerät: Abmeldung vom Matter-Observable (verhindert doppelte Callbacks bei erneutem startEventStream) */
+  private matterAttributeStreamDisposers = new Map<string, () => void>();
+  /** Gemeinsamer Stream-Callback (ModuleEventStreamManager); für lokale Kommandos ohne Device-Report */
+  private matterAttributeStreamCallback: ((event: MatterEvent) => void) | null = null;
 
   constructor(databaseManager: DatabaseManager) {
     super();
@@ -91,9 +97,9 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     return devices;
   }
 
-  private getDeviceInfo(vendorProduct: string): { vendorId: number, productId: number } {
+  private getDeviceInfo(vendorProduct: string): { vendorId: string, productId: string } {
     const [vendorId, productId] = vendorProduct.split("+");
-    return { vendorId: parseInt(vendorId), productId: parseInt(productId) };
+    return { vendorId: vendorId, productId: productId };
   }
 
   async pairDevice(device: MatterDeviceDiscovered, payload: PairingPayload): Promise<MatterDeviceDiscovered | null> {
@@ -219,6 +225,43 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     }
   }
 
+  async updateOnOffValues(device: MatterDeviceButtoned) {
+    const node = await this.getNode(NodeId(device.getNodeId()));
+    if( !node) return;
+    for( const buttonId of Object.keys(device.buttons)) {
+      const button = node.parts.get(Number(buttonId));
+      if( !button) return;
+      const onOffState = button.stateOf(OnOffClient);
+      if (onOffState !== undefined) {
+          device.buttons[buttonId].on = onOffState.onOff;
+      }
+    }
+  }
+
+  async updateLevelValues(device: MatterDeviceButtoned) {
+    const node = await this.getNode(NodeId(device.getNodeId()));
+    if( !node) return;
+    for( const buttonId of Object.keys(device.buttons)) {
+      const button = node.parts.get(Number(buttonId));
+      if( !button) return;
+      const levelState = button.stateOf(LevelControlClient);
+      if (levelState !== undefined) {
+          const matterLevel = this.mapIntensityMatterLevelToPercent(levelState.currentLevel ?? 0, levelState);
+          device.buttons[buttonId].brightness = matterLevel;
+      } 
+    }
+  }
+
+  async updateTemperatureValues(device: MatterDeviceTemperture) {
+    const state = await this.getThermostatState(device);
+    device.temperature = (state.localTemperature ?? 0) / 100;
+  }
+
+  async updateTemperatureGoalValues(device: MatterDeviceTemperture) {
+    const state = await this.getThermostatState(device);
+    device.temperatureGoal = (state.occupiedHeatingSetpoint ?? 0) / 100;
+  }
+
   async toggleSwitch(device: MatterDevice, buttonId: string) {
     const node = await this.getNode(NodeId(device.getNodeId()));
     if( !node) return;
@@ -227,7 +270,11 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     const onOffState = button.stateOf(OnOffClient);
     if (onOffState !== undefined) {
         const onOffCommands = button.commandsOf(OnOffClient);
-        onOffCommands.toggle();
+        if (onOffState.onOff) {
+          onOffCommands.off();
+        } else {
+          onOffCommands.on();
+        }
     }
   }
 
@@ -263,8 +310,84 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     const levelState = button.stateOf(LevelControlClient);
     if (levelState !== undefined) {
         const levelCommands = button.commandsOf(LevelControlClient);
-        levelCommands.moveToLevelWithOnOff({level: intensity, transitionTime: 0, optionsMask: { executeIfOff: false, coupleColorTempToLevel: false }, optionsOverride: { executeIfOff: false, coupleColorTempToLevel: false }});
-    } 
+        const matterLevel = this.mapIntensityPercentToMatterLevel(intensity, levelState);
+        const result = levelCommands.moveToLevelWithOnOff({
+          level: matterLevel,
+          transitionTime: 0,
+          optionsMask: { executeIfOff: true, coupleColorTempToLevel: false },
+          optionsOverride: { executeIfOff: true, coupleColorTempToLevel: false },
+        });
+        await Promise.resolve(result);
+        /** Viele Geräte/Matter-Stacks melden nach einem lokalen Invoke kein Subscription-Update → Stream trotzdem feuern */
+        this.emitLocalCurrentLevelAttribute(device, buttonId, matterLevel);
+    }
+  }
+
+  /**
+   * Löst denselben Stream-Pfad aus wie ein echter currentLevel-Report (nach lokalem setIntensity).
+   */
+  private emitLocalCurrentLevelAttribute(device: MatterDevice, buttonId: string, matterLevel: number): void {
+    const cb = this.matterAttributeStreamCallback;
+    if (!cb) return;
+    const deviceId = (device as unknown as Device).id;
+    try {
+      cb({
+        nodeId: device.getNodeId(),
+        deviceId,
+        event: LevelControl.Complete.id,
+        payload: {
+          path: {
+            endpointId: Number(buttonId),
+            clusterId: LevelControl.Complete.id,
+            attributeId: LevelControl.Complete.attributes.currentLevel.id,
+            attributeName: "currentLevel",
+          },
+          value: matterLevel,
+          version: 0,
+        } as MatterEvent["payload"],
+        buttonId: Number(buttonId),
+      });
+    } catch (err) {
+      logger.warn({ err, deviceId }, "Lokaler Matter currentLevel-Stream-Callback fehlgeschlagen");
+    }
+  }
+
+  /**
+   * Matter Level-Control: minLevel/maxLevel aus dem State, sonst typische Lampen-Defaults (1…254).
+   */
+  private resolveLevelControlMinMax(levelState: object): { minLevel: number; maxLevel: number } {
+    const s = levelState as { minLevel?: number | null; maxLevel?: number | null };
+    const minLevel =
+      typeof s.minLevel === "number" && s.minLevel >= 0 ? s.minLevel : 1;
+    const maxLevel =
+      typeof s.maxLevel === "number" && s.maxLevel >= minLevel ? s.maxLevel : 0xfe;
+    return { minLevel, maxLevel };
+  }
+
+  /**
+   * Mappt Helligkeit 0–100 (Gerätemodell) auf Matter Level-Control ({@link LevelControlClient} minLevel…maxLevel).
+   */
+  private mapIntensityPercentToMatterLevel(percent: number, levelState: object): number {
+    const { minLevel, maxLevel } = this.resolveLevelControlMinMax(levelState);
+    const p = Math.max(0, Math.min(100, percent));
+    if (maxLevel <= minLevel) {
+      return minLevel;
+    }
+    const mapped = minLevel + (p / 100) * (maxLevel - minLevel);
+    return Math.round(Math.max(minLevel, Math.min(maxLevel, mapped)));
+  }
+
+  /**
+   * Inverse Abbildung: Matter-currentLevel → 0–100 anhand derselben minLevel/maxLevel-Spanne.
+   */
+  mapIntensityMatterLevelToPercent(level: number, levelState: object): number {
+    const { minLevel, maxLevel } = this.resolveLevelControlMinMax(levelState);
+    if (maxLevel <= minLevel) {
+      return 0;
+    }
+    const clamped = Math.max(minLevel, Math.min(maxLevel, level));
+    const percent = ((clamped - minLevel) / (maxLevel - minLevel)) * 100;
+    return Math.round(Math.max(0, Math.min(100, percent)));
   }
 
   /**
@@ -276,7 +399,6 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   private clampHeatSetpoint(thermostatState: unknown, temperatureCelsius: number): number {
     const heatSetpoint = Math.round(temperatureCelsius * 100);
     const state = thermostatState as unknown as Record<string, number | undefined>;
-    console.log(state);
     const minLimit = (state.absMinHeatSetpointLimit && state.absMinHeatSetpointLimit > 0) ? state.absMinHeatSetpointLimit ?? 1000 : 1000;  // 10°C
     const maxLimit = (state.absMaxHeatSetpointLimit && state.absMaxHeatSetpointLimit > 0) ? state.absMaxHeatSetpointLimit ?? 3000 : 3000;  // 30°C
     return Math.max(minLimit, Math.min(maxLimit, heatSetpoint));
@@ -420,6 +542,30 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     }
   }
 
+  /** Matter-Geräte antworten mit InvalidAction, wenn z. B. ein optionales Attribut nicht existiert oder eine Subscription ungültig ist. */
+  private async matterSafeSubscribe(context: string, op: () => unknown): Promise<void> {
+    try {
+      await Promise.resolve(op());
+    } catch (err) {
+      logger.warn(
+        { err, context },
+        "Matter Subscribe abgelehnt (Attribut evtl. nicht unterstuetzt oder Geraet lehnt Anfrage ab)"
+      );
+    }
+  }
+
+  private matterStreamPayload(
+    endpointId: number,
+    clusterId: number,
+    attributeName: string,
+    value: unknown
+  ): MatterEvent["payload"] {
+    return {
+      path: { endpointId, clusterId, attributeName },
+      value,
+    } as MatterEvent["payload"];
+  }
+
   public async startEventStream(device: Device, callback: (event: MatterEvent) => void): Promise<void> {
     const matterDevice = device as unknown as MatterDevice;
     if (typeof matterDevice.getNodeId !== "function") {
@@ -430,24 +576,116 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
       return;
     }
     const node = await this.getNode(NodeId(matterDevice.getNodeId()));
-    if( !node) return;
-    node.events.eventTriggered.on(({ path: { nodeId, clusterId, endpointId, eventName }, events }) => {
-      console.log(
-          `eventTriggeredCallback ${nodeId}: Event ${eventName} triggered with ${serialize(
-              events,
-          )}`
-      );
-      for(const event of events) {
-        callback({ nodeId: String(nodeId), deviceId: device.id, event: eventName, name: eventName, payload: event })
+    if (!node) return;
+
+    this.matterAttributeStreamCallback = callback;
+
+    try {
+      await node.reconnect();
+    } catch (err) {
+      logger.warn({ err, deviceId: device.id }, "Matter reconnect fuer EventStream fehlgeschlagen");
+      return;
+    }
+
+    const devices = node.getDevices();
+    for (const d of devices) {
+      const onoffClient = d.getClusterClient(OnOff.Complete);
+      if (onoffClient) {
+        const ep = onoffClient.endpointId;
+        await this.matterSafeSubscribe(`OnOff/onOff device=${device.id} ep=${ep}`, () =>
+          onoffClient.subscribeOnOffAttribute((value: unknown) => {
+            callback({
+              nodeId: matterDevice.getNodeId(),
+              deviceId: device.id,
+              event: OnOff.Complete.id,
+              buttonId: ep,
+              payload: this.matterStreamPayload(ep, OnOff.Complete.id, "onOff", value),
+            });
+          }, 0, 2)
+        );
       }
-    });
+
+      const levelControlClient = d.getClusterClient(LevelControl.Complete);
+      if (levelControlClient) {
+        const ep = levelControlClient.endpointId;
+        await this.matterSafeSubscribe(`LevelControl/currentLevel device=${device.id} ep=${ep}`, () =>
+          levelControlClient.subscribeCurrentLevelAttribute((value: unknown) => {
+            callback({
+              nodeId: matterDevice.getNodeId(),
+              deviceId: device.id,
+              event: LevelControl.Complete.id,
+              buttonId: ep,
+              payload: this.matterStreamPayload(ep, LevelControl.Complete.id, "currentLevel", value),
+            });
+          }, 0, 2)
+        );
+      }
+
+      const thermostatClient = d.getClusterClient(Thermostat.Complete);
+      if (thermostatClient) {
+        const ep = thermostatClient.endpointId;
+        const cid = Thermostat.Complete.id;
+        await this.matterSafeSubscribe(`Thermostat/localTemperature device=${device.id}`, () =>
+          thermostatClient.subscribeLocalTemperatureAttribute((value: unknown) => {
+            callback({
+              nodeId: matterDevice.getNodeId(),
+              deviceId: device.id,
+              event: cid,
+              buttonId: 0,
+              payload: this.matterStreamPayload(ep, cid, "localTemperature", value),
+            });
+          }, 0, 2)
+        );
+        await this.matterSafeSubscribe(`Thermostat/occupiedHeatingSetpoint device=${device.id}`, () =>
+          thermostatClient.subscribeOccupiedHeatingSetpointAttribute((value: unknown) => {
+            callback({
+              nodeId: matterDevice.getNodeId(),
+              deviceId: device.id,
+              event: cid,
+              buttonId: 6,
+              payload: this.matterStreamPayload(ep, cid, "occupiedHeatingSetpoint", value),
+            });
+          }, 0, 2)
+        );
+      }
+
+      const temperatureMeasurement = d.getClusterClient(TemperatureMeasurement.Complete);
+      if (temperatureMeasurement) {
+        const ep = temperatureMeasurement.endpointId;
+        const cid = TemperatureMeasurement.Complete.id;
+        await this.matterSafeSubscribe(`TemperatureMeasurement/measuredValue device=${device.id}`, () =>
+          temperatureMeasurement.subscribeMeasuredValueAttribute((value: unknown) => {
+            callback({
+              nodeId: matterDevice.getNodeId(),
+              deviceId: device.id,
+              event: cid,
+              buttonId: 0,
+              payload: this.matterStreamPayload(ep, cid, "measuredValue", value),
+            });
+          }, 0, 2)
+        );
+      }
+    }
+  }
+
+  private clearMatterAttributeStreamForDevice(deviceId: string): void {
+    const dispose = this.matterAttributeStreamDisposers.get(deviceId);
+    if (dispose) {
+      dispose();
+      this.matterAttributeStreamDisposers.delete(deviceId);
+    }
   }
 
   public async stopEventStream(device: Device): Promise<void> {
-    
+    this.clearMatterAttributeStreamForDevice(device.id);
   }
 
   async shutdown() {
+    this.matterAttributeStreamCallback = null;
+    for (const dispose of this.matterAttributeStreamDisposers.values()) {
+      dispose();
+    }
+    this.matterAttributeStreamDisposers.clear();
     const controller = this.commissioningController;
     if (controller && controller.isCommissioned()) {
       controller?.close();
@@ -521,30 +759,10 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     try {
       await commissioningController.start();
     } catch (err) {
-      console.error("Error starting commissioning controller:", err);
+      logger.error({ err }, "CommissioningController konnte nicht gestartet werden");
       this.initControllerPromise = null; // Ermöglicht erneuten Versuch
       return null;
     }
-
-    /** Alle Geräte aus der Fabric entfernen (decommissionieren) */
-    /*
-    try {
-      const commissionedNodes = commissioningController.getCommissionedNodes();
-      for (const nodeId of commissionedNodes) {
-        try {
-          const node = await commissioningController.getNode(nodeId);
-          if (node) {
-            await node.decommission();
-            logger.info({ nodeId: String(nodeId) }, "Gerät aus Fabric entfernt");
-          }
-        } catch (nodeErr) {
-          logger.warn({ nodeId: String(nodeId), err: nodeErr }, "Gerät konnte nicht aus Fabric entfernt werden");
-        }
-      }
-    } catch (err) {
-      logger.warn(err, "Fehler beim Entfernen der Fabric-Geräte");
-    }
-      */
 
     this.commissioningControllerStarted = true;
 

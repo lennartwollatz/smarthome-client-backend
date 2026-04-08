@@ -23,6 +23,7 @@ export abstract class DeviceTemperature extends Device {
 
   abstract updateValues(): Promise<void>;
 
+
   isTemperatureEquals(temperature: number): boolean {
     return (this.temperature ?? 0) === temperature;
   }
@@ -38,9 +39,6 @@ export abstract class DeviceTemperature extends Device {
     const deviceBefore = { ...this };
     this.temperature = temperature;
     this.addTemperatureToHistory(temperature);
-    if (execute) {
-      await this.executeSetTemperature(temperature);
-    }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventTemperatureChanged(this.id, deviceBefore, temperature));
       this.eventManager?.triggerEvent(new EventTemperatureEquals(this.id, deviceBefore, temperature));
@@ -48,8 +46,6 @@ export abstract class DeviceTemperature extends Device {
       this.eventManager?.triggerEvent(new EventTemperatureGreater(this.id, deviceBefore, temperature));
     }
   }
-
-  protected abstract executeSetTemperature(temperature: number): Promise<void>;
 
   protected addTemperatureToHistory(temperature: number, temperatureGoal: number = -999) {
     this.temperatureHistory.push({

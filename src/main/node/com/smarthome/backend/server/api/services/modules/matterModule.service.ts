@@ -18,6 +18,22 @@ export function createMatterModuleRouter(deps: ServerDeps) {
     }
   });
 
+  /** Virtueller Matter-On/Off-Schalter dieses Servers (QR/Code wie Nutzer-Anwesenheitsgerät). */
+  router.post("/devices/virtual-host-switch", async (req, res) => {
+    try {
+      const name = typeof req.body?.name === "string" ? req.body.name : "";
+      const result = await matterModule.createMatterHostSwitch(name);
+      if (!result) {
+        res.status(500).json({ success: false, error: "Virtuelles Matter-Geraet konnte nicht erstellt werden" });
+        return;
+      }
+      res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      logger.error({ error }, "Matter virtueller Host-Schalter");
+      res.status(400).json({ error: "Invalid request" });
+    }
+  });
+
   router.post("/devices/:deviceId/pair", async (req, res) => {
     try {
       const result = await matterModule.pairDevice(req.params.deviceId, req.body ?? {});
