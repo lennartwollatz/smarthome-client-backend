@@ -64,11 +64,14 @@ require_cmd() {
 save_state() {
   cat > "$STATE_FILE" <<EOF
 PI_USER=${PI_USER}
-REPO_URL=${REPO_URL}
-GIT_BRANCH=${GIT_BRANCH}
+BACKEND_REPO_URL=${BACKEND_REPO_URL}
+FRONTEND_REPO_URL=${FRONTEND_REPO_URL}
+BACKEND_BRANCH=${BACKEND_BRANCH}
+FRONTEND_BRANCH=${FRONTEND_BRANCH}
 DYNDNS_DOMAIN=${DYNDNS_DOMAIN}
 CERTBOT_EMAIL=${CERTBOT_EMAIL}
-WEBHOOK_SECRET=${WEBHOOK_SECRET}
+WEBHOOK_SECRET_BACKEND=${WEBHOOK_SECRET_BACKEND}
+WEBHOOK_SECRET_FRONTEND=${WEBHOOK_SECRET_FRONTEND}
 EOF
   chmod 600 "$STATE_FILE"
 }
@@ -114,31 +117,41 @@ confirm_or_exit() {
 prompt_parameters() {
   info "Parameterabfrage"
   echo "Hinweise:"
-  echo "- REPO_URL findest du in GitHub unter: Repository > Code > HTTPS"
+  echo "- BACKEND_REPO_URL findest du in GitHub unter: Backend-Repo > Code > HTTPS"
+  echo "- FRONTEND_REPO_URL findest du in GitHub unter: Frontend-Repo > Code > HTTPS"
   echo "- DYNDNS_DOMAIN erstellst du bei noip.com unter Dynamic DNS > Create Hostname"
   echo "- CERTBOT_EMAIL ist deine E-Mail fuer Zertifikatsablauf-Hinweise"
   echo
 
   PI_USER="${PI_USER:-$(whoami)}"
   read_with_default PI_USER "Linux-Benutzer auf dem Pi" "$PI_USER"
-  read_with_default REPO_URL "Git Repository URL (HTTPS)" "https://github.com/<user>/<repo>.git"
-  read_with_default GIT_BRANCH "Git Branch fuer Deploy" "main"
+  read_with_default BACKEND_REPO_URL "Backend Repository URL (HTTPS/SSH)" "https://github.com/<user>/<backend-repo>.git"
+  read_with_default FRONTEND_REPO_URL "Frontend Repository URL (HTTPS/SSH)" "https://github.com/<user>/<frontend-repo>.git"
+  read_with_default BACKEND_BRANCH "Backend Branch fuer Deploy" "main"
+  read_with_default FRONTEND_BRANCH "Frontend Branch fuer Deploy" "main"
   read_with_default DYNDNS_DOMAIN "DynDNS Domain" "mein-smarthome.ddns.net"
   read_with_default CERTBOT_EMAIL "E-Mail fuer Certbot" "admin@example.com"
 
-  if [ -z "${WEBHOOK_SECRET:-}" ]; then
-    WEBHOOK_SECRET="$(openssl rand -hex 32)"
-    info "Webhook Secret automatisch erzeugt."
+  if [ -z "${WEBHOOK_SECRET_BACKEND:-}" ]; then
+    WEBHOOK_SECRET_BACKEND="$(openssl rand -hex 32)"
+    info "Webhook Secret fuer Backend automatisch erzeugt."
+  fi
+  if [ -z "${WEBHOOK_SECRET_FRONTEND:-}" ]; then
+    WEBHOOK_SECRET_FRONTEND="$(openssl rand -hex 32)"
+    info "Webhook Secret fuer Frontend automatisch erzeugt."
   fi
 
   echo
   echo "Verwendete Parameter:"
-  echo "- PI_USER        : $PI_USER"
-  echo "- REPO_URL       : $REPO_URL"
-  echo "- GIT_BRANCH     : $GIT_BRANCH"
-  echo "- DYNDNS_DOMAIN  : $DYNDNS_DOMAIN"
-  echo "- CERTBOT_EMAIL  : $CERTBOT_EMAIL"
-  echo "- WEBHOOK_SECRET : $WEBHOOK_SECRET"
+  echo "- PI_USER                : $PI_USER"
+  echo "- BACKEND_REPO_URL       : $BACKEND_REPO_URL"
+  echo "- FRONTEND_REPO_URL      : $FRONTEND_REPO_URL"
+  echo "- BACKEND_BRANCH         : $BACKEND_BRANCH"
+  echo "- FRONTEND_BRANCH        : $FRONTEND_BRANCH"
+  echo "- DYNDNS_DOMAIN          : $DYNDNS_DOMAIN"
+  echo "- CERTBOT_EMAIL          : $CERTBOT_EMAIL"
+  echo "- WEBHOOK_SECRET_BACKEND : $WEBHOOK_SECRET_BACKEND"
+  echo "- WEBHOOK_SECRET_FRONTEND: $WEBHOOK_SECRET_FRONTEND"
   echo
 
   confirm_or_exit
@@ -175,21 +188,33 @@ phase2_node_install() {
   npm -v
 }
 
-phase3_clone_repo() {
-  info "Phase 3: Repository klonen/aktualisieren"
-  mkdir -p "$HOME/smarthome"
-  cd "$HOME/smarthome"
+clone_or_update_repo() {
+  local target_dir="$1"
+  local repo_url="$2"
+  local branch="$3"
 
-  if [ -d .git ]; then
-    info "Git-Repo bereits vorhanden, aktualisiere Remote + Pull"
+  mkdir -p "$target_dir"
+  if [ -d "$target_dir/.git" ]; then
+    info "Aktualisiere Repo in $target_dir"
+    cd "$target_dir"
     git remote remove origin >/dev/null 2>&1 || true
-    git remote add origin "$REPO_URL"
-    git fetch origin "$GIT_BRANCH"
-    git checkout -B "$GIT_BRANCH" "origin/$GIT_BRANCH"
+    git remote add origin "$repo_url"
+    git fetch origin "$branch"
+    git checkout -B "$branch" "origin/$branch"
   else
-    git clone "$REPO_URL" .
-    git checkout "$GIT_BRANCH" || true
+    info "Klone Repo nach $target_dir"
+    rm -rf "$target_dir"
+    git clone "$repo_url" "$target_dir"
+    cd "$target_dir"
+    git checkout "$branch" || true
   fi
+}
+
+phase3_clone_repo() {
+  info "Phase 3: Repositories klonen/aktualisieren (Backend + Frontend)"
+  mkdir -p "$HOME/smarthome"
+  clone_or_update_repo "$HOME/smarthome/smarthome-client-backend" "$BACKEND_REPO_URL" "$BACKEND_BRANCH"
+  clone_or_update_repo "$HOME/smarthome/smarthome-client-frontend" "$FRONTEND_REPO_URL" "$FRONTEND_BRANCH"
 }
 
 patch_backend_localhost_bind() {
@@ -422,26 +447,33 @@ LOGFILE="/var/log/smarthome-deploy.log"
 exec >> "\$LOGFILE" 2>&1
 echo "========== Deploy gestartet: \$(date) =========="
 
-cd "$HOME/smarthome"
+echo "[1/7] Backend: Git pull..."
+cd "$HOME/smarthome/smarthome-client-backend"
+git fetch origin "$BACKEND_BRANCH"
+git checkout "$BACKEND_BRANCH"
+git pull --ff-only origin "$BACKEND_BRANCH"
 
-echo "[1/6] Git pull..."
-git pull --ff-only origin "$GIT_BRANCH"
+echo "[2/7] Frontend: Git pull..."
+cd "$HOME/smarthome/smarthome-client-frontend"
+git fetch origin "$FRONTEND_BRANCH"
+git checkout "$FRONTEND_BRANCH"
+git pull --ff-only origin "$FRONTEND_BRANCH"
 
-echo "[2/6] Backend: npm install..."
+echo "[3/7] Backend: npm install..."
 cd "$HOME/smarthome/smarthome-client-backend/src/main/node"
 npm install --loglevel=error
 
-echo "[3/6] Backend: TypeScript kompilieren..."
+echo "[4/7] Backend: TypeScript kompilieren..."
 npm run build
 
-echo "[4/6] Backend: PM2 neustarten..."
+echo "[5/7] Backend: PM2 neustarten..."
 pm2 restart smarthome-backend
 
-echo "[5/6] Frontend: npm install..."
+echo "[6/7] Frontend: npm install..."
 cd "$HOME/smarthome/smarthome-client-frontend"
 npm install --loglevel=error
 
-echo "[6/6] Frontend: Angular Build..."
+echo "[7/7] Frontend: Angular Build..."
 npx ng build --configuration production --progress=false
 
 echo "========== Deploy abgeschlossen: \$(date) =========="
@@ -458,7 +490,7 @@ write_webhook_files() {
   cat > "$HOME/webhook/hooks.json" <<EOF
 [
   {
-    "id": "deploy-smarthome",
+    "id": "deploy-smarthome-backend",
     "execute-command": "/home/${PI_USER}/smarthome/deploy.sh",
     "command-working-directory": "/home/${PI_USER}/smarthome",
     "pass-arguments-to-command": [],
@@ -467,7 +499,7 @@ write_webhook_files() {
         {
           "match": {
             "type": "payload-hmac-sha256",
-            "secret": "${WEBHOOK_SECRET}",
+            "secret": "${WEBHOOK_SECRET_BACKEND}",
             "parameter": {
               "source": "header",
               "name": "X-Hub-Signature-256"
@@ -477,7 +509,37 @@ write_webhook_files() {
         {
           "match": {
             "type": "value",
-            "value": "refs/heads/${GIT_BRANCH}",
+            "value": "refs/heads/${BACKEND_BRANCH}",
+            "parameter": {
+              "source": "payload",
+              "name": "ref"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "deploy-smarthome-frontend",
+    "execute-command": "/home/${PI_USER}/smarthome/deploy.sh",
+    "command-working-directory": "/home/${PI_USER}/smarthome",
+    "pass-arguments-to-command": [],
+    "trigger-rule": {
+      "and": [
+        {
+          "match": {
+            "type": "payload-hmac-sha256",
+            "secret": "${WEBHOOK_SECRET_FRONTEND}",
+            "parameter": {
+              "source": "header",
+              "name": "X-Hub-Signature-256"
+            }
+          }
+        },
+        {
+          "match": {
+            "type": "value",
+            "value": "refs/heads/${FRONTEND_BRANCH}",
             "parameter": {
               "source": "payload",
               "name": "ref"
@@ -576,12 +638,8 @@ append_cron_if_missing() {
 
 phase9_cicd() {
   info "Phase 9: CI/CD"
-  cd "$HOME/smarthome"
-  git init
-  git remote remove origin >/dev/null 2>&1 || true
-  git remote add origin "$REPO_URL"
-  git fetch origin "$GIT_BRANCH"
-  git checkout -B "$GIT_BRANCH" "origin/$GIT_BRANCH"
+  clone_or_update_repo "$HOME/smarthome/smarthome-client-backend" "$BACKEND_REPO_URL" "$BACKEND_BRANCH"
+  clone_or_update_repo "$HOME/smarthome/smarthome-client-frontend" "$FRONTEND_REPO_URL" "$FRONTEND_BRANCH"
 
   write_deploy_script
 
@@ -604,10 +662,16 @@ phase9_cicd() {
 
   echo
   echo "GitHub Webhook Parameter (fuer manuelle Einrichtung):"
-  echo "- URL    : https://${DYNDNS_DOMAIN}/hooks/deploy-smarthome"
-  echo "- Secret : ${WEBHOOK_SECRET}"
-  echo "- Event  : Just the push event"
-  echo "- Branch : ${GIT_BRANCH}"
+  echo "- Backend Repo:"
+  echo "  URL    : https://${DYNDNS_DOMAIN}/hooks/deploy-smarthome-backend"
+  echo "  Secret : ${WEBHOOK_SECRET_BACKEND}"
+  echo "  Event  : Just the push event"
+  echo "  Branch : ${BACKEND_BRANCH}"
+  echo "- Frontend Repo:"
+  echo "  URL    : https://${DYNDNS_DOMAIN}/hooks/deploy-smarthome-frontend"
+  echo "  Secret : ${WEBHOOK_SECRET_FRONTEND}"
+  echo "  Event  : Just the push event"
+  echo "  Branch : ${FRONTEND_BRANCH}"
 }
 
 phase10_hardening() {
@@ -692,7 +756,7 @@ manual_checkpoints() {
 
   pause_for_user "Fritzbox konfigurieren:\n1) Internet > Freigaben > DynDNS (No-IP Daten eintragen)\n2) Portfreigaben: 443/TCP und 80/TCP auf den Pi\n3) Danach DNS pruefen: dig +short ${DYNDNS_DOMAIN}"
 
-  pause_for_user "GitHub Webhook manuell anlegen:\nRepo > Settings > Webhooks > Add webhook\nURL: https://${DYNDNS_DOMAIN}/hooks/deploy-smarthome\nSecret: ${WEBHOOK_SECRET}\nContent type: application/json\nEvent: Just the push event"
+  pause_for_user "GitHub Webhooks manuell anlegen:\n1) Backend-Repo > Settings > Webhooks > Add webhook\n   URL: https://${DYNDNS_DOMAIN}/hooks/deploy-smarthome-backend\n   Secret: ${WEBHOOK_SECRET_BACKEND}\n   Event: Just the push event\n2) Frontend-Repo > Settings > Webhooks > Add webhook\n   URL: https://${DYNDNS_DOMAIN}/hooks/deploy-smarthome-frontend\n   Secret: ${WEBHOOK_SECRET_FRONTEND}\n   Event: Just the push event"
 }
 
 print_summary() {
@@ -704,8 +768,10 @@ print_summary() {
   echo
   echo "Wichtige Werte:"
   echo "- DynDNS Domain : $DYNDNS_DOMAIN"
-  echo "- Webhook URL   : https://$DYNDNS_DOMAIN/hooks/deploy-smarthome"
-  echo "- Webhook Secret: $WEBHOOK_SECRET"
+  echo "- Backend Webhook URL    : https://$DYNDNS_DOMAIN/hooks/deploy-smarthome-backend"
+  echo "- Backend Webhook Secret : $WEBHOOK_SECRET_BACKEND"
+  echo "- Frontend Webhook URL   : https://$DYNDNS_DOMAIN/hooks/deploy-smarthome-frontend"
+  echo "- Frontend Webhook Secret: $WEBHOOK_SECRET_FRONTEND"
   echo
   echo "Empfohlene Checks:"
   echo "- pm2 status"
