@@ -12,6 +12,7 @@ import { DeviceManager } from "./server/api/entities/devices/deviceManager.js";
 import { DataCollector } from "./server/ml/dataCollector.js";
 
 const port = Number(process.env.PORT ?? 4040);
+const host = process.env.HOST ?? "127.0.0.1";
 const dbPath = process.env.DB_URL ?? "data/smarthomeNew.sqlite";
 const mlDbPath = process.env.ML_DB_URL ?? "data/ml.sqlite";
 
@@ -32,6 +33,6 @@ const httpServer = createServer({
   databaseManager, eventManager, floorplanManager, settingManager, sceneManager, deviceManager, userManager, actionManager, dataCollector
 });
 
-httpServer.listen(port, () => {
+httpServer.listen(port, host,() => {
   logger.info({ port }, "HTTP-Server vollständig gestartet.");
 });
