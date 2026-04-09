@@ -19,7 +19,7 @@ export class EventCalendarEntryChangedAllDay extends Event{
             type: "bool",
             value: allDay
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_ALL_DAY, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_ALL_DAY, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

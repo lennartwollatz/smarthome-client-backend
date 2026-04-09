@@ -18,7 +18,7 @@ export class EventLightStatusChanged extends Event{
             type: "obj",
             value: lightAfter
         };
-        super(eventId, deviceId, Date.now(), EventType.LIGHT_STATUS_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.LIGHT_STATUS_CHANGED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

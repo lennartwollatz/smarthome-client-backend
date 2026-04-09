@@ -18,7 +18,7 @@ export class EventPresenceHome extends Event {
             type: "bool",
             value: true
         };
-        super(eventId, deviceId, Date.now(), EventType.PRESENCE_HOME, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.PRESENCE_HOME, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

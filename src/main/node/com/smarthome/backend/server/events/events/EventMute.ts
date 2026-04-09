@@ -18,7 +18,7 @@ export class EventMute extends Event {
       type: "bool",
       value: muted
     };
-    super(eventId, deviceId, Date.now(), EventType.MUTE, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.MUTE, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

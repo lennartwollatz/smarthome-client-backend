@@ -18,7 +18,7 @@ export class EventLightOff extends Event{
             type: "bool",
             value: false
         };
-        super(eventId, deviceId, Date.now(), EventType.LIGHT_OFF, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.LIGHT_OFF, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

@@ -12,7 +12,7 @@ export class EventVacuumDocked extends Event {
       type: "obj",
       value: deviceBefore
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_DOCKED, [eventCondition], [], []);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_DOCKED, [eventCondition], [], [], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

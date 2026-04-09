@@ -23,7 +23,7 @@ export class EventSpeakerSourceSet extends Event {
       type: "str",
       value: sourceIndex
     };
-    super(eventId, deviceId, Date.now(), EventType.SPEAKER_SOURCE_SET, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.SPEAKER_SOURCE_SET, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

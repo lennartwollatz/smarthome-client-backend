@@ -18,7 +18,7 @@ export class EventTemperatureEquals extends Event{
             type: "num",
             value: temperature
         };
-        super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_EQUALS, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_EQUALS, [eventCondition], [], [resultCondition], false);
     }
 
     public matchesListener(listener: EventListener): boolean {

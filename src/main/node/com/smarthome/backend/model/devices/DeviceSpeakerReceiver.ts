@@ -26,6 +26,24 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
     this.type = DeviceType.SPEAKER_RECEIVER;
   }
 
+  override toDatabaseJson(): Record<string, unknown> {
+    const selectedSource = this.sources?.find(s => s.selected)?.index ?? null;
+    const activeZone = this.zones?.find(z => z.power)?.name ?? null;
+    const subs = (this.subwoofers ?? []).map(s => ({
+      id: s.id ?? '',
+      pw: s.power ? 1 : 0,
+      db: s.db ?? 0,
+    }));
+    return {
+      ...super.toDatabaseJson(),
+      src: selectedSource,
+      zn: activeZone,
+      sw: subs,
+      vs: this.volumeStart ?? 0,
+      vm: this.volumeMax ?? 0,
+    };
+  }
+
   getSubwoofers() {
     return this.subwoofers;
   }

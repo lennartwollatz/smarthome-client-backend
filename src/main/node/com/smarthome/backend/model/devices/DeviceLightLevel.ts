@@ -17,6 +17,10 @@ export abstract class DeviceLightLevel extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), ll: this.lightLevel ?? 0 };
+  }
+
   isDark(): boolean {
     return (this.lightLevel ?? 0) < 20;
   }

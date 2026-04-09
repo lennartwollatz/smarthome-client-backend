@@ -18,7 +18,7 @@ export class EventVacuumRoomCleaned extends Event {
       type: "str",
       value: roomId
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_ROOM_CLEANED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_ROOM_CLEANED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

@@ -18,7 +18,7 @@ export class EventSensibilityChanged extends Event{
             type: "num",
             value: sensitivity
         };
-        super(eventId, deviceId, Date.now(), EventType.SENSIBILITY_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.SENSIBILITY_CHANGED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

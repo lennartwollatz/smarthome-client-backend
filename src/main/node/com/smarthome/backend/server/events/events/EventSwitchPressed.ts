@@ -22,7 +22,7 @@ export class EventSwitchPressed extends Event {
       { id: 0, name: "buttonId", type: "str", value: buttonId },
       { id: 0, name: "pressCount", type: "num", value: pressCount }
     ];
-    super(eventId, deviceId, Date.now(), EventType.SWITCH_PRESSED, [eventCondition], [], resultConditions);
+    super(eventId, deviceId, Date.now(), EventType.SWITCH_PRESSED, [eventCondition], [], resultConditions, true);
   }
 
   public matchesListener(listener: EventListener): boolean {

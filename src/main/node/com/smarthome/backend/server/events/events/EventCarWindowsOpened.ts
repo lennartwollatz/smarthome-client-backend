@@ -19,7 +19,7 @@ export class EventCarWindowsOpened extends Event{
             type: "obj",
             value: windows
         };
-        super(eventId, deviceId, Date.now(), EventType.CAR_WINDOWS_OPENED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CAR_WINDOWS_OPENED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

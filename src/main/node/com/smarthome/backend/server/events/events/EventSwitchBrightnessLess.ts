@@ -22,7 +22,7 @@ export class EventSwitchBrightnessLess extends Event {
       { id: 0, name: "buttonId", type: "str", value: buttonId },
       { id: 0, name: "intensity", type: "num", value: intensity },
     ];
-    super(eventId, deviceId, Date.now(), EventType.SWITCH_BRIGHTNESS_LESS, [eventCondition], [], resultConditions);
+    super(eventId, deviceId, Date.now(), EventType.SWITCH_BRIGHTNESS_LESS, [eventCondition], [], resultConditions, false);
   }
 
   public matchesListener(listener: EventListener): boolean {

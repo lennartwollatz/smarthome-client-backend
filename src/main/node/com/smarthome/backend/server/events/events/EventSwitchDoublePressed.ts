@@ -23,7 +23,7 @@ export class EventSwitchDoublePressed extends Event {
       type: "str",
       value: buttonId
     };
-    super(eventId, deviceId, Date.now(), EventType.SWITCH_DOUBLE_PRESSED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.SWITCH_DOUBLE_PRESSED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

@@ -13,7 +13,8 @@ export const WACLIGHTINGMODULE: ModuleModel = {
     id: "waclighting",
     name: "WAC LIGHTING",
     shortDescription: "Modul, mit dem geräte der Firma WAC LIGHTING gesteuert werden können.",
-    longDescription: "TODO",
+    longDescription:
+      "Steuerung von WAC-LIGHTING-Geräten über das lokale Netz: Erkennung, Einbindung und Steuerung von kompatibler Beleuchtung.",
     categoryKey: "climate",
     icon: "&#127744;",
     price: 0.0,

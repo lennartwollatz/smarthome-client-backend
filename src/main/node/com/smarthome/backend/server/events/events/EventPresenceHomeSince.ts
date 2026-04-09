@@ -18,7 +18,7 @@ export class EventPresenceHomeSince extends Event {
       type: "str",
       value: last_detect,
     };
-    super(eventId, deviceId, Date.now(), EventType.PRESENCE_HOME_SINCE, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.PRESENCE_HOME_SINCE, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

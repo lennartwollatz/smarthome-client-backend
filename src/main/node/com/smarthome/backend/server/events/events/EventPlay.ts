@@ -12,7 +12,7 @@ export class EventPlay extends Event {
       type: "obj",
       value: deviceBefore,
     };
-    super(eventId, deviceId, Date.now(), EventType.PLAY, [eventCondition], [], []);
+    super(eventId, deviceId, Date.now(), EventType.PLAY, [eventCondition], [], [], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

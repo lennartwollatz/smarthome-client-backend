@@ -14,6 +14,10 @@ export abstract class DeviceLightDimmerTemperatureColor extends DeviceLightDimme
     this.type = DeviceType.LIGHT_DIMMER_TEMPERATURE_COLOR;
   }
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), cx: this.colorX, cy: this.colorY };
+  }
+
   async setColor(x: number, y: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.colorX = round3(Math.max(0, Math.min(1, x)));

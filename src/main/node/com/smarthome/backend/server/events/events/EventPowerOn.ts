@@ -19,7 +19,7 @@ export class EventPowerOn extends Event {
       type: "bool",
       value: false,
     };
-    super(eventId, deviceId, Date.now(), EventType.POWER_ON, [eventCondition], [], [eventResult]);
+    super(eventId, deviceId, Date.now(), EventType.POWER_ON, [eventCondition], [], [eventResult], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

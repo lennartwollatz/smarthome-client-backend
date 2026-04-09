@@ -30,7 +30,17 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
   }
 
   abstract updateValues(): Promise<void>;
-  
+
+  override toDatabaseJson(): Record<string, unknown> {
+    return {
+      ...super.toDatabaseJson(),
+      m: this.motion ? 1 : 0,
+      se: this.sensitivity ?? 0,
+      ll: this.lightLevel ?? 0,
+      t: this.temperature ?? 0,
+    };
+  }
+
   isDark(): boolean {
     return (this.lightLevel ?? 0) < 20;
   }

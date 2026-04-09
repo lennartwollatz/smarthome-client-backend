@@ -87,7 +87,7 @@ export class DeviceManager implements EntityManager {
     for (const device of devicesToRemove) {
       this.eventManager.removeListenerForDevice(device.id);
       this.devices.delete(device.id);
-      //TODO: prüfen, ob das einfluss auf die Actions hat.
+      // Event-basierte Trigger dieses Geräts sind entfernt; gespeicherte Workflows/Scenes können verwaiste deviceIds enthalten.
     }
   }
 
@@ -99,7 +99,7 @@ export class DeviceManager implements EntityManager {
     this.devices.delete(deviceId);
     this.deviceRepository.deleteById(deviceId);
     device?.delete();
-    //TODO: prüfen, ob das einfluss auf die Actions hat.
+    // Event-basierte Trigger dieses Geräts sind entfernt; gespeicherte Workflows/Scenes können verwaiste deviceIds enthalten.
     if (!isVoiceAssistant) {
       this.liveUpdateService?.emit("device:removed", { deviceId });
     }
@@ -191,7 +191,7 @@ export class DeviceManager implements EntityManager {
       next.longitude = patch.longitude;
     }
     if ("roomMapping" in patch && typeof patch.roomMapping === "object" && patch.roomMapping !== null) {
-      next.roomMapping = patch.roomMapping as Record<string, { name: string; id: string; segmentId?: string }>;
+      next.roomMapping = patch.roomMapping as Record<string, { name: string; id: string; segmentId: string }>;
     }
     if ("cleanSequence" in patch && device instanceof DeviceVacuumCleaner) {
       const seq = this.parseCleanSequenceFromPatch(patch["cleanSequence"]);

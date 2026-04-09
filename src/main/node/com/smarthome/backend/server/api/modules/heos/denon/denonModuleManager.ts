@@ -260,7 +260,7 @@ export class DenonModuleManager extends HeosModuleManager {
     Object.assign(receiver, device);
     receiver.moduleId = this.getModuleId();
     if (typeof (receiver as any).setHeosController === "function") {
-      (receiver as any).setHeosController(this.deviceController);
+      (receiver as any).setHeosController(this.deviceController, this.deviceManager);
     }
     await receiver.updateValues();
     return receiver;
@@ -382,7 +382,7 @@ export class DenonModuleManager extends HeosModuleManager {
       (speaker as any).triggerListeners = new Map();
     }
     if (typeof (speaker as any).setHeosController === "function") {
-      (speaker as any).setHeosController(this.deviceController);
+      (speaker as any).setHeosController(this.deviceController, this.deviceManager);
     }
     if (!(speaker instanceof DeviceSpeaker)) {
       logger.warn({ deviceId }, "Geraet ist kein Speaker");
@@ -409,6 +409,7 @@ export class DenonModuleManager extends HeosModuleManager {
     } else {
       speaker = new DenonReceiver(speakerName, deviceId, address, pid, this.deviceController);
     }
+    speaker.setHeosController(this.deviceController, this.deviceManager);
     await speaker.updateValues();
     return speaker;
   }
@@ -441,14 +442,14 @@ export class DenonModuleManager extends HeosModuleManager {
       case DeviceType.SPEAKER:
         const denonSpeaker = new DenonSpeaker();
         Object.assign(denonSpeaker, device);
-        denonSpeaker.setHeosController(this.deviceController);
+        denonSpeaker.setHeosController(this.deviceController, this.deviceManager);
         await denonSpeaker.updateValues();
         convertedDevice = denonSpeaker;
         break;
       case DeviceType.SPEAKER_RECEIVER:
         const denonReceiver = new DenonReceiver();
         Object.assign(denonReceiver, device);
-        denonReceiver.setHeosController(this.deviceController);
+        denonReceiver.setHeosController(this.deviceController, this.deviceManager);
         await denonReceiver.updateValues();
         convertedDevice = denonReceiver;
         break;
@@ -461,7 +462,7 @@ export class DenonModuleManager extends HeosModuleManager {
     const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
     for (const device of devices) {
         if (device instanceof DenonSpeaker || device instanceof DenonReceiver) {
-          device.setHeosController(this.deviceController);
+          device.setHeosController(this.deviceController, this.deviceManager);
         }
     }
     

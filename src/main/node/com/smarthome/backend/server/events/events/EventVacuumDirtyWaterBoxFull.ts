@@ -12,7 +12,7 @@ export class EventVacuumDirtyWaterBoxFull extends Event {
       type: "obj",
       value: deviceBefore
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_DIRTY_WATER_BOX_FULL, [eventCondition], [], []);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_DIRTY_WATER_BOX_FULL, [eventCondition], [], [], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

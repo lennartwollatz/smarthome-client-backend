@@ -18,7 +18,7 @@ export class EventThermostatStateCooling extends Event {
       type: "str",
       value: "cooling"
     };
-    super(eventId, deviceId, Date.now(), EventType.THERMOSTAT_STATE_COOLING, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.THERMOSTAT_STATE_COOLING, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

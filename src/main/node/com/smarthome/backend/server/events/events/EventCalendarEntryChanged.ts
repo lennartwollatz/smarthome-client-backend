@@ -19,7 +19,7 @@ export class EventCalendarEntryChanged extends Event{
             type: "obj",
             value: entryAfter
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED, [eventCondition], [], [resultCondition], false);
     }
 
     public matchesListener(listener: EventListener): boolean {

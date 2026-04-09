@@ -18,7 +18,7 @@ export class EventTVScreenOff extends Event {
       type: "bool",
       value: screen
     };
-    super(eventId, deviceId, Date.now(), EventType.TV_SCREEN_OFF, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.TV_SCREEN_OFF, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

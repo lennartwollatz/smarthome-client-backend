@@ -18,7 +18,7 @@ export class EventCarRangeChanged extends Event {
       type: "num",
       value: rangeKm,
     };
-    super(eventId, deviceId, Date.now(), EventType.CAR_RANGE_CHANGED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.CAR_RANGE_CHANGED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

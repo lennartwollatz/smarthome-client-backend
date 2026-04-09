@@ -18,7 +18,7 @@ export class EventPresenceAwaySince extends Event {
       type: "str",
       value: last_detect,
     };
-    super(eventId, deviceId, Date.now(), EventType.PRESENCE_AWAY_SINCE, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.PRESENCE_AWAY_SINCE, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

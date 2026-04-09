@@ -18,7 +18,7 @@ export class EventWeatherStatusChanged extends Event {
       type: "obj",
       value: deviceAfter
     };
-    super(eventId, deviceId, Date.now(), EventType.WEATHER_STATUS_CHANGED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.WEATHER_STATUS_CHANGED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

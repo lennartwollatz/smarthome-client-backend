@@ -18,7 +18,7 @@ export class EventPresenceAway extends Event {
             type: "bool",
             value: false
         };
-        super(eventId, deviceId, Date.now(), EventType.PRESENCE_AWAY, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.PRESENCE_AWAY, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

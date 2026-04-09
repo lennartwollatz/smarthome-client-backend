@@ -18,7 +18,7 @@ export class EventVacuumCleaningModeWiper extends Event {
       type: "int",
       value: cleaningMode
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_MODE_WIPER, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_MODE_WIPER, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

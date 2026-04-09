@@ -15,6 +15,10 @@ export abstract class DeviceLightDimmerTemperature extends DeviceLightDimmer {
     this.type = DeviceType.LIGHT_DIMMER_TEMPERATURE;
   }
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), t: this.temperature ?? 0 };
+  }
+
   isLightTemperatureEquals(temperature: number): boolean {
     return this.temperature === temperature;
   }

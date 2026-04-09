@@ -11,6 +11,7 @@ import {
   QrPairingCodeCodec,
 } from "@matter/main/types";
 import { logger } from "../../../../logger.js";
+import { runWithSource, EventSource } from "../../../events/EventSource.js";
 import { Device } from "../../../../model/devices/Device.js";
 import { DevicePresence } from "../../../../model/devices/DevicePresence.js";
 import { MatterSwitch } from "./devices/matterSwitch.js";
@@ -242,7 +243,7 @@ export class MatterVirtualDeviceManager {
         id: nodeId,
         name: displayName,
         moduleId: PRESENCE_MODULE_ID,
-        isConnected: false,
+        isConnected: true,
         isPairingMode: false,
         quickAccess: false,
         present: user.present,
@@ -264,15 +265,15 @@ export class MatterVirtualDeviceManager {
       (existing.isVoiceAssistantDevice() || existing.moduleId === VA_MODULE_ID);
 
     if (!looksLikeVa) {
-      const { storageId: matterNodeId } = this.matterCommissioningIds(data.deviceId);
+      const { virtualNodeId } = this.matterCommissioningIds(data.deviceId);
       const device = new MatterSwitch(
         data.keyword,
         data.deviceId,
-        matterNodeId,
+        virtualNodeId,
         voiceAssistantActionToButtonIds(data.actionType),
         { moduleId: VA_MODULE_ID, quickAccess: false, isVoiceAssistantDevice: true }
       );
-      device.isConnected = false;
+      device.isConnected = true;
       device.isPairingMode = false;
       (device as unknown as Record<string, unknown>).typeLabel = "deviceType.switch";
       this.attachVaMetadata(device, data.keyword, {
@@ -333,7 +334,7 @@ export class MatterVirtualDeviceManager {
       id: nodeId,
       name: displayName,
       moduleId: PRESENCE_MODULE_ID,
-      isConnected: false,
+      isConnected: true,
       isPairingMode: true,
       quickAccess: false,
       present: false,
@@ -396,12 +397,12 @@ export class MatterVirtualDeviceManager {
     const port = this.getNextMatterHostPort();
     const pairingCode = ManualPairingCodeCodec.encode({ discriminator, passcode });
     const qrPairingCode = this.encodeHostQrPairingCode(discriminator, passcode);
-    const { storageId: matterNodeId } = this.matterHostCommissioningIds(deviceId);
+    const { virtualNodeId } = this.matterHostCommissioningIds(deviceId);
 
     const device = new MatterSwitch(
       displayName,
       deviceId,
-      matterNodeId,
+      virtualNodeId,
       [VA_MATTER_BTN_ONOFF],
       {
         moduleId: MATTERCONFIG.id,
@@ -409,7 +410,7 @@ export class MatterVirtualDeviceManager {
         isVirtualMatterHost: true,
       }
     );
-    device.isConnected = false;
+    device.isConnected = true;
     device.isPairingMode = true;
     (device as unknown as Record<string, unknown>).typeLabel = "deviceType.switch";
     this.applyMatterHostPairingFields(device, { pairingCode, qrPairingCode });
@@ -516,12 +517,12 @@ export class MatterVirtualDeviceManager {
     const port = this.getNextVaPort();
     const pairingCode = ManualPairingCodeCodec.encode({ discriminator, passcode });
     const qrPairingCode = this.encodeQrPairingCode(discriminator, passcode);
-    const { storageId: matterNodeId } = this.matterCommissioningIds(resolvedDeviceId);
+    const { virtualNodeId } = this.matterCommissioningIds(resolvedDeviceId);
 
     const device = new MatterSwitch(
       trimmedKeyword,
       resolvedDeviceId,
-      matterNodeId,
+      virtualNodeId,
       voiceAssistantActionToButtonIds(actionType),
       {
         moduleId: VA_MODULE_ID,
@@ -529,7 +530,7 @@ export class MatterVirtualDeviceManager {
         isVoiceAssistantDevice: true,
       }
     );
-    device.isConnected = false;
+    device.isConnected = true;
     device.isPairingMode = true;
     (device as unknown as Record<string, unknown>).typeLabel = "deviceType.switch";
     this.attachVaMetadata(device, trimmedKeyword, { port, passcode, discriminator, actionType });
@@ -562,7 +563,7 @@ export class MatterVirtualDeviceManager {
       deviceId: resolvedDeviceId,
       keyword: trimmedKeyword,
       actionType,
-      matterNodeId,
+      matterNodeId: virtualNodeId,
       port,
       passcode,
       discriminator,
@@ -746,30 +747,43 @@ export class MatterVirtualDeviceManager {
     ]);
   }
 
+  private generateVirtualNodeId(deviceId: string): string {
+    const hash = createHash("sha256").update(deviceId, "utf8").digest();
+    const hi = hash.readUInt32BE(0);
+    const lo = hash.readUInt32BE(4);
+    const n = (BigInt(hi) << 32n) | BigInt(lo);
+    const masked = n & 0xFFFF_FFFF_FFFFn;
+    return String(masked || 1n);
+  }
+
   private matterCommissioningIds(deviceId: string): {
     storageId: string;
     matterUniqueId: string;
     matterSerial: string;
+    virtualNodeId: string;
   } {
     const matterUniqueId = createHash("sha256").update(deviceId, "utf8").digest("hex").slice(0, 32);
     const matterSerial = `v${matterUniqueId}`.slice(0, 32);
     const safe = deviceId.replace(/[^a-zA-Z0-9_-]/g, "_");
     const storageId =
       safe.length > 0 && safe.length <= 64 ? safe : `va_${matterUniqueId.slice(0, 24)}`;
-    return { storageId, matterUniqueId, matterSerial };
+    const virtualNodeId = this.generateVirtualNodeId(deviceId);
+    return { storageId, matterUniqueId, matterSerial, virtualNodeId };
   }
 
   private matterHostCommissioningIds(deviceId: string): {
     storageId: string;
     matterUniqueId: string;
     matterSerial: string;
+    virtualNodeId: string;
   } {
     const matterUniqueId = createHash("sha256").update(deviceId, "utf8").digest("hex").slice(0, 32);
     const matterSerial = `h${matterUniqueId}`.slice(0, 32);
     const safe = deviceId.replace(/[^a-zA-Z0-9_-]/g, "_");
     const storageId =
       safe.length > 0 && safe.length <= 64 ? safe : `mhs_${matterUniqueId.slice(0, 24)}`;
-    return { storageId, matterUniqueId, matterSerial };
+    const virtualNodeId = this.generateVirtualNodeId(deviceId);
+    return { storageId, matterUniqueId, matterSerial, virtualNodeId };
   }
 
   private storedRowToMatterHostData(row: MatterHostSwitchDeviceStored): MatterHostSwitchDeviceData | null {
@@ -807,7 +821,7 @@ export class MatterVirtualDeviceManager {
 
   private async restoreMatterHostFromStorage(data: MatterHostSwitchDeviceData): Promise<void> {
     const existing = this.deviceManager.getDevice(data.deviceId);
-    const { storageId: matterNodeId } = this.matterHostCommissioningIds(data.deviceId);
+    const { virtualNodeId } = this.matterHostCommissioningIds(data.deviceId);
 
     if (existing instanceof MatterSwitch && existing.isVirtualMatterHost) {
       this.applyMatterHostPairingFields(existing, data);
@@ -820,7 +834,7 @@ export class MatterVirtualDeviceManager {
       const device = new MatterSwitch(
         data.displayName,
         data.deviceId,
-        matterNodeId,
+        virtualNodeId,
         [VA_MATTER_BTN_ONOFF],
         { moduleId: MATTERCONFIG.id, quickAccess: false, isVirtualMatterHost: true }
       );
@@ -831,7 +845,7 @@ export class MatterVirtualDeviceManager {
         const icon = (existing as { icon?: string }).icon;
         if (icon) (device as unknown as { icon?: string }).icon = icon;
       }
-      device.isConnected = false;
+      device.isConnected = true;
       device.isPairingMode = false;
       (device as unknown as Record<string, unknown>).typeLabel = "deviceType.switch";
       const swBtnNew = device.getButton(VA_MATTER_BTN_ONOFF);
@@ -891,7 +905,7 @@ export class MatterVirtualDeviceManager {
     const ev = ep.events as {
       onOff: { onOff$Changed: { on: (fn: (isOn: boolean, wasOn?: boolean) => void) => void } };
     };
-    ev.onOff.onOff$Changed.on((isOn: boolean) => {
+    ev.onOff.onOff$Changed.on((isOn: boolean) => runWithSource(EventSource.VOICE, () => {
       this.updateMatterHostButtons(deviceId, { [bid]: isOn });
       const d = this.deviceManager.getDevice(deviceId);
       if (!d) return;
@@ -901,7 +915,7 @@ export class MatterVirtualDeviceManager {
       } else {
         void this.eventManager!.triggerEvent(new EventSwitchButtonOff(deviceId, snap, bid));
       }
-    });
+    }));
 
     server.run().catch(err => {
       logger.error({ err, deviceId }, "Matter-Host-Server beendet mit Fehler");
@@ -1133,7 +1147,7 @@ export class MatterVirtualDeviceManager {
 
     if (buttonIds.length === 1) {
       const epOnoff = endpoints[VA_MATTER_BTN_ONOFF]!;
-      bindOnOff(epOnoff, (isOn: boolean) => {
+      bindOnOff(epOnoff, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
         this.updateVaButtons(deviceId, { [VA_MATTER_BTN_ONOFF]: isOn });
         const d = this.deviceManager.getDevice(deviceId);
         if (!d) return;
@@ -1143,12 +1157,12 @@ export class MatterVirtualDeviceManager {
         } else {
           void this.eventManager!.triggerEvent(new EventSwitchButtonOff(deviceId, snap, VA_MATTER_BTN_ONOFF));
         }
-      });
+      }));
     } else {
       const epOnoff = endpoints[VA_MATTER_BTN_ONOFF]!;
       const epPause = endpoints[VA_MATTER_BTN_PAUSE]!;
       const epContinue = endpoints[VA_MATTER_BTN_CONTINUE]!;
-      bindOnOff(epOnoff, (isOn: boolean) => {
+      bindOnOff(epOnoff, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
         this.updateVaButtons(deviceId, { [VA_MATTER_BTN_ONOFF]: isOn });
         const d = this.deviceManager.getDevice(deviceId);
         if (!d) return;
@@ -1158,8 +1172,8 @@ export class MatterVirtualDeviceManager {
         } else {
           void this.eventManager!.triggerEvent(new EventSwitchButtonOff(deviceId, snap, VA_MATTER_BTN_ONOFF));
         }
-      });
-      bindOnOff(epPause, (isOn: boolean) => {
+      }));
+      bindOnOff(epPause, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
         const pk = this.pulseKey(deviceId, VA_MATTER_BTN_PAUSE);
         if (!isOn) {
           if (this.matterPulseSuppress.has(pk)) {
@@ -1174,8 +1188,8 @@ export class MatterVirtualDeviceManager {
         const snap = snapshotDevice(d);
         void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, VA_MATTER_BTN_PAUSE));
         this.scheduleMomentaryOff(epPause, deviceId, VA_MATTER_BTN_PAUSE);
-      });
-      bindOnOff(epContinue, (isOn: boolean) => {
+      }));
+      bindOnOff(epContinue, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
         const pk = this.pulseKey(deviceId, VA_MATTER_BTN_CONTINUE);
         if (!isOn) {
           if (this.matterPulseSuppress.has(pk)) {
@@ -1190,7 +1204,7 @@ export class MatterVirtualDeviceManager {
         const snap = snapshotDevice(d);
         void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, VA_MATTER_BTN_CONTINUE));
         this.scheduleMomentaryOff(epContinue, deviceId, VA_MATTER_BTN_CONTINUE);
-      });
+      }));
     }
 
     server.run().catch(err => {

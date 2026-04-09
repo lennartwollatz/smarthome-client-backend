@@ -474,8 +474,18 @@ export class XiaomiVacuumCleaner extends DeviceVacuumCleaner {
       logger.warn({ id: this.id }, "executeCleanRoom uebersprungen - address/token fehlen");
       return;
     }
-    const res = await this.xiaomi?.callMiioAndGetResult(this.address, this.token, MIO_COMMANDS.START_SEGMENT_CLEAN, roomIds.map(roomId => parseInt(roomId)));
-    console.log(res);
+    const segmentIdStrings = this.resolveSegmentIdsForRoomCleaning(roomIds);
+    if (segmentIdStrings.length === 0) {
+      logger.warn({ id: this.id, roomIds }, "executeStartCleaningRoom: keine Segment-IDs aus roomMapping");
+      return;
+    }
+    const segmentInts = segmentIdStrings.map((id) => Number(id));
+    await this.xiaomi?.callMiioAndGetResult(
+      this.address,
+      this.token,
+      MIO_COMMANDS.START_SEGMENT_CLEAN,
+      segmentInts
+    );
   }
 
   protected async executeStopCleaningRoom(): Promise<void> {

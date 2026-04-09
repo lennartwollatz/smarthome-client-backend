@@ -15,6 +15,10 @@ export abstract class DeviceFanLightDimmer extends DeviceFanLight {
     this.type = DeviceType.FAN_LIGHT_DIMMER;
   }
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), lb: this.lightBrightness ?? 0 };
+  }
+
   isBrightnessEquals(brightness: number): boolean {
     return this.lightBrightness === brightness;
   }

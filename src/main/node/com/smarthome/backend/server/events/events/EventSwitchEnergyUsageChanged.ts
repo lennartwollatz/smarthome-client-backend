@@ -23,7 +23,7 @@ export class EventSwitchEnergyUsageChanged extends Event {
       type: "obj",
       value: energyUsage
     };
-    super(eventId, deviceId, Date.now(), EventType.SWITCH_ENERGY_USAGE_CHANGED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.SWITCH_ENERGY_USAGE_CHANGED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

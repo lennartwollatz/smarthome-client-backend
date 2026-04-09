@@ -3,11 +3,15 @@ import { DeviceSpeakerReceiver } from "../../../../../../model/devices/DeviceSpe
 import { HeosDeviceController } from "../../heosDeviceController.js";
 import { HeosSpeaker } from "../../devices/heosSpeaker.js";
 import { DeviceSpeaker } from "com/smarthome/backend/model/devices/DeviceSpeaker.js";
+import type { DeviceManager } from "../../../../entities/devices/deviceManager.js";
+import { resolveHeosGroupPeerDeviceIds } from "../../heosPlayerGroupPeers.js";
+import { getHeosDeviceGroupingContext, setHeosDeviceGroupingContext } from "../../heosDeviceGroupingContext.js";
 
 export class DenonReceiver extends DeviceSpeakerReceiver {
   address?: string;
   pid?: number;
   private heos?: HeosDeviceController;
+  private groupingDeviceManager?: DeviceManager;
 
   constructor(name?: string, id?: string, address?: string, pid?: number, heos?: HeosDeviceController) {
     super();
@@ -36,8 +40,11 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
     this.pid = pid;
   }
 
-  setHeosController(heosController: HeosDeviceController) {
+  setHeosController(heosController: HeosDeviceController, groupingContext?: DeviceManager) {
     this.heos = heosController;
+    if (groupingContext !== undefined) {
+      setHeosDeviceGroupingContext(this, groupingContext);
+    }
   }
 
   async updateValues(): Promise<void> {
@@ -53,6 +60,25 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
     logger.debug({ id: this.id, heosSet: Boolean(this.heos) }, "Initialisiere Werte");
 
     try {
+      if (typeof this.heos.getGroups === "function") {
+        const groups = await this.heos.getGroups(proxy);
+        if (groups.some((group) => group.includes(String(this.pid) ?? ""))) {
+          const pids = groups.find((group) => group.includes(String(this.pid) ?? "")) ?? [];
+          this.groupedWith = resolveHeosGroupPeerDeviceIds(
+            getHeosDeviceGroupingContext(this),
+            this.moduleId ?? "",
+            this.id ?? "",
+            this.address,
+            this.pid ?? 0,
+            pids
+          );
+        } else {
+          this.groupedWith = [];
+        }
+      } else {
+        this.groupedWith = [];
+      }
+
       this.volume = await this.heos.getVolume(proxy);
       this.muted = await this.heos.getMute(proxy);
       this.playState = await this.heos.getPlayState(proxy);

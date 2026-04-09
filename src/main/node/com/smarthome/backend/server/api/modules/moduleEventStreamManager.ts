@@ -1,5 +1,5 @@
-import { ActionManager } from "../entities/actions/ActionManager.js";
 import { logger } from "../../../logger.js";
+import { runWithSource, EventSource } from "../../events/EventSource.js";
 import { ModuleEvent } from "./moduleEvent.js";
 import { ModuleEventController } from "./moduleEventController.js";
 import { DeviceManager } from "../entities/devices/deviceManager.js";
@@ -28,7 +28,7 @@ export abstract class ModuleEventStreamManager<C extends ModuleEventController, 
       return;
     }
     this.running = true;
-    const callback: (event: E) => void = (event: E) => this.handleEvent(event);
+    const callback: (event: E) => void = (event: E) => runWithSource(EventSource.SENSOR, () => this.handleEvent(event));
     // Start asynchronously, damit die Event-Loop nicht blockiert und z. B. HTTP-Anfragen weiter bedient werden
     void this.startEventStream(callback)
       .then(() => logger.info(this.managerId + " EventStream gestartet"))

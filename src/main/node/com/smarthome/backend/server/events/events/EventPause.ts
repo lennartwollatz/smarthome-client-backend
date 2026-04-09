@@ -12,7 +12,7 @@ export class EventPause extends Event {
       type: "obj",
       value: deviceBefore,
     };
-    super(eventId, deviceId, Date.now(), EventType.PAUSE, [eventCondition], [], []);
+    super(eventId, deviceId, Date.now(), EventType.PAUSE, [eventCondition], [], [], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

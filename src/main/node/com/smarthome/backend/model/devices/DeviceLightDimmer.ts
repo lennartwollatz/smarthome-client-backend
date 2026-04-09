@@ -15,6 +15,10 @@ export abstract class DeviceLightDimmer extends DeviceLight {
     this.type = DeviceType.LIGHT_DIMMER;
   }
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), b: this.brightness ?? 0 };
+  }
+
   isBrightnessEquals(brightness: number): boolean {
     return this.brightness === brightness;
   }

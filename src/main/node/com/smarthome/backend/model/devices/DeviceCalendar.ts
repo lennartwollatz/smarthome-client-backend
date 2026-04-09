@@ -112,6 +112,11 @@ export class DeviceCalendar extends Device {
     this.moduleId = DEFAULT_CALENDAR_MODULE_ID;
   }
 
+  override toDatabaseJson(): Record<string, unknown> {
+    const totalEntries = this.calendars.reduce((sum, c) => sum + c.entries.length, 0);
+    return { ...super.toDatabaseJson(), ec: totalEntries };
+  }
+
   updateValues(): Promise<void> {
     return Promise.resolve();
   }

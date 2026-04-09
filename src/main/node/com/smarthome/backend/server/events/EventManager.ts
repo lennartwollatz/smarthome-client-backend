@@ -5,13 +5,19 @@ import { EventType } from "./event-types/EventType.js";
 import { EventLogger } from "./EventLogger.js";
 import { ActionRunnable } from "../api/entities/actions/runnable/ActionRunnable.js";
 import { ActionRunnableEventBased } from "../api/entities/actions/runnable/ActionRunnableEventBased.js";
+import { getCurrentSource } from "./EventSource.js";
 
 export class EventManager {
     private eventLogger: EventLogger;
     private listeners: Map<string, Map<EventType, EventListener[]>> = new Map();
+    private onEventCallbacks: ((event: Event) => void)[] = [];
 
     constructor() {
         this.eventLogger = new EventLogger();
+    }
+
+    public addOnEventCallback(callback: (event: Event) => void): void {
+        this.onEventCallbacks.push(callback);
     }
 
     public addRunnable(runnable: ActionRunnable) {
@@ -76,8 +82,10 @@ export class EventManager {
         this.listeners.delete(deviceId);
     }
 
-    removeListenerForScene(sceneId: string) {
-        //TODO: implement
+    removeListenerForScene(actionIds: string[]) {
+        for (const actionId of actionIds) {
+            this.removeListenerForAction(actionId);
+        }
     }
 
     public removeListenerForDeviceAndEventType(deviceId: string, eventType: EventType) {
@@ -85,7 +93,11 @@ export class EventManager {
     }
 
     public async triggerEvent(event: Event) {
+        event.source = getCurrentSource();
         this.eventLogger.log(event);
+        for (const cb of this.onEventCallbacks) {
+            try { cb(event); } catch { /* DataCollector-Fehler dürfen Events nicht blockieren */ }
+        }
         const { deviceId, eventType } = event;
 
         if (!this.listeners.has(deviceId)) {

@@ -23,7 +23,7 @@ export class EventSwitchButtonOn extends Event {
       type: "str",
       value: buttonId
     };
-    super(eventId, deviceId, Date.now(), EventType.SWITCH_BUTTON_ON, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.SWITCH_BUTTON_ON, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

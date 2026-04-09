@@ -18,7 +18,7 @@ export class EventTVChannelChanged extends Event {
       type: "str",
       value: channelId
     };
-    super(eventId, deviceId, Date.now(), EventType.TV_CHANNEL_CHANGED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.TV_CHANNEL_CHANGED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

@@ -18,7 +18,7 @@ export class EventNoMotionDetected extends Event{
             type: "bool",
             value: false
         };
-        super(eventId, deviceId, Date.now(), EventType.NO_MOTION_DETECTED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.NO_MOTION_DETECTED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

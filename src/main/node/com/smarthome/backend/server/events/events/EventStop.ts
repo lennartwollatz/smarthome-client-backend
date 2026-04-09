@@ -12,7 +12,7 @@ export class EventStop extends Event {
       type: "obj",
       value: deviceBefore,
     };
-    super(eventId, deviceId, Date.now(), EventType.STOP, [eventCondition], [], []);
+    super(eventId, deviceId, Date.now(), EventType.STOP, [eventCondition], [], [], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

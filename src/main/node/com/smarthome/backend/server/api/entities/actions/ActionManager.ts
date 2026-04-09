@@ -113,6 +113,7 @@ export class ActionManager implements EntityManager {
     this.actions.delete(actionId);
     this.eventManager.removeListenerForAction(actionId);
     this.actionRepository.deleteById(actionId);
+    this.sceneManager.removeActionIdFromAllScenes(actionId);
     this.liveUpdateService?.emit("action:removed", { actionId });
     this.removeVoiceAssistantDevice(actionId, action?.getVoiceAssistantTriggerDeviceId() ?? "");
     return true;

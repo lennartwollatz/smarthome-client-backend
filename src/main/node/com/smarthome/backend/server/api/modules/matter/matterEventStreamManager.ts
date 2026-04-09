@@ -24,7 +24,6 @@ export class MatterEventStreamManager extends ModuleEventStreamManager<MatterDev
         await this.controller.startEventStream(device, callback);
       } catch (err) {
         logger.error({ err, deviceId: device.id }, "Fehler beim Starten des EventStreams für Matter-Gerät");
-        // Weiter mit dem nächsten Gerät, Server soll nicht abstürzen
       }
     }
   }

@@ -18,7 +18,7 @@ export class EventLightLevelBright extends Event{
             type: "num",
             value: lightLevel
         };
-        super(eventId, deviceId, Date.now(), EventType.LIGHT_LEVEL_BRIGHT, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.LIGHT_LEVEL_BRIGHT, [eventCondition], [], [resultCondition], false);
     }
 
     public matchesListener(listener: EventListener): boolean {

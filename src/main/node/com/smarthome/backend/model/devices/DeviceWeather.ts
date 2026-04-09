@@ -90,6 +90,29 @@ export abstract class DeviceWeather extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return {
+      ...super.toDatabaseJson(),
+      t: this.temperature ?? 0,
+      wc: this.weatherCode ?? 0,
+      ws: this.windSpeedMps ?? 0,
+      wd: this.windDirection ?? 0,
+      h: this.humidity ?? 0,
+      pr: this.pressure ?? 0,
+      pp: this.precipitationProbability ?? 0,
+      uv: this.uvIndex ?? 0,
+      rn: this.rain ?? 0,
+      sh: this.showers ?? 0,
+      sf: this.snowfall ?? 0,
+      sd: this.snowDepth ?? 0,
+      vi: this.visibility ?? 0,
+      tmx: this.temperatureMax ?? 0,
+      tmn: this.temperatureMin ?? 0,
+      sr: this.sunrise ?? null,
+      ss: this.sunset ?? null,
+    };
+  }
+
     /** Regen aus WMO-Code (51-67, 80-82) */
     isRaining(): boolean {
       return this.deriveIsRaining(this.weatherCode);

@@ -18,7 +18,7 @@ export class EventVacuumWiperLevelLess extends Event {
       type: "str",
       value: wiperLevel
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_WIPER_LEVEL_LESS, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_WIPER_LEVEL_LESS, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

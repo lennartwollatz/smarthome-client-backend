@@ -23,7 +23,7 @@ export class EventPrecipitationProbabilityGreater extends Event {
       type: "num",
       value: precipitationProbability
     };
-    super(eventId, deviceId, Date.now(), EventType.PRECIPITATION_PROBABILITY_GREATER, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.PRECIPITATION_PROBABILITY_GREATER, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

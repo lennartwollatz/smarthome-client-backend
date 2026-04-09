@@ -18,7 +18,7 @@ export class EventVacuumCleanSequenceChanged extends Event {
       type: "obj",
       value: cleanSequence
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEAN_SEQUENCE_CHANGED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEAN_SEQUENCE_CHANGED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

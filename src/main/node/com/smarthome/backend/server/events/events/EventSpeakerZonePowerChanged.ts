@@ -22,7 +22,7 @@ export class EventSpeakerZonePowerChanged extends Event {
       { id: 0, name: "zoneName", type: "str", value: zoneName },
       { id: 0, name: "power", type: "bool", value: power }
     ];
-    super(eventId, deviceId, Date.now(), EventType.SPEAKER_ZONE_POWER_CHANGED, [eventCondition], [], resultConditions);
+    super(eventId, deviceId, Date.now(), EventType.SPEAKER_ZONE_POWER_CHANGED, [eventCondition], [], resultConditions, false);
   }
 
   public matchesListener(listener: EventListener): boolean {

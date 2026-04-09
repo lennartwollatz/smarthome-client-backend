@@ -33,9 +33,12 @@ function isLgTvUnreachableOutput(text: string): boolean {
 }
 
 export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, DeviceTV> {
+  private static readonly RECONNECT_DELAY_MS = 10_000;
+
   private deviceCallbacks = new Map<string, (event: LGEvent) => void>();
   private processes = new Map<string, ChildProcess | null>();
   private outputBuffers = new Map<string, string>();
+  private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 
   async register(tv: LGTV) {
@@ -254,7 +257,21 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     child.on("close", code => {
       this.processes.delete(deviceId);
       this.outputBuffers.delete(deviceId);
-      logger.info({ deviceId, code }, "LG EventStream beendet");
+
+      const cb = this.deviceCallbacks.get(deviceId);
+      if (!cb) {
+        logger.info({ deviceId, code }, "LG EventStream beendet");
+        return;
+      }
+
+      this.deviceCallbacks.delete(deviceId);
+      const delay = LGDeviceController.RECONNECT_DELAY_MS;
+      logger.info({ deviceId, code, delayMs: delay }, "LG EventStream beendet – Neuverbindung in %d ms", delay);
+      const timer = setTimeout(() => {
+        this.reconnectTimers.delete(deviceId);
+        void this.startEventStream(device, cb);
+      }, delay);
+      this.reconnectTimers.set(deviceId, timer);
     });
   }
 
@@ -262,6 +279,12 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     const tv = device as LGTV;
     const deviceId = tv.id ?? "";
     if (!deviceId) return;
+
+    const timer = this.reconnectTimers.get(deviceId);
+    if (timer) {
+      clearTimeout(timer);
+      this.reconnectTimers.delete(deviceId);
+    }
 
     this.deviceCallbacks.delete(deviceId);
     const process = this.processes.get(deviceId);
@@ -286,7 +309,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return;
     }
     if (event.event === "error") {
-      logger.warn({ deviceId }, "LG EventStream error: {}", event);
+      logger.warn({ deviceId }, "LG EventStream error: "+JSON.stringify(event));
       return;
     }
 

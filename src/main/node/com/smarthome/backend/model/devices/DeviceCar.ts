@@ -76,6 +76,21 @@ export abstract class DeviceCar extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return {
+      ...super.toDatabaseJson(),
+      fl: this.fuelLevelPercent ?? 0,
+      rk: this.rangeKm ?? 0,
+      ls: this.lockedState ? 1 : 0,
+      cc: this.climateControlState ? 1 : 0,
+      iu: this.inUseState ? 1 : 0,
+      lat: this.location?.coordinates?.latitude ?? null,
+      lon: this.location?.coordinates?.longitude ?? null,
+      wc: this.windows?.combinedState ? 1 : 0,
+      dc: this.doors?.combinedState ? 1 : 0,
+    };
+  }
+
   isLocked():boolean {
     return this.lockedState === true;
   }

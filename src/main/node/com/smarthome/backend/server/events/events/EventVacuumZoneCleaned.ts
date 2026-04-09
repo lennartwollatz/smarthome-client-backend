@@ -18,7 +18,7 @@ export class EventVacuumZoneCleaned extends Event {
       type: "str",
       value: zoneId
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_ZONE_CLEANED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_ZONE_CLEANED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

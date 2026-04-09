@@ -18,7 +18,7 @@ export class EventThermostatStateOff extends Event {
       type: "str",
       value: "off"
     };
-    super(eventId, deviceId, Date.now(), EventType.THERMOSTAT_STATE_OFF, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.THERMOSTAT_STATE_OFF, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

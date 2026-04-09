@@ -18,7 +18,7 @@ export class EventUvIndexEquals extends Event {
       type: "num",
       value: uvIndex
     };
-    super(eventId, deviceId, Date.now(), EventType.UV_INDEX_EQUALS, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.UV_INDEX_EQUALS, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

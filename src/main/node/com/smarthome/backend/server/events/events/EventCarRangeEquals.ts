@@ -18,7 +18,7 @@ export class EventCarRangeEquals extends Event {
       type: "num",
       value: rangeKm,
     };
-    super(eventId, deviceId, Date.now(), EventType.CAR_RANGE_EQUALS, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.CAR_RANGE_EQUALS, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

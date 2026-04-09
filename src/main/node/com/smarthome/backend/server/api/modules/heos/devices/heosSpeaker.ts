@@ -2,6 +2,9 @@ import { DeviceSpeakerReceiver } from "com/smarthome/backend/model/devices/Devic
 import { logger } from "../../../../../logger.js";
 import { DeviceSpeaker } from "../../../../../model/devices/DeviceSpeaker.js";
 import { HeosDeviceController } from "../heosDeviceController.js";
+import type { DeviceManager } from "../../../entities/devices/deviceManager.js";
+import { resolveHeosGroupPeerDeviceIds } from "../heosPlayerGroupPeers.js";
+import { getHeosDeviceGroupingContext, setHeosDeviceGroupingContext } from "../heosDeviceGroupingContext.js";
 
 export class HeosSpeaker extends DeviceSpeaker {
   address?: string;
@@ -63,11 +66,17 @@ export class HeosSpeaker extends DeviceSpeaker {
     logger.debug({ id: this.id, heosSet: Boolean(this.heos) }, "Initialisiere Werte");
 
     try {
-      const players = await this.heos.getPlayers(this);
       const groups = await this.heos.getGroups(this);
       if( groups.some(group => group.includes(String(this.pid) ?? ""))){
         const pids = groups.find(group => group.includes(String(this.pid) ?? "")) ?? [];
-        //TODO:speakerIds zu den pids ermitteln.
+        this.groupedWith = resolveHeosGroupPeerDeviceIds(
+          getHeosDeviceGroupingContext(this),
+          this.moduleId ?? "",
+          this.id,
+          this.address,
+          this.pid ?? 0,
+          pids
+        );
       } else {
         this.groupedWith = [];
       }
@@ -80,10 +89,13 @@ export class HeosSpeaker extends DeviceSpeaker {
     }
   }
 
-  setHeosController(heosController?: HeosDeviceController) {
+  setHeosController(heosController?: HeosDeviceController, groupingContext?: DeviceManager) {
     if (heosController) {
       this.heos = heosController;
       this.isConnected = true;
+    }
+    if (groupingContext !== undefined) {
+      setHeosDeviceGroupingContext(this, groupingContext);
     }
   }
 

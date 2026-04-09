@@ -14,6 +14,7 @@ import { ActionRunnableResponse } from "../runnable/ActionRunnableResponse.js";
 import { ActionRunnableManualBased } from "../runnable/ActionRunnableManualBased.js";
 import { EventManager } from "../../../../events/EventManager.js";
 import { EventParameter } from "../../../../events/event-types/EventParameter.js";
+import { runWithSource, EventSource } from "../../../../events/EventSource.js";
 import { voiceAssistantActionToButtonId, voiceAssistantActionToEventId, VoiceAssistantCommandAction } from "../../../modules/matter/voiceAssistantCommandMapping.js";
 import { VoiceAssistantTrigger } from "./VoiceAssistantTrigger.js";
 import { TriggerConfig } from "./TriggerConfig.js";
@@ -375,8 +376,14 @@ export class Action {
         return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
       }
       if (actionName) {
-        this.invokeDeviceMethod(device, actionName, values);
-        //TODO: wenn aus der Funktion ein Promise zurückgegeben wird, soll dieser Wert in die Environment eingefügt werden.
+        const methodOut = await this.invokeDeviceMethod(device, actionName, values);
+        if (methodOut !== undefined && methodOut !== null) {
+          const envKey =
+            (node.nodeId && String(node.nodeId).trim() !== "")
+              ? String(node.nodeId)
+              : `device:${deviceId}:${stripParensBase(actionName)}`;
+          result.environment.environment.set(envKey, methodOut);
+        }
         console.log("[Workflow] Geräte-Aktion ausgeführt", {
           workflowActionId: this.actionId,
           workflowActionName: this.name,
@@ -422,14 +429,22 @@ export class Action {
 
   }
 
-  private invokeDeviceMethod(device: Device, methodName: string, values: unknown[]) {
+  private async invokeDeviceMethod(device: Device, methodName: string, values: unknown[]): Promise<unknown> {
+    const source = this.isAiSuggested ? EventSource.AUTOMATION : EventSource.SYSTEM;
+    const raw = runWithSource(source, () => this.invokeDeviceMethodInner(device, methodName, values));
+    if (raw instanceof Promise) {
+      return await raw;
+    }
+    return raw;
+  }
+
+  private invokeDeviceMethodInner(device: Device, methodName: string, values: unknown[]): unknown {
     try {
       values = normalizeWorkflowArgList(values);
       const baseMethodName = methodName.includes("(")
         ? methodName.slice(0, methodName.indexOf("("))
         : methodName;
       const resolved = getDeviceMethodExact(device, methodName);
-      console.log("resolved: " + JSON.stringify(resolved));
       if (!resolved) {
         logger.warn(
           { actionId: this.actionId, methodName: baseMethodName, deviceId: device.id },
@@ -441,43 +456,37 @@ export class Action {
 
       if (!values || values.length === 0) {
         if (fn.length >= 1) {
-          console.log("call with true but no params");
-          fn.call(device, true);
+          return fn.call(device, true);
         } else {
-          console.log("call without true but no params");
-          fn.call(device);
+          return fn.call(device);
         }
-        return;
       }
 
       if (values.length === 1) {
         const param = this.convertValue(values[0]);
         if (fn.length >= 2) {
-          fn.call(device, param, true);
+          return fn.call(device, param, true);
         } else {
-          fn.call(device, param);
+          return fn.call(device, param);
         }
-        return;
       }
 
       if (values.length === 2) {
         const param1 = this.convertValue(values[0]);
         const param2 = this.convertValue(values[1]);
         if (fn.length >= 3) {
-          fn.call(device, param1, param2, true);
+          return fn.call(device, param1, param2, true);
         } else {
-          fn.call(device, param1, param2);
+          return fn.call(device, param1, param2);
         }
-        return;
       }
 
       if (values.length > 2) {
         if (fn.length >= 4) {
-          fn.call(device, ...values, true);
+          return fn.call(device, ...values, true);
         } else {
-          fn.call(device, ...values);
+          return fn.call(device, ...values);
         }
-        return;
       }
 
     } catch (err) {

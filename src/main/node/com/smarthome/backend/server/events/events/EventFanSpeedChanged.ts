@@ -18,7 +18,7 @@ export class EventFanSpeedChanged extends Event{
             type: "num",
             value: speed
         };
-        super(eventId, deviceId, Date.now(), EventType.FAN_SPEED_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.FAN_SPEED_CHANGED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

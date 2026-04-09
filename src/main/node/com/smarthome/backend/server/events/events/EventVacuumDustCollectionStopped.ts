@@ -12,7 +12,7 @@ export class EventVacuumDustCollectionStopped extends Event {
       type: "obj",
       value: deviceBefore
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_DUST_COLLECTION_STOPPED, [eventCondition], [], []);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_DUST_COLLECTION_STOPPED, [eventCondition], [], [], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

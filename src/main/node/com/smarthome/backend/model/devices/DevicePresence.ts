@@ -22,6 +22,10 @@ export class DevicePresence extends Device {
     this.type = DeviceType.PRESENCE;
   }
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), p: this.present ? 1 : 0, ld: this.timeStringToMiliseconds(this.lastDetect) ?? 0 };
+  }
+
   isPresent(): boolean {
     return this.present;
   }

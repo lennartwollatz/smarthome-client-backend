@@ -18,7 +18,7 @@ export class EventCarMileageLess extends Event {
       type: "num",
       value: mileageKm,
     };
-    super(eventId, deviceId, Date.now(), EventType.CAR_MILEAGE_LESS, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.CAR_MILEAGE_LESS, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

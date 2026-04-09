@@ -18,7 +18,7 @@ export class EventFanStatusChanged extends Event{
             type: "obj",
             value: fanAfter
         };
-        super(eventId, deviceId, Date.now(), EventType.FAN_STATUS_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.FAN_STATUS_CHANGED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

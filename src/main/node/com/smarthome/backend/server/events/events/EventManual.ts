@@ -5,7 +5,7 @@ import crypto from "crypto";
 
 export class EventManual extends Event{
     constructor(actionId: string, eventId: string = crypto.randomUUID()) {
-        super(eventId, actionId, Date.now(), EventType.MANUAL, [], [], []);
+        super(eventId, actionId, Date.now(), EventType.MANUAL, [], [], [], false);
     }
 
     public matchesListener(listener: EventListener): boolean {

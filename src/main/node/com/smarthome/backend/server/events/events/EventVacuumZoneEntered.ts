@@ -18,7 +18,7 @@ export class EventVacuumZoneEntered extends Event {
       type: "obj",
       value: coordinate
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_ZONE_ENTERED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_ZONE_ENTERED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

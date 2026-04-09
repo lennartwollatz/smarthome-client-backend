@@ -13,7 +13,7 @@ export class EventCalendarEntryDeleted extends Event{
             type: "obj",
             value: entry
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_DELETED, [eventCondition], [], []);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_DELETED, [eventCondition], [], [], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

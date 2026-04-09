@@ -19,7 +19,7 @@ export class EventCarLocationChanged extends Event{
             type: "obj",
             value: location
         };
-        super(eventId, deviceId, Date.now(), EventType.CAR_LOCATION_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CAR_LOCATION_CHANGED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

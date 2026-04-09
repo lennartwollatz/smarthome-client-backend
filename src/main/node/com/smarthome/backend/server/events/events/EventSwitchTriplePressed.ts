@@ -23,7 +23,7 @@ export class EventSwitchTriplePressed extends Event {
       type: "str",
       value: buttonId
     };
-    super(eventId, deviceId, Date.now(), EventType.SWITCH_TRIPLE_PRESSED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.SWITCH_TRIPLE_PRESSED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

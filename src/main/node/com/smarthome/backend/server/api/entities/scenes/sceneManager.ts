@@ -47,6 +47,7 @@ export class SceneManager implements EntityManager {
           icon: def.icon,
           active: false,
           actionIds: [],
+          deactivateActionIds: [],
           showOnHome: def.showOnHome ?? true,
           isCustom: def.isCustom ?? false,
         });
@@ -90,8 +91,29 @@ export class SceneManager implements EntityManager {
     if (!scene) return false;
     this.scenes.delete(sceneId);
     this.sceneRepository.deleteById(sceneId);
-    this.eventManager.removeListenerForScene(sceneId);
+    this.eventManager.removeListenerForScene(Scene.allReferencedActionIds(scene));
     this.liveUpdateService?.emit("scene:removed", { sceneId });
     return true;
+  }
+
+  /**
+   * Entfernt eine Action-ID aus allen Szenen (Aktivierung und Deaktivierung), speichert und sendet Live-Updates.
+   */
+  removeActionIdFromAllScenes(actionId: string): void {
+    const id = String(actionId ?? "").trim();
+    if (!id) return;
+    for (const scene of this.scenes.values()) {
+      if (!scene?.id) continue;
+      const on = scene.actionIds ?? [];
+      const off = scene.deactivateActionIds ?? [];
+      const nextOn = on.filter((x) => x !== id);
+      const nextOff = off.filter((x) => x !== id);
+      if (nextOn.length === on.length && nextOff.length === off.length) {
+        continue;
+      }
+      scene.actionIds = nextOn;
+      scene.deactivateActionIds = nextOff;
+      this.updateScene(scene);
+    }
   }
 }

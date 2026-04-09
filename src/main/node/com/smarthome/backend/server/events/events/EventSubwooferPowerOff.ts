@@ -23,7 +23,7 @@ export class EventSubwooferPowerOff extends Event {
       type: "str",
       value: subwooferId
     };
-    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_POWER_OFF, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_POWER_OFF, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

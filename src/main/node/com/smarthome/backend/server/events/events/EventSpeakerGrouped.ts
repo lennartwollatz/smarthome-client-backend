@@ -27,7 +27,7 @@ export class EventSpeakerGrouped extends Event {
       type: "obj",
       value: groupedDeviceIds,
     };
-    super(eventId, deviceId, Date.now(), EventType.SPEAKER_GROUPED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.SPEAKER_GROUPED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

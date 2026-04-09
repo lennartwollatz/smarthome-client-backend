@@ -18,7 +18,7 @@ export class EventVacuumModeChanged extends Event {
       type: "str",
       value: mode
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_MODE_CHANGED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_MODE_CHANGED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

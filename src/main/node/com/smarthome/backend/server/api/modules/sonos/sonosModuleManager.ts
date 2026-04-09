@@ -36,8 +36,7 @@ export class SonosModuleManager extends ModuleManager<SonosEventStreamManager, S
       const discoveredDevices = await this.deviceDiscover.discover(5, []);
       logger.info({ count: discoveredDevices.length }, "Geraete gefunden");
       
-      // TODO: eventuell sollte die Konvertierung zu einem SonosSpeaker und Speicherung
-      // erst dann geschehen, wenn das Device übernommen wird.
+      // Konvertierung und Persistenz bei Discovery wie bei Denon HEOS — Geräte sind direkt nutzbar.
       const speakers = await this.convertDiscoveredDevicesToSonosSpeakers(discoveredDevices);
       this.deviceManager.saveDevices(speakers);
       return speakers;

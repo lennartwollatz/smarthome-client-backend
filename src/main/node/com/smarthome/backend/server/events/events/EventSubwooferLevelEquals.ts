@@ -22,7 +22,7 @@ export class EventSubwooferLevelEquals extends Event {
       { id: 0, name: "subwooferId", type: "str", value: subwooferId },
       { id: 0, name: "level", type: "num", value: level }
     ];
-    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_LEVEL_EQUALS, [eventCondition], [], resultConditions);
+    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_LEVEL_EQUALS, [eventCondition], [], resultConditions, false);
   }
 
   public matchesListener(listener: EventListener): boolean {

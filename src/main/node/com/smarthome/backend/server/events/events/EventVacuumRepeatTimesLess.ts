@@ -18,7 +18,7 @@ export class EventVacuumRepeatTimesLess extends Event {
       type: "num",
       value: repeatTimes
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_REPEAT_TIMES_LESS, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_REPEAT_TIMES_LESS, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

@@ -20,6 +20,10 @@ export abstract class DeviceMotion extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), m: this.motion ? 1 : 0, se: this.sensitivity ?? 0 };
+  }
+
   isMotionDetectedSince(seconds: number): boolean {
     const t = this.timeStringToMiliseconds(this.motion_last_detect ?? '');
     if (t === null) return false;

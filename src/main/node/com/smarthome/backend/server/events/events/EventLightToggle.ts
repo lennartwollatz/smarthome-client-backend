@@ -18,7 +18,7 @@ export class EventLightToggle extends Event{
             type: "bool",
             value: lightOn
         };
-        super(eventId, deviceId, Date.now(), EventType.LIGHT_TOGGLE, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.LIGHT_TOGGLE, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

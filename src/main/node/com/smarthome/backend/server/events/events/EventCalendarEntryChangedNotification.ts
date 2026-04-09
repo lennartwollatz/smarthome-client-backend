@@ -19,7 +19,7 @@ export class EventCalendarEntryChangedNotification extends Event{
             type: "bool",
             value: enabled
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_NOTIFICATION, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_NOTIFICATION, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

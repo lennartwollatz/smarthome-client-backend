@@ -12,7 +12,7 @@ export class EventVacuumCleaningDone extends Event {
       type: "obj",
       value: deviceBefore
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_DONE, [eventCondition], [], []);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_DONE, [eventCondition], [], [], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

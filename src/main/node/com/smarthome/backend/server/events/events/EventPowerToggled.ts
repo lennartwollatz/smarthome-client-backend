@@ -19,7 +19,7 @@ export class EventPowerToggled extends Event{
             type: "bool",
             value: powerAfter
         };
-        super(eventId, deviceId, Date.now(), EventType.POWER_TOGGLED, [eventCondition], [], [eventResult]);
+        super(eventId, deviceId, Date.now(), EventType.POWER_TOGGLED, [eventCondition], [], [eventResult], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

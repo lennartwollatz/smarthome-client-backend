@@ -18,7 +18,7 @@ export class EventVacuumRepeatTimesEquals extends Event {
       type: "num",
       value: repeatTimes
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_REPEAT_TIMES_EQUALS, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_REPEAT_TIMES_EQUALS, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

@@ -28,7 +28,8 @@ export function createSettingsRouter(deps: ServerDeps) {
   });
 
   router.delete("/data", (_req, res) => {
-    res.status(204).json("");
+    deps.dataCollector?.clearMlData();
+    res.status(204).send();
   });
 
   router.delete("/factory-reset", (_req, res) => {

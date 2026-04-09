@@ -18,7 +18,7 @@ export class EventCarClimateControlStarted extends Event{
             type: "bool",
             value: true
         };
-        super(eventId, deviceId, Date.now(), EventType.CAR_CLIMATE_CONTROL_STARTED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CAR_CLIMATE_CONTROL_STARTED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

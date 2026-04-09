@@ -5,6 +5,7 @@ import { EventType } from "../event-types/EventType.js";
 import { EventResult } from "../event-types/EventResult.js";
 import { EventCondition } from "../event-types/EventCondition.js";
 import { EventListener } from "../EventListener.js";
+import { EventSource } from "../EventSource.js";
 
 /** Minimale Listener-Form ohne Zirkelbezug zu EventListener.ts */
 export type TriggerListenerShape = { runnable: ActionRunnable };
@@ -53,6 +54,8 @@ export abstract class Event {
   eventConditions: EventCondition[];
   eventParameters: EventParameter[];
   eventResults: EventResult[];
+  mlcollect:boolean;
+  source: EventSource = EventSource.SYSTEM;
 
   constructor(
     eventId: string,
@@ -61,7 +64,8 @@ export abstract class Event {
     eventType: EventType,
     eventConditions: EventCondition[],
     eventParameters: EventParameter[],
-    eventResults: EventResult[]
+    eventResults: EventResult[],
+    mlcollect:boolean
   ) {
     this.eventId = eventId;
     this.deviceId = deviceId;
@@ -70,6 +74,7 @@ export abstract class Event {
     this.eventConditions = eventConditions;
     this.eventParameters = eventParameters;
     this.eventResults = eventResults;
+    this.mlcollect = mlcollect;
   }
 
   public abstract matchesListener(listener: EventListener): boolean;

@@ -23,6 +23,9 @@ export abstract class DeviceTemperature extends Device {
 
   abstract updateValues(): Promise<void>;
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), t: this.temperature ?? 0 };
+  }
 
   isTemperatureEquals(temperature: number): boolean {
     return (this.temperature ?? 0) === temperature;

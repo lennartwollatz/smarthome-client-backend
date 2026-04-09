@@ -18,7 +18,7 @@ export class EventCarFuelLevelChanged extends Event{
             type: "num",
             value: fuelLevelPercent
         };
-        super(eventId, deviceId, Date.now(), EventType.CAR_FUEL_LEVEL_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CAR_FUEL_LEVEL_CHANGED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

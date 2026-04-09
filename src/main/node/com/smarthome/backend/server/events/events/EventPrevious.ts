@@ -12,7 +12,7 @@ export class EventPrevious extends Event {
       type: "obj",
       value: deviceBefore
     };
-    super(eventId, deviceId, Date.now(), EventType.PREVIOUS, [eventCondition], [], []);
+    super(eventId, deviceId, Date.now(), EventType.PREVIOUS, [eventCondition], [], [], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

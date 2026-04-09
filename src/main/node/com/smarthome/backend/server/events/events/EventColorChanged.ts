@@ -18,7 +18,7 @@ export class EventColorChanged extends Event{
             type: "obj",
             value: { x: colorX, y: colorY }
         };
-        super(eventId, deviceId, Date.now(), EventType.COLOR_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.COLOR_CHANGED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

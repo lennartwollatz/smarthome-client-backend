@@ -172,12 +172,12 @@ export abstract class DeviceVacuumCleaner extends Device {
   cleanSequence: string[] = [];
   cleanings: Cleanings = [];
   error: string = "";
-    /**
-   * Schlüssel = Staubsauger-Raum-ID (z. B. aus get_room_mapping) — diese Werte gehen an MiIO, wenn segmentId fehlt.
+  /**
+   * Schlüssel = Staubsauger-Raum-ID (z. B. aus get_room_mapping).
    * Wert.id = Grundriss-/Smarthome-Raum-ID (nicht an MiIO senden).
-   * segmentId = optional, falls app_segment_clean andere IDs als die Schlüssel braucht.
+   * Wert.segmentId = die an MiIO zu sendende Segment-ID (immer gesetzt; i. d. R. identisch zum Schlüssel).
    */
-  roomMapping: Record<string, { name: string; id: string; segmentId?: string }> = {};
+  roomMapping: Record<string, { name: string; id: string; segmentId: string }> = {};
 
   constructor(init?: Partial<DeviceVacuumCleaner>) {
     super();
@@ -186,6 +186,31 @@ export abstract class DeviceVacuumCleaner extends Device {
   }
 
   abstract updateValues(): Promise<void>;
+
+  override toDatabaseJson(): Record<string, unknown> {
+    return {
+      ...super.toDatabaseJson(),
+      mo: this.deviceState?.mode ?? 'sleeping',
+      cm: this.deviceState?.cleaningMode ?? 0,
+      ci: this.deviceState?.cleaningIntensity ?? 'standard',
+      wi: this.deviceState?.wiperIntensity ?? 'off',
+      vi: this.deviceState?.vacuumIntensity ?? 0,
+      rt: this.deviceState?.repeatTimes ?? 1,
+      cr: this.deviceState?.currentRooms ?? [],
+      cz: this.deviceState?.currentZones ?? [],
+      crm: this.deviceState?.currentRoom ?? '',
+      cl: this.deviceState?.currentLocation ?? { x: 0, y: 0 },
+      bl: this.batteryLevel ?? 0,
+      ds: {
+        w: this.dockState?.washing ? 1 : 0,
+        dc: this.dockState?.dustCollection ? 1 : 0,
+        dr: this.dockState?.drying ? 1 : 0,
+        wl: this.dockState?.waterBoxLevel ?? 0,
+        dwl: this.dockState?.dirtyWaterBoxLevel ?? 0,
+      },
+      cs: this.cleanSequence ?? [],
+    };
+  }
 
   isCleaning(): boolean {
     return this.deviceState.mode === DEVICE_MODE.CLEANING;
@@ -368,61 +393,20 @@ export abstract class DeviceVacuumCleaner extends Device {
 
   protected abstract executeDock(): Promise<void>;
 
-  /**
-   * Liefert die an MiIO (app_segment_clean) zu übergebenden numerischen Raum-/Segment-IDs als Strings.
-   * — Schlüssel von roomMapping = Staubsauger-Raum-ID (z. B. "16") → wird verwendet, sofern kein segmentId gesetzt.
-   * — Wert `id` = Grundriss-Raum-ID (Smarthome), wird nicht an MiIO geschickt.
-   * — Optional `segmentId` überschreibt, falls das Gerät explizit Segment-IDs braucht.
-   */
-  private miioIdFromMappingEntry(
-    vacuumRoomKey: string,
-    entry: { name: string; id: string; segmentId?: string } | undefined
-  ): string | undefined {
-    if (!entry || !vacuumRoomKey) return undefined;
-    if (typeof entry.segmentId === "string" && entry.segmentId.length > 0) {
-      return String(entry.segmentId);
-    }
-    return String(vacuumRoomKey);
-  }
 
-  resolveSegmentIdsForRoomCleaning(incomingRoomIds: string[]): string[] {
-    const mapping = this.roomMapping ?? {};
-    const keys = Object.keys(mapping);
-    if (keys.length === 0) {
-      return incomingRoomIds.map((x) => String(x).trim()).filter(Boolean);
+  protected resolveSegmentIdsForRoomCleaning(incomingRoomIds: string[]): string[] {
+    const mapping = this.roomMapping;
+    if( mapping == undefined || mapping == null ){
+      return this.cleanSequence;
     }
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const rid of incomingRoomIds) {
-      const raw = String(rid).trim();
-      if (!raw) continue;
-      let miioId: string | undefined;
-      const byKey = mapping[raw];
-      if (byKey != null) {
-        miioId = this.miioIdFromMappingEntry(raw, byKey);
-      }
-      if (miioId == null) {
-        for (const [vacuumKey, entry] of Object.entries(mapping)) {
-          if (entry != null && String(entry.id) === raw) {
-            miioId = this.miioIdFromMappingEntry(vacuumKey, entry);
-            break;
-          }
+    return incomingRoomIds.map((roomId) => {
+      for(const [key, entry] of Object.entries(mapping)){
+        if( entry.id === roomId || String(entry.segmentId) === String(roomId) || String(key) === String(roomId) ){
+          return key;
         }
       }
-      if (miioId == null) {
-        for (const entry of Object.values(mapping)) {
-          if (entry != null && entry.segmentId != null && String(entry.segmentId) === raw) {
-            miioId = String(entry.segmentId);
-            break;
-          }
-        }
-      }
-      if (miioId != null && miioId.length > 0 && !seen.has(miioId)) {
-        seen.add(miioId);
-        out.push(miioId);
-      }
-    }
-    return out;
+      return undefined;
+    }).filter((id)=> id !== undefined);
   }
 
   async startCleaningRoom(roomIds: string[], execute: boolean, trigger: boolean = true) {

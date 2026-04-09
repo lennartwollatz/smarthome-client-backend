@@ -11,7 +11,6 @@ export abstract class DeviceSwitchEnergy extends DeviceSwitch {
 
   abstract updateValues(): Promise<void>;
 
-
   isEnergyUsageHigher(button:string, threshold: number, timePeriod: string): boolean {
     const buttonButton = this.buttons[button];
     if (!buttonButton || !buttonButton.energyUsage) {

@@ -18,7 +18,7 @@ export class EventCarLockedStateLocked extends Event{
             type: "bool",
             value: true
         };
-        super(eventId, deviceId, Date.now(), EventType.CAR_LOCKED_STATE_LOCKED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CAR_LOCKED_STATE_LOCKED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

@@ -18,7 +18,7 @@ export class EventTemperatureGoalReached extends Event{
             type: "num",
             value: temperatureGoal
         };
-        super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_GOAL_REACHED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_GOAL_REACHED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

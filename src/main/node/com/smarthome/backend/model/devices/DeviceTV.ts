@@ -31,7 +31,17 @@ export abstract class DeviceTV extends Device {
     this.type = DeviceType.TV;
   }
 
-  /** Entspricht den Einträgen `BASE_FUNCTIONS_BOOL` im Frontend (`device-tv.ts`). */
+  override toDatabaseJson(): Record<string, unknown> {
+    return {
+      ...super.toDatabaseJson(),
+      pw: this.power ? 1 : 0,
+      sc: this.screen ? 1 : 0,
+      v: this.volume,
+      ch: this.selectedChannel ?? null,
+      ap: this.selectedApp ?? null,
+    };
+  }
+
   isPowerOn(): boolean {
     return !!this.power;
   }

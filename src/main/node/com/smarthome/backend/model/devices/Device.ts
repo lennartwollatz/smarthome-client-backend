@@ -62,5 +62,9 @@ export class Device {
     return Number.isNaN(ms) ? null : ms;
   }
 
+  toDatabaseJson(): Record<string, unknown> {
+    return {};
+  }
+
   async delete(): Promise<void> {};
 }

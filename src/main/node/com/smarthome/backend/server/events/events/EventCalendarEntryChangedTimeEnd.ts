@@ -19,7 +19,7 @@ export class EventCalendarEntryChangedTimeEnd extends Event{
             type: "str",
             value: newEndIso
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_TIME_END, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_TIME_END, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

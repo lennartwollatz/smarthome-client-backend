@@ -18,7 +18,7 @@ export class EventTemperatureChanged extends Event{
             type: "num",
             value: temperature
         };
-        super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_CHANGED, [eventCondition], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

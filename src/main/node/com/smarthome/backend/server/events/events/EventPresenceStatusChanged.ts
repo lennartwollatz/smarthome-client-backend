@@ -18,7 +18,7 @@ export class EventPresenceStatusChanged extends Event {
             type: "obj",
             value: deviceAfter
         };
-        super(eventId, deviceId, Date.now(), EventType.PRESENCE_STATUS_CHANGED, [eventCondition], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.PRESENCE_STATUS_CHANGED, [eventCondition], [], [resultCondition], false);
     }
 
     public matchesListener(listener: EventListener): boolean {

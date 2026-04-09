@@ -18,7 +18,7 @@ export class EventVacuumDirtyWaterBoxLevelLess extends Event {
       type: "num",
       value: level
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_DIRTY_WATER_BOX_LEVEL_LESS, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_DIRTY_WATER_BOX_LEVEL_LESS, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

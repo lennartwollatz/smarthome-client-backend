@@ -33,6 +33,18 @@ export abstract class DeviceSpeaker extends Device {
     this.type = DeviceType.SPEAKER;
   }
 
+  private static readonly PLAY_STATE_MAP: Record<string, number> = { stop: 0, play: 1, pause: 2 };
+
+  override toDatabaseJson(): Record<string, unknown> {
+    return {
+      ...super.toDatabaseJson(),
+      ps: DeviceSpeaker.PLAY_STATE_MAP[this.playState ?? 'stop'] ?? 0,
+      v: this.volume ?? 0,
+      mu: this.muted ? 1 : 0,
+      gw: this.groupedWith ?? [],
+    };
+  }
+
   static playStateFromString(value?: string | null) {
     if (!value) return null;
     const values = Object.values(DeviceSpeaker.PlayState) as string[];

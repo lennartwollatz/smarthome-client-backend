@@ -12,7 +12,7 @@ export class EventContinue extends Event {
       type: "obj",
       value: deviceBefore,
     };
-    super(eventId, deviceId, Date.now(), EventType.CONTINUE, [eventCondition], [], []);
+    super(eventId, deviceId, Date.now(), EventType.CONTINUE, [eventCondition], [], [], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

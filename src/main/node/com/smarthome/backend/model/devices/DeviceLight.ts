@@ -53,6 +53,10 @@ export abstract class DeviceLight extends Device {
 
   protected abstract executeSetOff(): Promise<void>;
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), o: this.on ? 1 : 0 };
+  }
+
   async toggle(execute: boolean, trigger: boolean = true) {
     if (this.on) {
        await this.setOff(execute, trigger);

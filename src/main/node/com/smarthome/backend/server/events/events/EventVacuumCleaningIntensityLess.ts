@@ -18,7 +18,7 @@ export class EventVacuumCleaningIntensityLess extends Event {
       type: "str",
       value: cleaningIntensity
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_INTENSITY_LESS, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_INTENSITY_LESS, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {

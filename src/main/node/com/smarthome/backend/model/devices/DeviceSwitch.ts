@@ -135,6 +135,21 @@ export abstract class DeviceSwitch extends Device {
 
   abstract delete(): Promise<void>;
 
+  override toDatabaseJson(): Record<string, unknown> {
+    const btns: Record<string, Record<string, unknown>> = {};
+    for (const [id, btn] of Object.entries(this.buttons ?? {})) {
+      btns[id] = {
+        o: btn.on ? 1 : 0,
+        b: btn.brightness ?? 0,
+        eu: btn.energyUsage?.now ?? 0,
+        pc: btn.pressCount ?? 0,
+        ip: btn.initialPressTime ?? 0,
+        lp: btn.lastPressTime ?? 0,
+        fp: btn.firstPressTime ?? 0,
+      };
+    }
+    return { ...super.toDatabaseJson(), btns };
+  }
 
   addButton(buttonId: string) {
     this.buttons ??= {};

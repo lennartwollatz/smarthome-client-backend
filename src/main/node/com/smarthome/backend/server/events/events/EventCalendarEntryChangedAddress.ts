@@ -13,7 +13,7 @@ export class EventCalendarEntryChangedAddress extends Event{
             type: "obj",
             value: entry
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_ADDRESS_CHANGED, [], [], [resultCondition]);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_ADDRESS_CHANGED, [], [], [resultCondition], true);
     }
 
     public matchesListener(listener: EventListener): boolean {

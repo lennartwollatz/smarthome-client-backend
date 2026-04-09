@@ -23,7 +23,7 @@ export class EventTemperatureSchedulesChanged extends Event {
       type: "obj",
       value: temperatureSchedules
     };
-    super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_SCHEDULES_CHANGED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_SCHEDULES_CHANGED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

@@ -15,6 +15,10 @@ export abstract class DeviceFan extends DeviceLight {
     this.type = DeviceType.FAN;
   }
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), sp: this.speed ?? 0 };
+  }
+
   fanSpeedEquals(speed: number):boolean {
     return (this.speed ?? 0) === speed;
   }

@@ -3,6 +3,7 @@ import { createServer as createHttpServer } from "http";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import { logger } from "../../logger.js";
+import { runWithSource, EventSource } from "../events/EventSource.js";
 import { LiveUpdateService } from "./services/live.service.js";
 import type { DatabaseManager } from "../db/database.js";
 import type { EventManager } from "../events/EventManager.js";
@@ -12,6 +13,7 @@ import type { SettingManager } from "./entities/settings/settingManager.js";
 import type { FloorplanManager } from "./entities/floorplan/floorplanManager.js";
 import { DeviceManager } from "./entities/devices/deviceManager.js";
 import { SceneManager } from "./entities/scenes/sceneManager.js";
+import type { DataCollector } from "../ml/dataCollector.js";
 import { createUserRouter } from "./services/user.service.js";
 import { createSettingsRouter } from "./services/settings.service.js";
 import { createSceneRouter } from "./services/scene.service.js";
@@ -29,6 +31,7 @@ export type ServerDeps = {
   deviceManager: DeviceManager;
   userManager: UserManager;
   actionManager: ActionManager;
+  dataCollector?: DataCollector;
 };
 
 export function createApiRouter(deps: ServerDeps) {
@@ -64,6 +67,7 @@ export function createServer(deps: ServerDeps) {
   app.use(cors());
   app.use(express.json({ limit: "10mb" }));
 
+  app.use("/api", (req, res, next) => runWithSource(EventSource.USER, next));
   app.use(
     "/api",
     createApiRouter(deps)

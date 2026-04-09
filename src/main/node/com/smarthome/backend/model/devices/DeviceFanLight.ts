@@ -14,6 +14,10 @@ export abstract class DeviceFanLight extends DeviceFan {
     this.type = DeviceType.FAN_LIGHT;
   }
 
+  override toDatabaseJson(): Record<string, unknown> {
+    return { ...super.toDatabaseJson(), lo: this.lightOn ? 1 : 0 };
+  }
+
   isLightOn():boolean {
     return this.lightOn === true;
   }

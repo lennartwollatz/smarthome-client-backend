@@ -60,8 +60,7 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
       const discoveredDevices = await this.deviceDiscover.discover(20, []);
       logger.info({ count: discoveredDevices.length }, "Geraete gefunden");
 
-      // TODO: eventuell sollte die Konvertierung zu einem XiaomiVacuumCleaner und Speicherung
-      // erst dann geschehen, wenn das Device übernommen wird.
+      // Konvertierung und Persistenz bei Discovery wie bei Denon HEOS — Geräte sind direkt nutzbar.
       const vacuumCleaners = await this.convertDiscoveredDevicesToVacuumCleaners(discoveredDevices);
       this.deviceManager.saveDevices(vacuumCleaners);
       this.initialiseEventStreamManager();
@@ -253,21 +252,15 @@ export class XiaomiModuleManager extends ModuleManager<XiaomiEventStreamManager,
    * Optionen werden am Gerät ausgeführt, in `deviceState` gesetzt und per saveDevice persistiert.
    */
   async startCleaningRoom(deviceId: string, roomIds: string[], options?: StartCleaningRoomOptions): Promise<boolean> {
-    const ids = roomIds?.map(String).filter(Boolean) ?? [];
-    if (ids.length === 0) return false;
-    logger.info({ deviceId, roomCount: ids.length }, "Starte Raumreinigung");
+    if (roomIds.length === 0) return false;
+    logger.info({ deviceId, rooms: JSON.stringify(roomIds) }, "Starte Raumreinigung");
     const vacuum = await this.getVacuumCleaner(deviceId);
     if (!vacuum) return false;
-    const segmentIds = vacuum.resolveSegmentIdsForRoomCleaning(ids);
-    if (segmentIds.length === 0) {
-      logger.warn({ deviceId, ids }, "startCleaningRoom: keine Segment-IDs aus roomMapping");
-      return false;
-    }
     try {
       if (options != null) {
         await this.applyStartCleaningRoomOptionsToVacuum(vacuum, options);
       }
-      await vacuum.startCleaningRoom(segmentIds, true, true);
+      await vacuum.startCleaningRoom(roomIds, true, true);
       this.deviceManager.saveDevice(vacuum);
       return true;
     } catch (err) {

@@ -37,6 +37,16 @@ export abstract class DeviceThermostat extends DeviceTemperature {
 
   abstract delete(): Promise<void>;
 
+  private static readonly STATE_MAP: Record<string, number> = { off: 0, heating: 1, cooling: 2 };
+
+  override toDatabaseJson(): Record<string, unknown> {
+    return {
+      ...super.toDatabaseJson(),
+      tg: this.temperatureGoal,
+      st: DeviceThermostat.STATE_MAP[this.state] ?? 0,
+    };
+  }
+
   isTemperatureGoalReached(): boolean {
     if (this.state === 'cooling') {
       return (this.temperature ?? 0) <= (this.temperatureGoal ?? 0);

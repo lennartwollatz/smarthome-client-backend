@@ -18,7 +18,7 @@ export class EventVolumeChanged extends Event {
       type: "num",
       value: volume
     };
-    super(eventId, deviceId, Date.now(), EventType.VOLUME_CHANGED, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VOLUME_CHANGED, [eventCondition], [], [resultCondition], true);
   }
 
   public matchesListener(listener: EventListener): boolean {

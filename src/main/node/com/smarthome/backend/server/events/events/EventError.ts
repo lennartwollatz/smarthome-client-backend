@@ -18,7 +18,7 @@ export class EventError extends Event {
       type: "str",
       value: error
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_ERROR, [eventCondition], [], [resultCondition]);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_ERROR, [eventCondition], [], [resultCondition], false);
   }
 
   public matchesListener(listener: EventListener): boolean {
