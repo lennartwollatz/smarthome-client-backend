@@ -44,8 +44,6 @@ class SonoffSwitch(SonoffDevice):
         device_id: str = None,
         api_key: str = None,
         outlet: int = None,
-        emit_every_multifun_telemetry: bool = False,
-        emit_all_mdns_updates: bool = False,
     ) -> None:
 
         self.inching_seconds = inching_seconds
@@ -69,8 +67,6 @@ class SonoffSwitch(SonoffDevice):
             device_id=device_id,
             api_key=api_key,
             outlet=outlet,
-            emit_every_multifun_telemetry=emit_every_multifun_telemetry,
-            emit_all_mdns_updates=emit_all_mdns_updates,
         )
 
     @property
@@ -141,18 +137,6 @@ class SonoffSwitch(SonoffDevice):
         """
         self.logger.debug("Switch turn_off called.")
         self.update_params({"switch": "off"})
-
-    async def turn_zeroconf(self, switch: str):
-        """on | off | toggle — erfolgt wie turn_on/off über update_params / LAN."""
-        s = (switch or "").lower()
-        if s == "toggle":
-            self.update_params({"switch": "toggle"})
-        elif s == "on":
-            await self.turn_on()
-        elif s == "off":
-            await self.turn_off()
-        else:
-            raise ValueError("switch must be on, off or toggle")
 
     async def shutdown_inching(self):
         self.logger.debug("shutdown_inching running")

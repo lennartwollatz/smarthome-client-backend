@@ -224,7 +224,7 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
       device.getLanApiKey(),
       "-l",
       "CRITICAL",
-      "state",
+      "getState",
     ];
     
     return await this.sendAndResolve(device, args);

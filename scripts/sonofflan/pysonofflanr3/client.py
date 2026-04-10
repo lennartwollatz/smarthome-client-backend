@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from typing import Dict, Union, Callable, Awaitable, Any, Optional, Tuple
+from typing import Dict, Union, Callable, Awaitable, Optional, Any
 import asyncio
 import traceback
 import collections
@@ -15,81 +15,109 @@ from pysonofflanr3 import utils
 import socket
 
 
-def _json_dumps_for_display(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True)
-
-
 def parse_zeroconf_http_response(
-    raw_body: str, request_iv_b64: str, api_key: str
-) -> Tuple[bool, Optional[dict]]:
-    """
-    Parse Sonoff /zeroconf/* HTTP body: plain {error:0}, encrypted wrapper, or raw AES.
-    Mirrors backend parseZeroconfHttpResponse.
-    """
-    trimmed = (raw_body or "").strip()
-    if not trimmed:
-        return False, None
+    api_key: Optional[str], raw: bytes
+) -> Optional[Dict[str, Any]]:
+    """Inneres JSON aus POST-Antwort /zeroconf/* (Klartext oder encrypt+data+iv)."""
     try:
-        top = json.loads(trimmed)
-        err = top.get("error")
-        if isinstance(err, int):
-            if err != 0:
-                return False, top
-            # error==0 kann trotzdem eine verschachtelte AES-Hülle (data/iv) enthalten
-            if (
-                top.get("encrypt") is True
-                and isinstance(top.get("data"), str)
-                and isinstance(top.get("iv"), str)
-            ):
-                try:
-                    plain = sonoffcrypto.decrypt(
-                        top["data"], top["iv"], api_key
-                    )
-                    inner = json.loads(plain.decode("utf-8"))
-                    inner_err = inner.get("error")
-                    if isinstance(inner_err, int):
-                        return inner_err == 0, inner
-                    return True, inner
-                except (
-                    json.JSONDecodeError,
-                    TypeError,
-                    ValueError,
-                    KeyError,
-                ):
-                    return True, top
-            return True, top
-        if (
-            top.get("encrypt") is True
-            and isinstance(top.get("data"), str)
-            and isinstance(top.get("iv"), str)
-        ):
-            plain = sonoffcrypto.decrypt(top["data"], top["iv"], api_key)
-            inner = json.loads(plain.decode("utf-8"))
-            inner_err = inner.get("error")
-            if isinstance(inner_err, int):
-                return inner_err == 0, inner
-            return True, inner
-        return True, top
-    except (json.JSONDecodeError, TypeError, ValueError, KeyError):
-        pass
-    try:
-        result = sonoffcrypto.decrypt(trimmed, request_iv_b64, api_key)
-        inner = json.loads(result.decode("utf-8"))
-        inner_err = inner.get("error")
-        if isinstance(inner_err, int):
-            return inner_err == 0, inner
-        return bool(inner.get("ok")), inner
-    except (json.JSONDecodeError, TypeError, ValueError, KeyError):
-        return False, None
+        body = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if body.get("error", -1) != 0:
+        return None
+    data = body.get("data")
+    if data is None:
+        return None
+    if bool(body.get("encrypt")) and isinstance(data, str):
+        if not api_key:
+            return None
+        iv = body.get("iv")
+        if iv is None:
+            return None
+        plaintext = sonoffcrypto.decrypt(data, iv, api_key)
+        inner = json.loads(plaintext.decode("utf-8"))
+        return inner if isinstance(inner, dict) else None
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, str):
+        try:
+            inner = json.loads(data)
+            return inner if isinstance(inner, dict) else None
+        except ValueError:
+            return None
+    return None
+
+
+def _json_dumps_for_display(obj: Any, indent: Optional[int]) -> str:
+    kw = {"ensure_ascii": False}
+    if indent is not None:
+        kw["indent"] = indent
+    else:
+        kw["separators"] = (",", ":")
+    return json.dumps(obj, **kw)
 
 
 def format_zeroconf_http_body_as_json(
-    raw_body: str, request_iv_b64: str, api_key: str
+    api_key: Optional[str],
+    raw: bytes,
+    indent: Optional[int] = 2,
 ) -> str:
-    ok, parsed = parse_zeroconf_http_response(raw_body, request_iv_b64, api_key)
-    if parsed is not None:
-        return _json_dumps_for_display({"ok": ok, "data": parsed})
-    return _json_dumps_for_display({"ok": False, "data": None, "raw": raw_body[:2000]})
+    """HTTP-/zeroconf-Antwort als JSON-String; bei encrypt+data ist `data` das entschlüsselte Objekt (dict/list), nicht Base64.
+
+    Fehlerantworten (error != 0) unverändert; Entschlüsselung nur bei error == 0.
+    Mit indent=None eine kompakte Zeile (z. B. für stdout / Pipe).
+    """
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as ex:
+        return _json_dumps_for_display(
+            {
+                "_parse_error": str(ex),
+                "_raw": raw.decode("utf-8", "replace")[:2000],
+            },
+            indent,
+        )
+
+    out: Dict[str, Any] = {}
+    for k in ("sequence", "seq", "error", "encrypt", "iv"):
+        if k in body:
+            out[k] = body[k]
+
+    err = body.get("error", -1)
+    data = body.get("data")
+
+    if err != 0:
+        if data is not None:
+            out["data"] = data
+        return _json_dumps_for_display(out, indent)
+
+    if data is None:
+        return _json_dumps_for_display(out, indent)
+
+    if bool(body.get("encrypt")) and isinstance(data, str):
+        iv = body.get("iv")
+        if not api_key or iv is None:
+            out["data_ciphertext"] = data
+            out["_note"] = "api_key oder iv fehlt, Entschlüsselung übersprungen"
+        else:
+            try:
+                plaintext = sonoffcrypto.decrypt(data, iv, api_key)
+                inner: Any = json.loads(plaintext.decode("utf-8"))
+                out["data"] = inner
+            except Exception as ex:
+                out["data_ciphertext"] = data
+                out["_decrypt_error"] = str(ex)
+    elif isinstance(data, dict):
+        out["data"] = data
+    elif isinstance(data, str):
+        try:
+            out["data"] = json.loads(data)
+        except ValueError:
+            out["data"] = data
+    else:
+        out["data"] = data
+
+    return _json_dumps_for_display(out, indent)
 
 
 class SonoffLANModeClient:
@@ -127,14 +155,12 @@ class SonoffLANModeClient:
         device_id: str = "",
         api_key: str = "",
         outlet: int = None,
-        forward_identical_mdns: bool = False,
     ):
 
         self.host = host
         self.device_id = device_id
         self.api_key = api_key
         self.outlet = outlet
-        self.forward_identical_mdns = forward_identical_mdns
         self.logger = logger
         self.event_handler = event_handler
         self.connected_event = asyncio.Event()
@@ -149,7 +175,6 @@ class SonoffLANModeClient:
         self._info_cache = None
         self._last_params = {"switch": "off"}
         self._times_added = 0
-        self._last_sent_iv: Optional[str] = None
 
     def listen(self):
         """
@@ -253,14 +278,11 @@ class SonoffLANModeClient:
             return
         self.set_url(found_ip, str(info.port))
 
-        # Optimierung: identische mDNS-Pakete überspringen (weniger CPU).
-        # Bei Live-Stream (--live / emit_all_mdns_updates) trotzdem weiterreichen,
-        # sonst fehlen regelmäßige stdout-Zeilen solange sich nichts ändert.
-        identical = info.properties == self._info_cache
-        if identical:
+        # Useful optimsation for 0.24.1 onwards (fixed in 0.24.5 though)
+        # as multiple updates that are the same are received
+        if info.properties == self._info_cache:
             self.logger.info("same update received for device: %s", name)
-            if not self.forward_identical_mdns:
-                return
+            return
         else:
             self._info_cache = info.properties
 
@@ -369,12 +391,9 @@ class SonoffLANModeClient:
                 # set retires back to 0
                 self.set_retries(0)
 
-    def _uses_switches_endpoint(self) -> bool:
-        return self.type in (b"strip", b"multifun_switch")
-
     def send_switch(self, request: Union[str, Dict]):
 
-        if self._uses_switches_endpoint():
+        if self.type in (b"strip", b"multifun_switch"):
             response = self.send(request, self.url + "/zeroconf/switches")
         else:
             response = self.send(request, self.url + "/zeroconf/switch")
@@ -404,49 +423,6 @@ class SonoffLANModeClient:
                 response.content,
             )
 
-    def send_statistics(self):
-
-        return self.send(
-            self.get_update_payload(self.device_id, {}),
-            self.url + "/zeroconf/statistics",
-        )
-
-    def send_empty_zeroconf_switch(self):
-
-        return self.send(
-            self.get_update_payload(self.device_id, {}),
-            self.url + "/zeroconf/switch",
-        )
-
-    def send_empty_zeroconf_switches(self):
-
-        return self.send(
-            self.get_update_payload(self.device_id, {}),
-            self.url + "/zeroconf/switches",
-        )
-
-    def send_zeroconf_get_state(self):
-        """
-        Leeres verschlüsseltes data-Objekt an /zeroconf/getState.
-        Viele Geräte (z. B. DUALR3) antworten hier mit vollem Status inkl.
-        ``switches``; leerer POST auf /zeroconf/switches liefert dagegen oft error 400.
-        """
-        return self.send(
-            self.get_update_payload(self.device_id, {}),
-            self.url + "/zeroconf/getState",
-        )
-
-    def send_dimmable(self, request: Union[str, Dict]):
-        """
-        Helligkeit per LAN. mDNS-Typ ``plug`` (z. B. Mini-Dimmer-Steckdose): nur
-        ``/zeroconf/brightness`` — dort liefert die Firmware zuverlässig ``error:0``,
-        während ``/zeroconf/dimmable`` 404 liefert. Andere Typen (z. B. D1): ``/zeroconf/dimmable``.
-        """
-        path = "brightness" if self.type == b"plug" else "dimmable"
-        url = self.url + "/zeroconf/" + path
-        self.logger.debug("LAN brightness endpoint: /zeroconf/%s (mDNS type=%s)", path, self.type)
-        return self.send(request, url)
-
     def send_signal_strength(self):
 
         response = self.send(
@@ -461,6 +437,27 @@ class SonoffLANModeClient:
         else:
             return response
 
+    def send_statistics(self):
+        """POST /zeroconf/statistics — wie SonoffLAN (u. a. einige POW-/Mess-Geräte, z. B. UIID 126)."""
+        return self.send(
+            self.get_update_payload(self.device_id, {}),
+            self.url + "/zeroconf/statistics",
+        )
+
+    def send_empty_zeroconf_switch(self):
+        """POST /zeroconf/switch mit leerem Payload (Ein-Kanal, Abfrage je nach Firmware)."""
+        return self.send(
+            self.get_update_payload(self.device_id, {}),
+            self.url + "/zeroconf/switch",
+        )
+
+    def send_empty_zeroconf_switches(self):
+        """POST /zeroconf/switches mit leerem Payload (Mehrkanal / DUALR3 u. ä.)."""
+        return self.send(
+            self.get_update_payload(self.device_id, {}),
+            self.url + "/zeroconf/switches",
+        )
+
     def send(self, request: Union[str, Dict], url):
         """
         Send message to an already-connected Sonoff LAN Mode Device
@@ -470,9 +467,6 @@ class SonoffLANModeClient:
         """
 
         data = json.dumps(request, separators=(",", ":"))
-        self._last_sent_iv = None
-        if isinstance(request, dict) and request.get("encrypt") and request.get("iv"):
-            self._last_sent_iv = request.get("iv")
         self.logger.debug("Sending http message to %s: %s", url, data)
         response = self.http_session.post(url, data=data)
         self.logger.debug(
@@ -485,39 +479,15 @@ class SonoffLANModeClient:
 
         self._last_params = params
 
-        if (
-            self.type in (b"strip", b"multifun_switch")
-            and params != {}
-            and params is not None
-        ):
+        if self.type in (b"strip", b"multifun_switch") and params != {} and params is not None:
 
             if self.outlet is None:
                 self.outlet = 0
 
-            outlet_val = self.outlet
-            if outlet_val is None and "outlet" in params:
-                outlet_val = int(params["outlet"])
-            if outlet_val is None:
-                outlet_val = 0
-
-            entry = {
-                "switch": params["switch"],
-                "outlet": int(outlet_val),
-            }
-            if "brightness" in params:
-                entry["brightness"] = params["brightness"]
-            if "mode" in params:
-                entry["mode"] = params["mode"]
-            params = {"switches": [entry]}
-
-        if (
-            self.type not in (b"strip", b"multifun_switch")
-            and params
-            and self.outlet is not None
-            and int(self.outlet) > 0
-            and "outlet" not in params
-        ):
-            params = {**params, "outlet": int(self.outlet)}
+            switches = {"switches": [{"switch": "off", "outlet": 0}]}
+            switches["switches"][0]["switch"] = params["switch"]
+            switches["switches"][0]["outlet"] = int(self.outlet)
+            params = switches
 
         payload = {
             "sequence": str(
@@ -572,21 +542,11 @@ class SonoffLANModeClient:
     def set_retries(self, retry_count):
 
         # no retries at moment, control in sonoffdevice
-        retry_kwargs = {
-            "total": retry_count,
-            "backoff_factor": 0.5,
-            "status_forcelist": None,
-        }
-        # urllib3<2: method_whitelist, urllib3>=2: allowed_methods
-        try:
-            retries = Retry(
-                allowed_methods=["POST"],
-                **retry_kwargs,
-            )
-        except TypeError:
-            retries = Retry(
-                method_whitelist=["POST"],
-                **retry_kwargs,
-            )
+        retries = Retry(
+            total=retry_count,
+            backoff_factor=0.5,
+            method_whitelist=["POST"],
+            status_forcelist=None,
+        )
 
         self.http_session.mount("http://", HTTPAdapter(max_retries=retries))

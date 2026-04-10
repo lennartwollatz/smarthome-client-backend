@@ -12,11 +12,38 @@ from pysonofflanr3 import SonoffLANModeClient
 from pysonofflanr3 import utils
 
 
+def _outlet_index(sw: dict, fallback_index: int) -> int:
+    o = sw.get("outlet")
+    if o is None:
+        return fallback_index
+    try:
+        return int(o)
+    except (TypeError, ValueError):
+        return fallback_index
+
+
+def _merge_switches_by_outlet(previous: list, incoming: list) -> list:
+    """DUALR3/Mehrkanal: Teilpakete enthalten oft nur einen `switches`-Eintrag.
+
+    Flaches {**old, **new} ersetzt sonst das komplette Array — es bleibt nur ein Kanal.
+    """
+    by_outlet: dict = {}
+    for i, sw in enumerate(previous or []):
+        if isinstance(sw, dict):
+            idx = _outlet_index(sw, i)
+            by_outlet[idx] = dict(sw)
+    for i, sw in enumerate(incoming or []):
+        if not isinstance(sw, dict):
+            continue
+        idx = _outlet_index(sw, i)
+        base = dict(by_outlet.get(idx, {}))
+        base.update(sw)
+        by_outlet[idx] = base
+    return [by_outlet[k] for k in sorted(by_outlet.keys())]
+
+
 class SonoffDevice(object):
-    """
-    Wenn True: bei multifun_switch-Nachrichten ohne ``switches`` (nur Telematik)
-    trotzdem ``callback_after_update`` aufrufen.
-    """
+    """Wenn True: multifun_switch löst callback_after_update auch bei reinen Telemetrie-Updates aus (nur CLI Leer-POST)."""
 
     invoke_callback_on_multifun_partial = False
 
@@ -33,8 +60,6 @@ class SonoffDevice(object):
         device_id: str = "",
         api_key: str = "",
         outlet: int = None,
-        emit_every_multifun_telemetry: bool = False,
-        emit_all_mdns_updates: bool = False,
     ) -> None:
         """
         Create a new SonoffDevice instance.
@@ -48,9 +73,6 @@ class SonoffDevice(object):
         self.api_key = api_key
         self.outlet = outlet
         self.shared_state = shared_state
-        self.emit_every_multifun_telemetry = emit_every_multifun_telemetry
-        self.emit_all_mdns_updates = emit_all_mdns_updates
-        self._multifun_initial_telemetry_notified = False
         self.basic_info = None
         self.params = {"switch": "unknown"}
         self.loop = loop
@@ -106,7 +128,6 @@ class SonoffDevice(object):
                 device_id=device_id,
                 api_key=api_key,
                 outlet=outlet,
-                forward_identical_mdns=emit_all_mdns_updates,
             )
 
             self.message_ping_event = asyncio.Event()
@@ -130,42 +151,6 @@ class SonoffDevice(object):
 
         except asyncio.CancelledError:
             self.logger.debug("SonoffDevice loop ended, returning")
-
-    def _outlet_index(self) -> int:
-        if self.outlet is None:
-            return 0
-        return int(self.outlet)
-
-    @staticmethod
-    def _merge_switches_by_outlet(old: list, new: list) -> list:
-        by_outlet = {}
-        for item in old or []:
-            if isinstance(item, dict) and "outlet" in item:
-                by_outlet[int(item["outlet"])] = dict(item)
-        for item in new or []:
-            if isinstance(item, dict) and "outlet" in item:
-                o = int(item["outlet"])
-                if o in by_outlet:
-                    by_outlet[o].update(item)
-                else:
-                    by_outlet[o] = dict(item)
-        return [by_outlet[k] for k in sorted(by_outlet.keys())]
-
-    def merge_basic_info_from_response(self, response: dict) -> dict:
-        if self.basic_info is None:
-            return dict(response)
-        merged = dict(self.basic_info)
-        for key, val in response.items():
-            if key == "switches" and isinstance(val, list):
-                if isinstance(merged.get("switches"), list):
-                    merged["switches"] = self._merge_switches_by_outlet(
-                        merged["switches"], val
-                    )
-                else:
-                    merged["switches"] = list(val)
-            else:
-                merged[key] = val
-        return merged
 
     async def send_availability_loop(self):
 
@@ -315,6 +300,29 @@ class SonoffDevice(object):
         finally:
             self.logger.debug("send_updated_params_loop finally block reached")
 
+    def merge_basic_info_from_response(self, response: dict) -> None:
+        """HTTP zeroconf / Teilmeldungen in basic_info einarbeiten (DUALR3: switches + flache *_00-Keys mergen)."""
+        if self.client.type != b"multifun_switch":
+            self.basic_info = dict(response)
+            self.basic_info["deviceid"] = self.host
+            return
+        if self.basic_info is None:
+            merged = dict(response)
+        else:
+            merged = {**self.basic_info, **response}
+            if isinstance(response.get("switches"), list) and isinstance(
+                self.basic_info.get("switches"), list
+            ):
+                merged["switches"] = _merge_switches_by_outlet(
+                    self.basic_info["switches"],
+                    response["switches"],
+                )
+            elif isinstance(response.get("switches"), list):
+                merged["switches"] = list(response["switches"])
+        merged.pop("deviceid", None)
+        self.basic_info = merged
+        self.basic_info["deviceid"] = self.host
+
     def update_params(self, params):
 
         if self.params != params:
@@ -354,47 +362,43 @@ class SonoffDevice(object):
 
             response = json.loads(message.decode("utf-8"))
 
-            if self.client.type == b"multifun_switch" and "switches" not in response:
-                self.basic_info = self.merge_basic_info_from_response(response)
-                self.basic_info["deviceid"] = self.host
-                self.client.connected_event.set()
-                self.logger.info(
-                    "%s: Connected event (multifun partial / telematics)",
-                    self.client.device_id,
-                )
-                should_notify = (
-                    self.emit_every_multifun_telemetry
-                    or SonoffDevice.invoke_callback_on_multifun_partial
-                )
-                if (
-                    not should_notify
-                    and not self._multifun_initial_telemetry_notified
-                ):
-                    self._multifun_initial_telemetry_notified = True
-                    should_notify = True
-                if should_notify and self.callback_after_update is not None:
-                    await self.callback_after_update(self)
-                return
+            switch_status = None
 
-            if self.client.type in (b"strip", b"multifun_switch"):
+            if self.client.type == b"strip":
 
                 if self.outlet is None:
                     self.outlet = 0
 
-                merged = self.merge_basic_info_from_response(response)
-                switches = merged.get("switches") or []
-                idx = self._outlet_index()
-                switch_status = None
-                for sw in switches:
-                    if isinstance(sw, dict) and int(sw.get("outlet", -1)) == idx:
-                        switch_status = sw.get("switch")
-                        break
-                if switch_status is None and idx < len(switches):
-                    entry = switches[idx]
-                    if isinstance(entry, dict):
-                        switch_status = entry.get("switch")
-                if switch_status is None:
-                    raise KeyError("switch status for outlet %s" % idx)
+                switch_status = response["switches"][int(self.outlet)][
+                    "switch"
+                ]
+
+            elif self.client.type == b"multifun_switch":
+                # DUALR3 etc.: encrypted chunks may be energy/telemetry only, or
+                # include "switches" / "switch". Merge partials into basic_info.
+                self.merge_basic_info_from_response(response)
+                merged = self.basic_info
+
+                if "switches" in merged:
+                    if self.outlet is None:
+                        self.outlet = 0
+                    switch_status = merged["switches"][int(self.outlet)][
+                        "switch"
+                    ]
+                elif "switch" in merged:
+                    switch_status = merged["switch"]
+                else:
+                    # Telemetrie o. Ä. ohne Schaltzustand — kein Fehler
+                    self.client.connected_event.set()
+                    self.logger.debug(
+                        "multifun_switch: partial update (no switch), merged"
+                    )
+                    if (
+                        SonoffDevice.invoke_callback_on_multifun_partial
+                        and self.callback_after_update is not None
+                    ):
+                        await self.callback_after_update(self)
+                    return
 
             elif (
                 self.client.type == b"plug"
@@ -402,26 +406,21 @@ class SonoffDevice(object):
                 or self.client.type == b"enhanced_plug"
                 or self.client.type == b"th_plug"
             ):
-
-                merged = self.merge_basic_info_from_response(response)
-                if (
-                    isinstance(merged.get("switches"), list)
-                    and merged["switches"]
-                ):
-                    idx = self._outlet_index()
-                    if idx < len(merged["switches"]):
-                        entry = merged["switches"][idx]
-                        switch_status = (
-                            entry.get("switch")
-                            if isinstance(entry, dict)
-                            else merged.get("switch")
-                        )
-                    else:
-                        switch_status = merged.get("switch")
+                if "switches" in response:
+                    if self.outlet is None:
+                        self.outlet = 0
+                    switch_status = response["switches"][int(self.outlet)][
+                        "switch"
+                    ]
+                elif "switch" in response:
+                    switch_status = response["switch"]
                 else:
-                    switch_status = merged.get("switch")
-                    if switch_status is None:
-                        raise KeyError("switch")
+                    self.client.connected_event.set()
+                    self.logger.debug(
+                        "plug: response without switch/switches keys: %s",
+                        list(response.keys()),
+                    )
+                    return
 
             else:
                 self.logger.error(
@@ -432,8 +431,9 @@ class SonoffDevice(object):
             self.logger.debug(
                 "Message: Received status from device, storing in instance"
             )
-            self.basic_info = merged
-            self.basic_info["deviceid"] = self.host
+            if self.client.type != b"multifun_switch":
+                self.basic_info = response
+                self.basic_info["deviceid"] = self.host
 
             self.client.connected_event.set()
             self.logger.info(
@@ -476,8 +476,7 @@ class SonoffDevice(object):
                     self.params = {"switch": switch_status}
                     send_update = True
 
-            notify = send_update or self.emit_all_mdns_updates
-            if notify and self.callback_after_update is not None:
+            if send_update and self.callback_after_update is not None:
                 await self.callback_after_update(self)
 
         except Exception as ex:  # pragma: no cover
