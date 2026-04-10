@@ -572,11 +572,21 @@ class SonoffLANModeClient:
     def set_retries(self, retry_count):
 
         # no retries at moment, control in sonoffdevice
-        retries = Retry(
-            total=retry_count,
-            backoff_factor=0.5,
-            method_whitelist=["POST"],
-            status_forcelist=None,
-        )
+        retry_kwargs = {
+            "total": retry_count,
+            "backoff_factor": 0.5,
+            "status_forcelist": None,
+        }
+        # urllib3<2: method_whitelist, urllib3>=2: allowed_methods
+        try:
+            retries = Retry(
+                allowed_methods=["POST"],
+                **retry_kwargs,
+            )
+        except TypeError:
+            retries = Retry(
+                method_whitelist=["POST"],
+                **retry_kwargs,
+            )
 
         self.http_session.mount("http://", HTTPAdapter(max_retries=retries))
