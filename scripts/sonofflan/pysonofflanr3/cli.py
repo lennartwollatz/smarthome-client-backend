@@ -204,38 +204,15 @@ async def _http_switches_query(
             "endpoint": endpoint_label,
         }
 
-    def _merge_switches(
-        a: Optional[list], b: Optional[list]
-    ) -> Optional[list]:
-        out: Dict[int, dict] = {}
-        for src in (a or []):
-            if isinstance(src, dict) and "outlet" in src:
-                try:
-                    out[int(src.get("outlet", -1))] = dict(src)
-                except Exception:
-                    pass
-        for src in (b or []):
-            if isinstance(src, dict) and "outlet" in src:
-                try:
-                    out[int(src.get("outlet", -1))] = dict(src)
-                except Exception:
-                    pass
-        if not out:
-            return None
-        return [out[k] for k in sorted(out.keys())]
-
     meta_get = await one_shot(device.client.send_zeroconf_get_state, "getState")
+    if meta_get.get("switches"):
+        meta_get["tried"] = ["getState"]
+        return meta_get
+
     meta_sw = await one_shot(device.client.send_empty_zeroconf_switches, "switches")
-    merged = _merge_switches(
-        meta_get.get("switches"),
-        meta_sw.get("switches"),
-    )
-    if merged:
-        # Für multifun/strip immer die vollständigste bekannte Kanalliste liefern.
-        best = meta_sw if len(meta_sw.get("switches") or []) >= len(meta_get.get("switches") or []) else meta_get
-        best["switches"] = merged
-        best["tried"] = ["getState", "switches"]
-        return best
+    if meta_sw.get("switches"):
+        meta_sw["tried"] = ["getState", "switches"]
+        return meta_sw
 
     # Beide ohne Kanalliste: letzten Versuch melden, erste Antwort als Referenz
     out = dict(meta_sw)
@@ -710,31 +687,6 @@ async def _build_state_payload(
     http_meta = await _http_switches_query(device, config)
     switches = http_meta["switches"] if http_meta else None
     basic = dict(device.basic_info)
-    if device.client.type == b"multifun_switch":
-        # Für multifun_switch immer beide Outlets (0/1) im Array liefern.
-        # Falls einer fehlt, als Platzhalter mit `switch: None` ergänzen.
-        merged_by_outlet: Dict[int, dict] = {}
-        for src in (switches or []):
-            if isinstance(src, dict) and "outlet" in src:
-                try:
-                    merged_by_outlet[int(src.get("outlet", -1))] = dict(src)
-                except Exception:
-                    pass
-        basic_switches = basic.get("switches")
-        if isinstance(basic_switches, list):
-            for src in basic_switches:
-                if isinstance(src, dict) and "outlet" in src:
-                    try:
-                        out = int(src.get("outlet", -1))
-                        if out not in merged_by_outlet:
-                            merged_by_outlet[out] = dict(src)
-                    except Exception:
-                        pass
-        for out in (0, 1):
-            if out not in merged_by_outlet:
-                merged_by_outlet[out] = {"outlet": out, "switch": None}
-        switches = [merged_by_outlet[k] for k in (0, 1)]
-
     if switches:
         basic["switches"] = switches
     outlet = config.get("outlet")
@@ -920,21 +872,18 @@ def state(config: dict):
     take = _new_cli_one_shot()
 
     async def state_callback(device):
-        if device.basic_info is None:
-            return
-        # Bei manchen multifun/energy Geräten bleibt `available` lange False,
-        # obwohl bereits verwertbare Telemetrie + basic_info vorliegt.
-        # Für One-shot `state` daher bei erstem brauchbaren Update sofort liefern.
-        if not await take():
-            return
-        payload = await _build_state_payload(device, config, live=False)
-        json_stdout_only(payload)
-        if not _machine_mode(config):
-            print_device_details(
-                device,
-                switches_override=payload.get("switches"),
-            )
-        device.shutdown_event_loop()
+        if device.basic_info is not None:
+            if device.available:
+                if not await take():
+                    return
+                payload = await _build_state_payload(device, config, live=False)
+                json_stdout_only(payload)
+                if not _machine_mode(config):
+                    print_device_details(
+                        device,
+                        switches_override=payload.get("switches"),
+                    )
+                device.shutdown_event_loop()
 
     logger.info("Initialising SonoffSwitch with host %s" % config["host"])
     SonoffSwitch(
