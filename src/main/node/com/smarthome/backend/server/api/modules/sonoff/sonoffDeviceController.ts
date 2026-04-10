@@ -133,27 +133,26 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
   private async sendAndResolve(device: SonoffLanEndDevice, args: string[]): Promise<Record<string, unknown> | null> {
     const timeoutMs = 10_000;
     const python = sonoffCliPython();
-    logger.debug(
-      {
-        python,
-        args,
-        commandLine: `${python} ${args.join(" ")}`,
-        address: device.getLanAddress(),
-        ewelinkDeviceId: device.getEwelinkDeviceId(),
-        apiKey: device.getLanApiKey(),
-      },
-      "Sonoff Python-Aufruf (sendAndResolve)"
-    );
 
     return new Promise(resolve => {
       const child = spawn(python, args, sonoffCliSpawnOptions());
       let stdout = "";
       let stderr = "";
+      let stdoutLineBuffer = "";
       let settled = false;
-      const finish = (exitCode: number | null) => {
+      const resolveAndStop = (payload: Record<string, unknown> | null) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        try {
+          if (!child.killed) child.kill("SIGTERM");
+        } catch {
+          // ignore
+        }
+        resolve(payload);
+      };
+      const finish = (exitCode: number | null) => {
+        if (settled) return;
         let decryptedPayload: Record<string, unknown> | null = null;
         try {
           decryptedPayload = JSON.parse(stdout);
@@ -167,11 +166,27 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
             "Sonoff verifyLan: pysonofflanr3 state fehlgeschlagen"
           );
         }
-        resolve(decryptedPayload);
+        resolveAndStop(decryptedPayload);
       };
 
       child.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
+        const text = chunk.toString();
+        stdout += text;
+        stdoutLineBuffer += text;
+        let newline: number;
+        while ((newline = stdoutLineBuffer.indexOf("\n")) >= 0) {
+          const line = stdoutLineBuffer.slice(0, newline).trim();
+          stdoutLineBuffer = stdoutLineBuffer.slice(newline + 1);
+          if (!line) continue;
+          try {
+            const parsed = JSON.parse(line) as Record<string, unknown>;
+            // Nicht-Live Aufrufe sollen sofort zurückkehren, sobald ein verwertbares JSON vorliegt.
+            resolveAndStop(parsed);
+            return;
+          } catch {
+            // kein JSON-Line-Fragment
+          }
+        }
       });
       child.stderr?.on("data", (chunk: Buffer) => {
         stderr += chunk.toString();
@@ -289,18 +304,6 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
       const ewelinkId = (d as any).ewelinkDeviceId ?? "";
       const backendId = d.id;
       const args = this.liveStreamArgsForDevice(d);
-      logger.debug(
-        {
-          python,
-          args,
-          commandLine: `${python} ${args.join(" ")}`,
-          ewelinkDeviceId: ewelinkId,
-          backendDeviceId: backendId,
-          address: (d as any).lanAddress ?? "",
-          apiKey: (d as any).lanApiKey ?? "",
-        },
-        "Sonoff Python-Aufruf (LAN-Livestream)"
-      );
       const child = spawn(python, args, spawnOpts);
       this.liveStreamByEwelinkId.set(ewelinkId, child);
 
