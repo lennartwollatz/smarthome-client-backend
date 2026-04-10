@@ -1,17 +1,20 @@
 import asyncio
 import json
 import logging
-import os
+import re
 import sys
-import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import click
 import click_log
 from click_log import ClickHandler
 
 from pysonofflanr3 import SonoffSwitch, Discover
-from pysonofflanr3.client import parse_zeroconf_http_response
+from pysonofflanr3.client import (
+    format_zeroconf_http_body_as_json,
+    parse_zeroconf_http_response,
+)
+from pysonofflanr3.sonoffdevice import SonoffDevice
 
 if sys.version_info < (3, 6):  # pragma: no cover
     print(
@@ -58,231 +61,108 @@ logger.handlers = [_default_handler]
 pass_config = click.make_pass_decorator(dict, ensure=True)
 
 
-def _parse_device_specs_loaded(loaded: Any, source: str) -> List[Dict[str, Any]]:
-    """JSON-Array → normalisierte Geräteliste; wirft click.BadParameter bei Fehlern."""
-    if not isinstance(loaded, list) or not loaded:
-        raise click.BadParameter(
-            "%s: Es wird ein nicht leeres JSON-Array erwartet." % source
-        )
-    for i, row in enumerate(loaded):
-        if not isinstance(row, dict):
-            raise click.BadParameter(
-                "%s[%s]: JSON-Objekt erwartet." % (source, i)
-            )
-        for key in ("host", "device_id"):
-            if not row.get(key):
-                raise click.BadParameter(
-                    "%s[%s]: '%s' fehlt oder ist leer." % (source, i, key)
-                )
-        if "api_key" not in row:
-            row["api_key"] = ""
-        if "outlet" in row and row["outlet"] is not None:
-            row["outlet"] = int(row["outlet"])
-    return loaded
-
-
-def apply_loglevel(root: logging.Logger, level_name: str) -> None:
-    ln = (level_name or "INFO").strip().upper()
-    if ln == "OFF":
-        root.handlers.clear()
-        root.addHandler(logging.NullHandler())
-        root.setLevel(logging.CRITICAL + 1)
-        for name in ("pysonofflanr3", "urllib3", "zeroconf"):
-            logging.getLogger(name).handlers.clear()
-            logging.getLogger(name).addHandler(logging.NullHandler())
-            logging.getLogger(name).setLevel(logging.CRITICAL + 1)
+def apply_loglevel(loglevel: str) -> None:
+    """-l OFF: keine Logs (nur stdout-JSON bei Zeroconf-Befehlen); sonst übliche Stufen."""
+    name = (loglevel or "INFO").upper()
+    if name == "OFF":
+        # Unterdrückt alle Meldungen inkl. CRITICAL für diesen Prozess
+        logging.disable(logging.CRITICAL)
         return
-    level = getattr(logging, ln, logging.INFO)
+    logging.disable(logging.NOTSET)
+    level = getattr(logging, name, logging.INFO)
+    root = logging.getLogger()
     root.setLevel(level)
-
-
-_stdout_lock = threading.Lock()
-
-
-def json_stdout_only(obj: object) -> None:
-    line = json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n"
-    with _stdout_lock:
-        sys.stdout.write(line)
-        sys.stdout.flush()
-
-
-def json_stdout_error(message: str) -> None:
-    json_stdout_only({"ok": False, "error": message})
-
-
-def json_stdout_ok(ok: bool) -> None:
-    """Eine Zeile `{"ok":true|false}` für Schaltbefehle (switch / on / off)."""
-    json_stdout_only({"ok": bool(ok)})
-
-
-def _new_cli_one_shot():
-    """
-    Nur die erste erfolgreich ankommende Callback-Instanz führt aus
-    (weitere mDNS-Updates während eines HTTP-Calls sonst doppelt).
-    """
-    lock = asyncio.Lock()
-    taken = False
-
-    async def take() -> bool:
-        nonlocal taken
-        async with lock:
-            if taken:
-                return False
-            taken = True
-            return True
-
-    return take
-
-
-def _switch_from_switches_list(
-    switches: list, outlet: Optional[int]
-) -> Optional[str]:
-    if not switches:
-        return None
-    if outlet is not None:
-        for ent in switches:
-            if isinstance(ent, dict) and int(ent.get("outlet", -1)) == int(
-                outlet
-            ):
-                return ent.get("switch")
-    ent0 = switches[0]
-    if isinstance(ent0, dict):
-        return ent0.get("switch")
-    return None
-
-
-def _switches_from_parsed(parsed: Optional[dict]) -> Optional[list]:
-    """``switches`` im Klartext (Root, oder unter ``params`` wie Cloud-API)."""
-    if not parsed or not isinstance(parsed, dict):
-        return None
-    sw = parsed.get("switches")
-    if isinstance(sw, list):
-        return sw
-    params = parsed.get("params")
-    if isinstance(params, dict):
-        sw2 = params.get("switches")
-        if isinstance(sw2, list):
-            return sw2
-    return None
-
-
-async def _http_switches_query(
-    device: SonoffSwitch, config: dict
-) -> Optional[dict]:
-    """
-    Kanalzustände per HTTP (multifun_switch, strip).
-    Zuerst /zeroconf/getState (SonoffLAN-Verhalten), Fallback /zeroconf/switches.
-    """
-    ct = device.client.type
-    if ct not in (b"multifun_switch", b"strip"):
-        return None
-    loop = device.loop
-    api = config.get("api_key") or ""
-
-    async def one_shot(send_fn, endpoint_label: str) -> dict:
+    logger.setLevel(level)
+    for h in list(root.handlers) + list(logger.handlers):
         try:
-            resp = await loop.run_in_executor(None, send_fn)
-        except Exception as ex:  # pragma: no cover
-            logger.debug("%s failed: %s", endpoint_label, ex)
-            return {
-                "switches": None,
-                "httpOk": False,
-                "httpStatus": None,
-                "data": None,
-                "error": str(ex),
-                "endpoint": endpoint_label,
-            }
-        body = resp.content.decode("utf-8", errors="replace")
-        iv = device.client._last_sent_iv or ""
-        ok, parsed = parse_zeroconf_http_response(body, iv, api)
-        sw = _switches_from_parsed(parsed)
-        return {
-            "switches": sw,
-            "httpOk": ok,
-            "httpStatus": resp.status_code,
-            "data": parsed,
-            "endpoint": endpoint_label,
-        }
-
-    meta_get = await one_shot(device.client.send_zeroconf_get_state, "getState")
-    if meta_get.get("switches"):
-        meta_get["tried"] = ["getState"]
-        return meta_get
-
-    meta_sw = await one_shot(device.client.send_empty_zeroconf_switches, "switches")
-    if meta_sw.get("switches"):
-        meta_sw["tried"] = ["getState", "switches"]
-        return meta_sw
-
-    # Beide ohne Kanalliste: letzten Versuch melden, erste Antwort als Referenz
-    out = dict(meta_sw)
-    out["fallback"] = meta_get
-    out["tried"] = ["getState", "switches"]
-    return out
+            h.setLevel(level)
+        except Exception:
+            pass
 
 
-def _is_dualr3(device: SonoffSwitch) -> bool:
-    """
-    DUALR3 (eWeLink uiid 126) ist ``multifun_switch`` mit Energiemessung;
-    /zeroconf/statistics liefert dort sinnvolle Zusatzdaten zu getState.
-    """
-    if device.client.type != b"multifun_switch":
-        return False
-    bi = device.basic_info
-    if not bi or not isinstance(bi, dict):
-        return False
-    uiid = bi.get("uiid")
-    try:
-        if uiid is not None and int(uiid) == 126:
-            return True
-    except (TypeError, ValueError):
-        pass
-    blob = json.dumps(bi, ensure_ascii=False, default=str).lower().replace(" ", "")
-    if "dualr3" in blob or "dual_r3" in blob:
-        return True
-    return False
+def _http_response_as_dict(api_key: Optional[str], raw: bytes) -> Dict[str, Any]:
+    """Gleiche Struktur wie format_zeroconf_http_body_as_json, als dict (entschlüsseltes data)."""
+    return json.loads(format_zeroconf_http_body_as_json(api_key, raw, indent=None))
 
 
-async def _http_statistics_meta(device: SonoffSwitch, config: dict) -> dict:
-    """Ein /zeroconf/statistics-Request; Rückgabe wie ``statistics``-CLI (ohne Prozessende)."""
-    loop = device.loop
-    api = config.get("api_key") or ""
-    try:
-        resp = await loop.run_in_executor(None, device.client.send_statistics)
-    except Exception as ex:  # pragma: no cover
-        logger.debug("statistics failed: %s", ex)
-        return {
-            "ok": False,
-            "httpStatus": None,
-            "data": None,
-            "error": str(ex),
-        }
-    body = resp.content.decode("utf-8", errors="replace")
-    iv = device.client._last_sent_iv or ""
-    ok, parsed = parse_zeroconf_http_response(body, iv, api)
-    return {
-        "ok": ok,
-        "httpStatus": resp.status_code,
-        "data": parsed,
-    }
-
-
-def _zeroconf_http_emit_result(device: SonoffSwitch, config: dict, resp) -> None:
-    body = resp.content.decode("utf-8", errors="replace")
-    iv = device.client._last_sent_iv or ""
-    ok, parsed = parse_zeroconf_http_response(
-        body, iv, config.get("api_key") or ""
+def _stdout_json_line(payload: Dict[str, Any]) -> None:
+    """Genau eine JSON-Zeile auf stdout (für Node & Co.)."""
+    sys.stdout.write(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+        + "\n"
     )
-    if _machine_mode(config):
-        json_stdout_only(
-            {"ok": ok, "httpStatus": resp.status_code, "data": parsed}
+    sys.stdout.flush()
+
+
+def _cli_zeroconf_empty_post(
+    config: dict,
+    title: str,
+    client_method: str,
+    path_segment: str,
+    json_stdout_only: bool = False,
+):
+    """Nach mDNS-Verbindung: genau ein HTTP POST auf /zeroconf/<path_segment> mit leerem Payload.
+
+    json_stdout_only: nur eine kompakte JSON-Zeile auf stdout (kein print_device_details).
+    """
+    ran = {"v": False}
+
+    async def callback(device):
+        if ran["v"]:
+            return
+        if not device.available:
+            return
+        ran["v"] = True
+        try:
+            fn = getattr(device.client, client_method)
+            response = await device.loop.run_in_executor(None, fn)
+            if not json_stdout_only:
+                logger.info(
+                    click.style(
+                        "%s — HTTP %s" % (title, response.status_code), bold=True
+                    )
+                )
+            inner = parse_zeroconf_http_response(device.api_key, response.content)
+            if inner:
+                device.merge_basic_info_from_response(inner)
+
+            single = _http_response_as_dict(device.api_key, response.content)
+            if json_stdout_only:
+                single = dict(single)
+                single["ok"] = True
+                _stdout_json_line(single)
+            else:
+                _stdout_json_line(single)
+
+            if not json_stdout_only:
+                print_device_details(device)
+        except Exception as ex:
+            if json_stdout_only:
+                _stdout_json_line({"ok": False, "error": str(ex)})
+                raise SystemExit(1) from ex
+            logger.error("%s: Request fehlgeschlagen: %s", title, ex, exc_info=True)
+        finally:
+            device.shutdown_event_loop()
+
+    if not json_stdout_only:
+        logger.info(
+            "%s: mDNS, dann POST …/zeroconf/%s (Host %s)",
+            title,
+            path_segment,
+            config["host"],
         )
-    else:
-        logger.info("Zeroconf HTTP %s ok=%s", resp.status_code, ok)
-        if parsed is not None:
-            logger.debug(
-                "%s", json.dumps(parsed, ensure_ascii=False, indent=2)
-            )
+    SonoffDevice.invoke_callback_on_multifun_partial = True
+    try:
+        SonoffSwitch(
+            host=config["host"],
+            callback_after_update=callback,
+            logger=logger,
+            device_id=config["device_id"],
+            api_key=config["api_key"],
+            outlet=config["outlet"],
+        )
+    finally:
+        SonoffDevice.invoke_callback_on_multifun_partial = False
 
 
 @click.group(invoke_without_command=True)
@@ -305,12 +185,6 @@ def _zeroconf_http_emit_result(device: SonoffSwitch, config: dict, resp) -> None
     help="api key for the device to connect to.",
 )
 @click.option(
-    "--outlet",
-    type=int,
-    default=None,
-    help="Kanal/outlet index (Multikanal, DUALR3, strip, …).",
-)
-@click.option(
     "--inching",
     envvar="PYSONOFFLAN_inching",
     required=False,
@@ -321,99 +195,42 @@ def _zeroconf_http_emit_result(device: SonoffSwitch, config: dict, resp) -> None
     "--wait",
     envvar="PYSONOFFLAN_wait",
     required=False,
+    help="time to wait for listen.",
+)
+@click.option(
+    "--outlet",
+    "outlet",
+    envvar="PYSONOFFLAN_OUTLET",
     type=int,
-    help="(listen --follow) nach N Updates beenden.",
-)
-@click.option(
-    "-l",
-    "--loglevel",
-    default="INFO",
-    show_default=True,
-    type=str,
-    help="DEBUG|INFO|… oder OFF (keine Logs; Maschinen-JSON nur auf stdout).",
-)
-@click.option(
-    "--devices",
-    "devices_path",
-    type=click.Path(exists=True, dir_okay=False),
     default=None,
     help=(
-        "JSON-Datei (Array): parallele get-state/getState-Aufrufe. "
-        "Eintrag: host, device_id, api_key (optional), outlet (optional)."
-    ),
-)
-@click.option(
-    "--devices-stdin",
-    "devices_stdin",
-    is_flag=True,
-    default=False,
-    help=(
-        "Geräteliste als JSON-Array von stdin (Node Backend). "
-        "Schließt --devices aus."
+        "Kanal-Index für Mehrkanal-Geräte (z. B. SONOFF DUALR3: 0 oder 1). "
+        "Steuert den mDNS/HTTP-Kontext sowie die Anzeige „State (selected outlet)“. "
+        "Für Strom u. a. werden bei `state` alle Kanäle ausgegeben, sobald `switches` in den Daten liegt."
     ),
 )
 @click.pass_context
+@click.option(
+    "-l",
+    "--loglevel",
+    type=click.Choice(
+        ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "OFF"],
+    ),
+    default="INFO",
+    help=(
+        "OFF = keine Log-Ausgaben "
+        "(nur JSON auf stdout bei statistics/switch/switches/getState|get-state)."
+    ),
+)
 @click.version_option()
-def cli(
-    ctx,
-    host,
-    device_id,
-    api_key,
-    outlet,
-    inching,
-    wait,
-    loglevel,
-    devices_path,
-    devices_stdin,
-):
-    """CLI für Sonoff LAN Mode (R3 / Zeroconf)."""
-    apply_loglevel(logger, loglevel)
-
-    if devices_path and devices_stdin:
-        raise click.UsageError(
-            "Nur eine Quelle für mehrere Geräte: --devices oder --devices-stdin."
-        )
-
-    device_specs: Optional[List[Dict[str, Any]]] = None
-    if devices_path:
-        try:
-            with open(devices_path, encoding="utf-8") as f:
-                loaded = json.load(f)
-        except (OSError, json.JSONDecodeError) as ex:
-            raise click.BadParameter("--devices: %s" % ex) from ex
-        device_specs = _parse_device_specs_loaded(loaded, "--devices")
-    elif devices_stdin:
-        try:
-            raw = sys.stdin.read()
-            loaded = json.loads(raw) if raw.strip() else None
-        except json.JSONDecodeError as ex:
-            raise click.BadParameter("--devices-stdin: %s" % ex) from ex
-        device_specs = _parse_device_specs_loaded(loaded, "--devices-stdin")
-    else:
-        env_json = os.environ.get("PYSONOFFLAN_DEVICES_JSON", "").strip()
-        if env_json:
-            try:
-                loaded = json.loads(env_json)
-            except json.JSONDecodeError as ex:
-                raise click.BadParameter(
-                    "PYSONOFFLAN_DEVICES_JSON: %s" % ex
-                ) from ex
-            device_specs = _parse_device_specs_loaded(
-                loaded, "PYSONOFFLAN_DEVICES_JSON"
-            )
+def cli(ctx, host, device_id, api_key, inching, wait, outlet, loglevel):
+    """A cli tool for controlling Sonoff Smart Switches/Plugs in LAN Mode."""
+    apply_loglevel(loglevel.upper() if isinstance(loglevel, str) else loglevel)
 
     if ctx.invoked_subcommand == "discover":
         return
 
-    if device_specs is not None:
-        sub = ctx.invoked_subcommand
-        if sub not in ("get-state", "getState"):
-            raise click.UsageError(
-                "Mehrere Geräte (--devices, --devices-stdin, "
-                "PYSONOFFLAN_DEVICES_JSON) nur mit get-state oder getState."
-            )
-
-    if device_specs is None and host is None and device_id is None:
+    if host is None and device_id is None:
         logger.error("No host name or device_id given, see usage below:")
         click.echo(ctx.get_help())
         sys.exit(1)
@@ -422,11 +239,9 @@ def cli(
         "host": host,
         "device_id": device_id,
         "api_key": api_key,
-        "outlet": outlet,
         "inching": inching,
         "wait": wait,
-        "loglevel": loglevel,
-        "device_specs": device_specs,
+        "outlet": outlet,
     }
 
 
@@ -449,440 +264,16 @@ def discover():
         )
 
 
-def _machine_mode(config: dict) -> bool:
-    return (config.get("loglevel") or "").strip().upper() == "OFF"
-
-
-@cli.command("statistics")
-@pass_config
-def statistics_cmd(config: dict):
-    """POST /zeroconf/statistics; eine kompakte JSON-Zeile auf stdout (auch bei DEBUG)."""
-    take = _new_cli_one_shot()
-
-    async def cb(device: SonoffSwitch):
-        if device.basic_info is None:
-            return
-        if not await take():
-            return
-        loop = device.loop
-        try:
-            resp = await loop.run_in_executor(
-                None, device.client.send_statistics
-            )
-        except Exception as ex:  # pragma: no cover
-            if _machine_mode(config):
-                json_stdout_error(str(ex))
-            else:
-                logger.exception("statistics request failed")
-        else:
-            body = resp.content.decode("utf-8", errors="replace")
-            iv = device.client._last_sent_iv or ""
-            ok, parsed = parse_zeroconf_http_response(
-                body, iv, config.get("api_key") or ""
-            )
-            json_stdout_only(
-                {"ok": ok, "httpStatus": resp.status_code, "data": parsed}
-            )
-            if not _machine_mode(config):
-                logger.info(
-                    "statistics HTTP %s ok=%s", resp.status_code, ok
-                )
-                if parsed is not None:
-                    logger.debug(
-                        "%s",
-                        json.dumps(parsed, ensure_ascii=False, indent=2),
-                    )
-        device.shutdown_event_loop()
-
-    SonoffSwitch(
-        host=config["host"],
-        callback_after_update=cb,
-        logger=logger,
-        device_id=config["device_id"],
-        api_key=config["api_key"],
-        outlet=config["outlet"],
-    )
-
-
-@cli.command("switch")
-@click.argument(
-    "switch_arg",
-    type=click.Choice(["on", "off", "toggle"]),
-)
-@pass_config
-def switch_zeroconf(config: dict, switch_arg: str):
-    """Schaltet über Zeroconf (wie on/off, inkl. strip/multifun_switch -> /switches)."""
-    take = _new_cli_one_shot()
-
-    async def cb(device: SonoffSwitch):
-        if device.basic_info is None:
-            return
-        if not device.available:
-            return
-        if not await take():
-            return
-        loop = device.loop
-        params = {"switch": switch_arg}
-        payload = device.client.get_update_payload(device.device_id, params)
-        try:
-            resp = await loop.run_in_executor(
-                None, device.client.send_switch, payload
-            )
-        except Exception as ex:  # pragma: no cover
-            json_stdout_ok(False)
-            if _machine_mode(config):
-                pass
-            else:
-                logger.exception("switch POST failed")
-            device.shutdown_event_loop()
-            return
-        body = resp.content.decode("utf-8", errors="replace")
-        iv = device.client._last_sent_iv or ""
-        ok, parsed = parse_zeroconf_http_response(
-            body, iv, config.get("api_key") or ""
-        )
-        json_stdout_ok(ok)
-        if not _machine_mode(config):
-            if parsed is not None:
-                logger.debug(
-                    "switch Zeroconf HTTP %s ok=%s — %s",
-                    resp.status_code,
-                    ok,
-                    json.dumps(parsed, ensure_ascii=False)[:500],
-                )
-            print_device_details(device)
-        device.shutdown_event_loop()
-
-    SonoffSwitch(
-        host=config["host"],
-        callback_after_update=cb,
-        logger=logger,
-        device_id=config["device_id"],
-        api_key=config["api_key"],
-        outlet=config["outlet"],
-    )
-
-
-@cli.command("brightness")
-@click.argument("level", type=int)
-@click.argument(
-    "switch_arg",
-    type=click.Choice(["on", "off"]),
-)
-@pass_config
-def brightness_zeroconf(config: dict, level: int, switch_arg: str):
-    """Helligkeit 0–100 per LAN (plug: /zeroconf/brightness, sonst /zeroconf/dimmable)."""
-    take = _new_cli_one_shot()
-    level = max(0, min(100, int(level)))
-
-    async def cb(device: SonoffSwitch):
-        if device.basic_info is None:
-            return
-        if not device.available:
-            return
-        if not await take():
-            return
-        loop = device.loop
-        params = {
-            "switch": switch_arg,
-            "brightness": level,
-            "mode": 0,
-        }
-        payload = device.client.get_update_payload(device.device_id, params)
-        try:
-            resp = await loop.run_in_executor(
-                None, device.client.send_dimmable, payload
-            )
-        except Exception as ex:  # pragma: no cover
-            json_stdout_ok(False)
-            if not _machine_mode(config):
-                logger.exception("dimmable POST failed")
-            device.shutdown_event_loop()
-            return
-        body = resp.content.decode("utf-8", errors="replace")
-        iv = device.client._last_sent_iv or ""
-        ok, parsed = parse_zeroconf_http_response(
-            body, iv, config.get("api_key") or ""
-        )
-        json_stdout_ok(ok)
-        if not _machine_mode(config):
-            if parsed is not None:
-                logger.debug(
-                    "brightness Zeroconf HTTP %s ok=%s — %s",
-                    resp.status_code,
-                    ok,
-                    json.dumps(parsed, ensure_ascii=False)[:500],
-                )
-            print_device_details(device)
-        device.shutdown_event_loop()
-
-    SonoffSwitch(
-        host=config["host"],
-        callback_after_update=cb,
-        logger=logger,
-        device_id=config["device_id"],
-        api_key=config["api_key"],
-        outlet=config["outlet"],
-    )
-
-
-@cli.command("switches")
-@pass_config
-def switches_zeroconf(config: dict):
-    """Leerer POST /zeroconf/switches; eine JSON-Zeile auf stdout (auch bei DEBUG)."""
-    take = _new_cli_one_shot()
-
-    async def cb(device: SonoffSwitch):
-        if device.basic_info is None:
-            return
-        if not await take():
-            return
-        loop = device.loop
-        try:
-            resp = await loop.run_in_executor(
-                None, device.client.send_empty_zeroconf_switches
-            )
-        except Exception as ex:  # pragma: no cover
-            if _machine_mode(config):
-                json_stdout_error(str(ex))
-            else:
-                logger.exception("switches request failed")
-        else:
-            body = resp.content.decode("utf-8", errors="replace")
-            iv = device.client._last_sent_iv or ""
-            ok, parsed = parse_zeroconf_http_response(
-                body, iv, config.get("api_key") or ""
-            )
-            json_stdout_only(
-                {"ok": ok, "httpStatus": resp.status_code, "data": parsed}
-            )
-            if not _machine_mode(config):
-                logger.info("switches HTTP %s ok=%s", resp.status_code, ok)
-                if parsed is not None:
-                    logger.debug(
-                        "%s",
-                        json.dumps(parsed, ensure_ascii=False, indent=2),
-                    )
-        device.shutdown_event_loop()
-
-    SonoffSwitch(
-        host=config["host"],
-        callback_after_update=cb,
-        logger=logger,
-        device_id=config["device_id"],
-        api_key=config["api_key"],
-        outlet=config["outlet"],
-    )
-
-
-async def _build_state_payload(
-    device: SonoffSwitch, config: dict, *, live: bool = False
-) -> dict:
-    """
-    mDNS basic_info + bei multifun/strip HTTP getState (Fallback switches).
-    DUALR3 ohne ``--live``: ``statistics`` im selben JSON.
-    Mit ``--live``: keine Einbettung hier; zweite stdout-Zeile (``streamPart`` ``statistics``)
-    kommt immer separat in ``_run_get_state``.
-    """
-    http_meta = await _http_switches_query(device, config)
-    switches = http_meta["switches"] if http_meta else None
-    basic = dict(device.basic_info)
-    if switches:
-        basic["switches"] = switches
-    outlet = config.get("outlet")
-    sw_one = _switch_from_switches_list(switches, outlet)
-    if sw_one is not None:
-        device.params = {"switch": sw_one}
-    payload = {
-        "ok": True,
-        "switch": device.params.get("switch"),
-        "switches": switches,
-        "basicInfo": basic,
-    }
-    if http_meta:
-        zs = {
-            "ok": http_meta.get("httpOk"),
-            "httpStatus": http_meta.get("httpStatus"),
-            "data": http_meta.get("data"),
-        }
-        if http_meta.get("endpoint"):
-            zs["endpoint"] = http_meta["endpoint"]
-        if http_meta.get("tried"):
-            zs["tried"] = http_meta["tried"]
-        if http_meta.get("fallback"):
-            zs["fallback"] = http_meta["fallback"]
-        if http_meta.get("error"):
-            zs["error"] = http_meta["error"]
-        payload["zeroconfSwitches"] = zs
-
-    if not live and _is_dualr3(device):
-        payload["statistics"] = await _http_statistics_meta(device, config)
-
-    return payload
-
-
-def _merge_device_row(global_config: dict, row: dict) -> dict:
-    """Einzelnes Gerät aus --devices-Zeile + gemeinsame CLI-Optionen (loglevel, wait, …)."""
-    return {
-        "host": row["host"],
-        "device_id": row["device_id"],
-        "api_key": row.get("api_key") or "",
-        "outlet": row.get("outlet"),
-        "inching": global_config.get("inching"),
-        "wait": global_config.get("wait"),
-        "loglevel": global_config.get("loglevel"),
-        "device_specs": None,
-    }
-
-
-def _mdns_seq_from_device(device: SonoffSwitch) -> Optional[str]:
-    try:
-        props = device.client.properties
-        if not props:
-            return None
-        raw = props.get(b"seq")
-        if raw is None:
-            return None
-        if isinstance(raw, bytes):
-            return raw.decode("utf-8", errors="replace")
-        return str(raw)
-    except Exception:  # pragma: no cover
-        return None
-
-
-def _run_get_state_parallel(
-    specs: List[Dict[str, Any]], global_config: dict, live: bool
-) -> None:
-    if len(specs) == 1:
-        _run_get_state(_merge_device_row(global_config, specs[0]), live)
-        return
-    threads = []
-    for row in specs:
-        cfg = _merge_device_row(global_config, row)
-        t = threading.Thread(
-            target=_run_get_state,
-            args=(cfg, live),
-            daemon=True,
-            name="sonoff-%s" % cfg["device_id"],
-        )
-        threads.append(t)
-        t.start()
-    for t in threads:
-        t.join()
-
-
-def _dispatch_get_state(config: dict, live: bool) -> None:
-    specs = config.get("device_specs")
-    if specs:
-        _run_get_state_parallel(specs, config, live)
-    else:
-        _run_get_state(config, live)
-
-
-def _run_get_state(config: dict, live: bool = False) -> None:
-    take = None if live else _new_cli_one_shot()
-    counter = {"n": 0}
-
-    async def cb(device: SonoffSwitch):
-        if device.basic_info is None:
-            return
-        if take is not None and not await take():
-            return
-        payload = await _build_state_payload(device, config, live=live)
-        try:
-            payload["ewelinkDeviceId"] = device.device_id
-        except Exception:  # pragma: no cover
-            pass
-        seq = None
-        if live:
-            counter["n"] += 1
-            payload["live"] = True
-            payload["n"] = counter["n"]
-            seq = _mdns_seq_from_device(device)
-            if seq is not None:
-                payload["mdnsSeq"] = seq
-        json_stdout_only(payload)
-        if live:
-            stats = await _http_statistics_meta(device, config)
-            stats_line = dict(stats)
-            stats_line["live"] = True
-            stats_line["n"] = counter["n"]
-            stats_line["streamPart"] = "statistics"
-            try:
-                stats_line["ewelinkDeviceId"] = device.device_id
-            except Exception:  # pragma: no cover
-                pass
-            if seq is not None:
-                stats_line["mdnsSeq"] = seq
-            json_stdout_only(stats_line)
-        human = not _machine_mode(config) and not live
-        if human:
-            print_device_details(
-                device,
-                switches_override=payload.get("switches"),
-            )
-        if not live:
-            device.shutdown_event_loop()
-
-    SonoffSwitch(
-        host=config["host"],
-        callback_after_update=cb,
-        logger=logger,
-        device_id=config["device_id"],
-        api_key=config["api_key"],
-        outlet=config["outlet"],
-        emit_every_multifun_telemetry=live,
-        emit_all_mdns_updates=live,
-    )
-
-
-@cli.command("get-state")
-@click.option(
-    "--live",
-    is_flag=True,
-    help=(
-        "Pro empfangenem mDNS-Status zwei JSON-Zeilen: getState-Payload, danach /zeroconf/statistics "
-        "(zweite Zeile mit streamPart=statistics). Ende mit Strg+C. Ohne --live: einmalig wie bisher."
-    ),
-)
-@pass_config
-def get_state(config: dict, live: bool):
-    """Zustand inkl. Kanäle; --live für Stream. --devices für mehrere Geräte parallel."""
-    _dispatch_get_state(config, live)
-
-
-@cli.command("getState")
-@click.option(
-    "--live",
-    is_flag=True,
-    help=(
-        "Wie get-state --live: pro Update zwei JSON-Zeilen (State + statistics); Ende mit Strg+C."
-    ),
-)
-@pass_config
-def getState_cmd(config: dict, live: bool):
-    """Alias für get-state."""
-    _dispatch_get_state(config, live)
-
-
 @cli.command()
 @pass_config
 def state(config: dict):
-    """Verbindung herstellen und Zustand ausgeben (für Backend: -l DEBUG)."""
-    take = _new_cli_one_shot()
+    """Connect to device and print current state."""
 
     async def state_callback(device):
         if device.basic_info is not None:
             if device.available:
-                if not await take():
-                    return
-                payload = await _build_state_payload(device, config, live=False)
-                json_stdout_only(payload)
-                if not _machine_mode(config):
-                    print_device_details(
-                        device,
-                        switches_override=payload.get("switches"),
-                    )
+                print_device_details(device)
+
                 device.shutdown_event_loop()
 
     logger.info("Initialising SonoffSwitch with host %s" % config["host"])
@@ -893,6 +284,101 @@ def state(config: dict):
         device_id=config["device_id"],
         api_key=config["api_key"],
         outlet=config["outlet"],
+    )
+
+
+def _run_get_state(config: dict) -> None:
+    """mDNS-Zustand (merged basic_info) als eine JSON-Zeile auf stdout."""
+
+    shared_state = {"once_emitted": False}
+
+    async def state_callback(self):
+        if self.basic_info is None:
+            return
+        if shared_state["once_emitted"]:
+            return
+        shared_state["once_emitted"] = True
+        _emit_get_state_json_stdout(self)
+        self.shutdown_event_loop()
+
+    logger.info("Initialising SonoffSwitch with host %s" % config["host"])
+
+    SonoffDevice.invoke_callback_on_multifun_partial = True
+    try:
+        SonoffSwitch(
+            host=config["host"],
+            callback_after_update=state_callback,
+            shared_state=shared_state,
+            logger=logger,
+            device_id=config["device_id"],
+            api_key=config["api_key"],
+            outlet=config["outlet"],
+        )
+    finally:
+        SonoffDevice.invoke_callback_on_multifun_partial = False
+
+
+GET_STATE_HELP = (
+    "Zustand aus mDNS (merged basic_info), eine JSON-Zeile auf stdout "
+    "(wie ``listen`` ohne ``--follow``). Ausgabe: "
+    '{"ok":true,"state":{...}} — mit ``-l OFF`` nur diese Zeile.'
+)
+
+
+@cli.command("get-state", help=GET_STATE_HELP)
+@pass_config
+def get_state_dash(config: dict):
+    _run_get_state(config)
+
+
+@cli.command(
+    "getState",
+    help=GET_STATE_HELP + " Gleiche Funktion wie ``get-state``.",
+)
+@pass_config
+def get_state_camel(config: dict):
+    _run_get_state(config)
+
+
+@cli.command()
+@pass_config
+def statistics(config: dict):
+    """POST /zeroconf/statistics mit leerem Payload (verschlüsselt wenn nötig).
+
+    Entspricht dem SonoffLAN-Befehl „statistics“ (u. a. für unterstützte POW-/Mess-Geräte).
+    """
+    _cli_zeroconf_empty_post(
+        config,
+        "statistics",
+        "send_statistics",
+        "statistics",
+        json_stdout_only=True,
+    )
+
+
+@cli.command("switch")
+@pass_config
+def zeroconf_switch(config: dict):
+    """POST /zeroconf/switch mit leerem Payload — Ein-Kanal-Geräte (z. B. Plug)."""
+    _cli_zeroconf_empty_post(
+        config,
+        "switch",
+        "send_empty_zeroconf_switch",
+        "switch",
+        json_stdout_only=True,
+    )
+
+
+@cli.command("switches")
+@pass_config
+def zeroconf_switches(config: dict):
+    """POST /zeroconf/switches mit leerem Payload — Mehrkanal (z. B. DUALR3, Strip)."""
+    _cli_zeroconf_empty_post(
+        config,
+        "switches",
+        "send_empty_zeroconf_switches",
+        "switches",
+        json_stdout_only=True,
     )
 
 
@@ -911,174 +397,217 @@ def off(config: dict):
 
 
 @cli.command()
+@pass_config
 @click.option(
     "--follow",
     is_flag=True,
-    help="Kontinuierlich Updates ausgeben (sonst nur erstes).",
+    help=(
+        "Weiter alle Updates mit menschenlesbarer Protokollierung; "
+        "ohne diese Option: genau eine JSON-Zeile auf stdout (erste ausgewertete Antwort) und Exit."
+    ),
 )
-@click.option(
-    "--json",
-    "json_lines",
-    is_flag=True,
-    help="Pro Update eine JSON-Zeile auf stdout.",
-)
-@pass_config
-def listen(config: dict, follow: bool, json_lines: bool):
-    """Zustand ausgeben; mit --follow weiter hören."""
-    take = _new_cli_one_shot()
+def listen(config: dict, follow: bool):
+    """Standard: erste Antwort als zusammengeführtes basic_info (JSON) auf stdout, dann Programmende.
 
-    async def state_callback(self_dev: SonoffSwitch):
-        if self_dev.basic_info is None:
+    Mit --follow Verhalten wie zuvor (endlos, bis SIGINT); optional --wait N beendet nach N Updates.
+    """
+
+    shared_state = {"callback_counter": 0, "once_emitted": False}
+
+    async def state_callback(self):
+        if self.basic_info is None:
             return
+
         if not follow:
-            if not await take():
+            if shared_state["once_emitted"]:
                 return
+            shared_state["once_emitted"] = True
+            _emit_basic_info_json_stdout(self)
+            self.shutdown_event_loop()
+            return
 
-        self_dev.shared_state["callback_counter"] = (
-            self_dev.shared_state.get("callback_counter", 0) + 1
+        self.shared_state["callback_counter"] += 1
+        print_device_details(self)
+        if config["wait"] is not None:
+            if self.shared_state["callback_counter"] >= int(config["wait"]):
+                self.shutdown_event_loop()
+
+    logger.info("Initialising SonoffSwitch with host %s" % config["host"])
+
+    SonoffDevice.invoke_callback_on_multifun_partial = True
+    try:
+        SonoffSwitch(
+            host=config["host"],
+            callback_after_update=state_callback,
+            shared_state=shared_state,
+            logger=logger,
+            device_id=config["device_id"],
+            api_key=config["api_key"],
+            outlet=config["outlet"],
         )
-        ctr = self_dev.shared_state["callback_counter"]
+    finally:
+        SonoffDevice.invoke_callback_on_multifun_partial = False
 
-        if json_lines or _machine_mode(config):
-            json_stdout_only(
-                {
-                    "ok": True,
-                    "n": ctr,
-                    "switch": self_dev.params.get("switch"),
-                    "basicInfo": self_dev.basic_info,
-                }
+
+def _emit_basic_info_json_stdout(device) -> None:
+    """Eine kompakte JSON-Zeile auf stdout (für Pipes); nicht serialisierbare Werte via str()."""
+    payload = dict(device.basic_info or {})
+    sys.stdout.write(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+        + "\n"
+    )
+    sys.stdout.flush()
+
+
+def _emit_get_state_json_stdout(device) -> None:
+    """getState: eine Zeile {"ok":true,"state":{...basic_info}} auf stdout."""
+    out = {"ok": True, "state": dict(device.basic_info or {})}
+    sys.stdout.write(
+        json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=str)
+        + "\n"
+    )
+    sys.stdout.flush()
+
+
+def print_device_details(device):
+    if device.basic_info is not None:
+        device_id = device.device_id
+        out_idx = device.client.outlet
+        if out_idx is None:
+            out_idx = 0
+
+        logger.info(
+            click.style(
+                "== Device: %s (%s) ==" % (device_id, device.host), bold=True
             )
-        else:
-            print_device_details(self_dev)
+        )
 
-        max_wait = config.get("wait")
-        if not follow:
-            self_dev.shutdown_event_loop()
-        elif max_wait is not None and ctr >= int(max_wait):
-            self_dev.shutdown_event_loop()
+        switches = device.basic_info.get("switches")
+        if isinstance(switches, list) and len(switches) > 1:
+            logger.info(
+                "Outlet (CLI --outlet / Kanal): %s (0-basiert)", out_idx
+            )
 
-    logger.info("Initialising SonoffSwitch with host %s" % config["host"])
+        logger.info(
+            "State (selected outlet): "
+            + click.style(
+                "ON" if device.is_on else "OFF",
+                fg="green" if device.is_on else "red",
+            )
+        )
 
-    shared_state = {"callback_counter": 0}
-    SonoffSwitch(
-        host=config["host"],
-        callback_after_update=state_callback,
-        shared_state=shared_state,
-        logger=logger,
-        device_id=config["device_id"],
-        api_key=config["api_key"],
-        outlet=config["outlet"],
-        emit_every_multifun_telemetry=follow,
+        _print_root_aggregate_power(device.basic_info)
+        _print_flat_per_outlet_suffixed(device.basic_info)
+        _print_all_switch_entries(device.basic_info)
+
+
+def _print_root_aggregate_power(basic_info: dict):
+    """Einige Firmware-Varianten legen Leistung nur am JSON-Root, nicht pro switches[]."""
+    keys = (
+        "power",
+        "actPow",
+        "reactPow",
+        "apparentPow",
+        "voltage",
+        "current",
+        "dayKwh",
+        "monthKwh",
+        "yearKwh",
     )
+    found = {k: basic_info[k] for k in keys if k in basic_info and basic_info[k] is not None}
+    if found:
+        logger.info(
+            click.style("Aggregat / Top-Level (sofern geliefert):", bold=True)
+            + " "
+            + " ".join("%s=%s" % (k, v) for k, v in found.items())
+        )
 
 
-def print_device_details(
-    device: SonoffSwitch, switches_override: Optional[list] = None
-):
-    if device.basic_info is None:
+def _print_flat_per_outlet_suffixed(basic_info: dict):
+    """SonoffLAN / UIID 126: actPow_00, current_01, voltage_00, … statt nur in switches[]."""
+    skip = frozenset({"switches", "deviceid", "configure", "pulses", "rssi"})
+    by_suffix = {}
+    for k, v in basic_info.items():
+        if k in skip or v is None:
+            continue
+        m = re.match(r"^(.+)_(\d+)$", k)
+        if not m:
+            continue
+        suf = m.group(2)
+        by_suffix.setdefault(suf, []).append((k, v))
+    if by_suffix:
+        logger.info(
+            click.style(
+                "Pro Kanal (flache Keys *_00, *_01, … wie bei SonoffLAN DualR3):",
+                bold=True,
+            )
+        )
+        for suf in sorted(by_suffix.keys(), key=lambda x: int(x) if x.isdigit() else x):
+            pairs = " ".join(
+                "%s=%s" % (kk, vv) for kk, vv in sorted(by_suffix[suf])
+            )
+            logger.info("  Kanal-Suffix _%s: %s", suf, pairs)
+
+
+def _format_switch_value(val):
+    if isinstance(val, (dict, list)):
+        return json.dumps(val, ensure_ascii=False, separators=(",", ":"))
+    return val
+
+
+def _print_all_switch_entries(basic_info: dict):
+    """Jeden Eintrag in switches[] mit allen Keys/Values (alle Kanäle)."""
+    switches = basic_info.get("switches")
+    if not isinstance(switches, list) or not switches:
         return
-    device_id = device.device_id
 
     logger.info(
-        click.style(
-            "== Device: %s (%s) ==" % (device_id, device.host), bold=True
+        click.style("Alle switches[]-Einträge (vollständig):", bold=True)
+    )
+    for idx, sw in enumerate(switches):
+        if not isinstance(sw, dict):
+            logger.info("  [%s] %r", idx, sw)
+            continue
+        outlet = sw.get("outlet", idx)
+        pairs = []
+        for k in sorted(sw.keys()):
+            pairs.append("%s=%s" % (k, _format_switch_value(sw[k])))
+        logger.info(
+            "  [%s] outlet=%s %s",
+            idx,
+            outlet,
+            " ".join(pairs),
         )
-    )
-
-    logger.info(
-        "State: "
-        + click.style(
-            "ON" if device.is_on else "OFF",
-            fg="green" if device.is_on else "red",
-        )
-    )
-
-    raw_type = device.client.type
-    type_str = (
-        raw_type.decode("utf-8", errors="replace")
-        if isinstance(raw_type, (bytes, bytearray))
-        else str(raw_type)
-    )
-    logger.info("type: %s", type_str)
-
-    sw_list = (
-        switches_override
-        if switches_override is not None
-        else device.basic_info.get("switches")
-    )
-    if isinstance(sw_list, list) and sw_list:
-        logger.info("Kanäle (switches):")
-        for i, ent in enumerate(sw_list):
-            if not isinstance(ent, dict):
-                logger.info("  [%s] %s", i, ent)
-                continue
-            ou = ent.get("outlet", i)
-            st = ent.get("switch", "?")
-            mark = ""
-            if device.outlet is not None and int(ou) == int(device.outlet):
-                mark = " (gewählter outlet)"
-            logger.info('  outlet %s: %s%s', ou, st, mark)
 
 
-def switch_device(config: dict, inching, new_state: str):
+def switch_device(config: dict, inching, new_state):
     logger.info("Initialising SonoffSwitch with host %s" % config["host"])
-    take = _new_cli_one_shot()
 
     async def update_callback(device: SonoffSwitch):
-        if device.basic_info is None or not device.available:
-            return
+        if device.basic_info is not None:
 
-        if inching is None:
-            if not await take():
-                return
-            already = (
-                device.is_on
-                and new_state == "on"
-                or device.is_off
-                and new_state == "off"
-            )
-            if already:
-                json_stdout_ok(True)
-                if not _machine_mode(config):
+            if device.available:
+
+                if inching is None:
                     print_device_details(device)
-                device.shutdown_event_loop()
-                return
-            if not _machine_mode(config):
-                print_device_details(device)
-            loop = device.loop
-            payload = device.client.get_update_payload(
-                device.device_id, {"switch": new_state}
-            )
-            try:
-                resp = await loop.run_in_executor(
-                    None, device.client.send_switch, payload
-                )
-            except Exception as ex:  # pragma: no cover
-                json_stdout_ok(False)
-                if not _machine_mode(config):
-                    logger.exception("switch POST failed")
-                device.shutdown_event_loop()
-                return
-            body = resp.content.decode("utf-8", errors="replace")
-            iv = device.client._last_sent_iv or ""
-            ok, parsed = parse_zeroconf_http_response(
-                body, iv, config.get("api_key") or ""
-            )
-            json_stdout_ok(ok)
-            if not _machine_mode(config) and parsed is not None:
-                logger.debug(
-                    "%s HTTP %s ok=%s — %s",
-                    new_state,
-                    resp.status_code,
-                    ok,
-                    json.dumps(parsed, ensure_ascii=False)[:500],
-                )
-            device.shutdown_event_loop()
-        else:
-            logger.info(
-                "Inching device activated by switching ON for %ss"
-                % inching
-            )
+
+                    if device.is_on:
+                        if new_state == "on":
+                            device.shutdown_event_loop()
+                        else:
+                            await device.turn_off()
+
+                    elif device.is_off:
+                        if new_state == "off":
+                            device.shutdown_event_loop()
+                        else:
+                            await device.turn_on()
+
+                else:
+                    logger.info(
+                        "Inching device activated by switching ON for %ss"
+                        % inching
+                    )
 
     SonoffSwitch(
         host=config["host"],
