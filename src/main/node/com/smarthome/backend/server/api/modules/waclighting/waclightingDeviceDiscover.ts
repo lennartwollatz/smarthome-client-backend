@@ -3,11 +3,8 @@ import type { DatabaseManager } from "../../../db/database.js";
 import { WACLightingDeviceDiscovered } from "./waclightingDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
 import { WACLIGHTINGCONFIG, WACLIGHTINGMODULE } from "./waclightingModule.js";
-import mdns from "multicast-dns";
-import os from "os";
 import { WACLightingDeviceController } from "./waclightingDeviceController.js";
-
-type MdnsInstance = ReturnType<typeof mdns>;
+import { createMdnsSocketsForDiscovery, type MdnsInstance } from "../multicastDnsFactory.js";
 
 export class WACLightingDeviceDiscover extends ModuleDeviceDiscover<WACLightingDeviceDiscovered> {
   private static SERVICE_TYPE = "_easylink._tcp.local";
@@ -105,33 +102,23 @@ export class WACLightingDeviceDiscover extends ModuleDeviceDiscover<WACLightingD
     };
 
     try {
-      const interfaces = os.networkInterfaces();
-      Object.values(interfaces).forEach(iface => {
-        (iface ?? []).forEach(addr => {
-          if (addr.internal) return;
-          if (addr.family !== "IPv4") return;
-          try {
-            const instance = mdns({ interface: addr.address });
-            this.mdnsInstances.push(instance);
-            instance.on("response", handleResponse);
+      for (const { instance, ifaceLabel } of createMdnsSocketsForDiscovery()) {
+        this.mdnsInstances.push(instance);
+        instance.on("response", handleResponse);
 
-            const query = () => {
-              instance.query({
-                questions: [{ name: WACLightingDeviceDiscover.SERVICE_TYPE, type: "PTR" }]
-              });
-            };
-            query();
-            const timer = setInterval(query, timeoutSeconds * 1000);
-            this.mdnsTimers.push(timer);
-            logger.info(
-              { iface: addr.address, serviceType: WACLightingDeviceDiscover.SERVICE_TYPE },
-              "WAC Lighting mDNS Discovery gestartet"
-            );
-          } catch (err) {
-            logger.warn({ err, iface: addr.address }, "Konnte mDNS nicht starten");
-          }
-        });
-      });
+        const query = () => {
+          instance.query({
+            questions: [{ name: WACLightingDeviceDiscover.SERVICE_TYPE, type: "PTR" }]
+          });
+        };
+        query();
+        const timer = setInterval(query, timeoutSeconds * 1000);
+        this.mdnsTimers.push(timer);
+        logger.info(
+          { iface: ifaceLabel, serviceType: WACLightingDeviceDiscover.SERVICE_TYPE },
+          "WAC Lighting mDNS Discovery gestartet"
+        );
+      }
 
       if (!this.mdnsInstances.length) {
         logger.warn("Konnte keine mDNS-Instanz für WAC Lighting Discovery erzeugen");

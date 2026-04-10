@@ -1,12 +1,9 @@
-import os from "node:os";
-import mdns from "multicast-dns";
 import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { LGDeviceDiscovered } from "./lgDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
 import { LGCONFIG, LGMODULE } from "./lgModule.js";
-
-type MdnsInstance = ReturnType<typeof mdns>;
+import { createMdnsSocketsForDiscovery, type MdnsInstance } from "../multicastDnsFactory.js";
 
 type ServiceCache = {
   name: string;
@@ -144,33 +141,23 @@ export class LGDeviceDiscover extends ModuleDeviceDiscover<LGDeviceDiscovered> {
     };
 
     try {
-      const interfaces = os.networkInterfaces();
-      Object.values(interfaces).forEach(iface => {
-        (iface ?? []).forEach(addr => {
-          if (addr.internal) return;
-          if (addr.family !== "IPv4") return;
-          try {
-            const instance = mdns({ interface: addr.address });
-            mdnsInstances.push(instance);
-            instance.on("response", handleResponse);
+      for (const { instance, ifaceLabel } of createMdnsSocketsForDiscovery()) {
+        mdnsInstances.push(instance);
+        instance.on("response", handleResponse);
 
-            const query = () => {
-              instance.query({
-                questions: [{ name: LGDeviceDiscover.SERVICE_TYPE, type: "PTR" }]
-              });
-            };
-            query();
-            const timer = setInterval(query, timeoutSeconds * 1000);
-            timers.push(timer);
-            logger.info(
-              { iface: addr.address, serviceType: LGDeviceDiscover.SERVICE_TYPE },
-              "JmDNS mDNS Discovery gestartet"
-            );
-          } catch (err) {
-            logger.warn({ err, iface: addr.address }, "Konnte mDNS nicht starten");
-          }
-        });
-      });
+        const query = () => {
+          instance.query({
+            questions: [{ name: LGDeviceDiscover.SERVICE_TYPE, type: "PTR" }]
+          });
+        };
+        query();
+        const timer = setInterval(query, timeoutSeconds * 1000);
+        timers.push(timer);
+        logger.info(
+          { iface: ifaceLabel, serviceType: LGDeviceDiscover.SERVICE_TYPE },
+          "JmDNS mDNS Discovery gestartet"
+        );
+      }
 
       if (!mdnsInstances.length) {
         logger.warn("Konnte keine mDNS-Instanz fuer Discovery erzeugen");

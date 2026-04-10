@@ -1,13 +1,10 @@
-import os from "node:os";
-import mdns from "multicast-dns";
 import crypto from "node:crypto";
 import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { SonoffDeviceDiscovered } from "./sonoffDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
 import { SONOFFCONFIG, SONOFFMODULE } from "./sonoffModule.js";
-
-type MdnsInstance = ReturnType<typeof mdns>;
+import { createMdnsSocketsForDiscovery, type MdnsInstance } from "../multicastDnsFactory.js";
 
 type ServiceCache = {
   name: string;
@@ -477,29 +474,19 @@ export class SonoffDeviceDiscover extends ModuleDeviceDiscover<SonoffDeviceDisco
 
   private startMdnsDiscovery() {
     this.stopMdnsDiscovery();
-    const interfaces = os.networkInterfaces();
-    Object.values(interfaces).forEach(iface => {
-      (iface ?? []).forEach(addr => {
-        if (addr.internal) return;
-        if (addr.family !== "IPv4") return;
-        try {
-          const instance = mdns({ interface: addr.address });
-          this.mdnsInstances.push(instance);
-          instance.on("response", (response: any) => this.handleMdnsResponse(response));
-          const query = () => {
-            instance.query({
-              questions: SonoffDeviceDiscover.PTR_QUERY_NAMES.map(name => ({ name, type: "PTR" })),
-            });
-          };
-          query();
-          const timer = setInterval(query, 2000);
-          this.mdnsTimers.push(timer);
-          logger.info({ iface: addr.address, ptr: SonoffDeviceDiscover.PTR_QUERY_NAMES }, "Sonoff mDNS Discovery gestartet");
-        } catch (err) {
-          logger.warn({ err, iface: addr.address }, "Sonoff mDNS konnte nicht gestartet werden");
-        }
-      });
-    });
+    for (const { instance, ifaceLabel } of createMdnsSocketsForDiscovery()) {
+      this.mdnsInstances.push(instance);
+      instance.on("response", (response: any) => this.handleMdnsResponse(response));
+      const query = () => {
+        instance.query({
+          questions: SonoffDeviceDiscover.PTR_QUERY_NAMES.map(name => ({ name, type: "PTR" })),
+        });
+      };
+      query();
+      const timer = setInterval(query, 2000);
+      this.mdnsTimers.push(timer);
+      logger.info({ iface: ifaceLabel, ptr: SonoffDeviceDiscover.PTR_QUERY_NAMES }, "Sonoff mDNS Discovery gestartet");
+    }
     if (this.mdnsInstances.length === 0) {
       logger.warn("Keine mDNS-Instanz fuer Sonoff-Discovery erzeugt");
     }

@@ -1,13 +1,10 @@
-import os from "node:os";
-import mdns from "multicast-dns";
 import { logger } from "../../../../logger.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { MatterDeviceDiscovered } from "./matterDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
 import { MATTERCONFIG, MATTERMODULE } from "./matterModule.js";
 import { matterVendors } from "./matterVendors.js";
-
-type MdnsInstance = ReturnType<typeof mdns>;
+import { createMdnsSocketsForDiscovery, type MdnsInstance } from "../multicastDnsFactory.js";
 
 type ServiceCache = {
   name: string;
@@ -60,35 +57,22 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
 
   private startMdnsDiscovery() {
     this.stopMdnsDiscovery();
-    const interfaces = os.networkInterfaces();
-    Object.values(interfaces).forEach(iface => {
-      (iface ?? []).forEach(addr => {
-        if (addr.internal) return;
-        if (addr.family !== "IPv4") return;
-        try {
-          const instance = mdns({ interface: addr.address });
-          this.mdnsInstances.push(instance);
-          instance.on("response", (response: any) => this.handleMdnsResponse(response));
-          const query = () => {
-            instance.query({
-              questions: [
-                { name: MatterDeviceDiscover.SERVICE_TYPE_OPERATIONAL, type: "PTR" },
-                { name: MatterDeviceDiscover.SERVICE_TYPE_COMMISSIONABLE, type: "PTR" }
-              ]
-            });
-          };
-          query();
-          const timer = setInterval(query, 2000);
-          this.mdnsTimers.push(timer);
-          logger.info(
-            { iface: addr.address },
-            "mDNS Discovery gestartet (operational + commissionable)"
-          );
-        } catch (err) {
-          logger.warn({ err, iface: addr.address }, "Konnte mDNS nicht starten");
-        }
-      });
-    });
+    for (const { instance, ifaceLabel } of createMdnsSocketsForDiscovery()) {
+      this.mdnsInstances.push(instance);
+      instance.on("response", (response: any) => this.handleMdnsResponse(response));
+      const query = () => {
+        instance.query({
+          questions: [
+            { name: MatterDeviceDiscover.SERVICE_TYPE_OPERATIONAL, type: "PTR" },
+            { name: MatterDeviceDiscover.SERVICE_TYPE_COMMISSIONABLE, type: "PTR" }
+          ]
+        });
+      };
+      query();
+      const timer = setInterval(query, 2000);
+      this.mdnsTimers.push(timer);
+      logger.info({ iface: ifaceLabel }, "mDNS Discovery gestartet (operational + commissionable)");
+    }
 
     if (this.mdnsInstances.length === 0) {
       logger.warn("Keine mDNS-Instanz fuer Discovery erzeugt");

@@ -1,13 +1,10 @@
-import os from "node:os";
 import crypto from "node:crypto";
-import mdns = require("multicast-dns");
 import { logger } from "../../../../logger.js";
 import { HeosDeviceController } from "./heosDeviceController.js";
 import { HeosDeviceDiscovered } from "./heosDeviceDiscovered.js";
 import { ModuleDeviceDiscover } from "../moduleDeviceDiscover.js";
 import type { DatabaseManager } from "../../../db/database.js";
-
-type MdnsInstance = ReturnType<typeof mdns>;
+import { createMdnsSocketsForDiscovery, type MdnsInstance } from "../multicastDnsFactory.js";
 
 type ServiceCache = {
   name: string;
@@ -80,30 +77,12 @@ export abstract class HeosDeviceDiscover extends ModuleDeviceDiscover<HeosDevice
       logger.info({ iface: ifaceLabel, serviceType }, `${this.runTag()}mDNS Discovery gestartet`);
     };
 
-    // Linux: eine Socket-Instanz ohne Bind an eine einzelne IP — sonst fehlen oft Multicast-Antworten,
-    // während avahi-browse dieselben Dienste sieht (symptom: totalDevices 0 trotz laufendem mDNS).
-    if (os.platform() === "linux") {
+    for (const { instance, ifaceLabel } of createMdnsSocketsForDiscovery()) {
       try {
-        attachInstance(mdns({}), "0.0.0.0 (alle IPv4-Schnittstellen)");
+        attachInstance(instance, ifaceLabel);
       } catch (err) {
-        logger.warn({ err }, `${this.runTag()}Konnte mDNS (Linux gesamt) nicht starten`);
+        logger.warn({ err, iface: ifaceLabel }, `${this.runTag()}Konnte mDNS nicht starten`);
       }
-    } else {
-      const interfaces = os.networkInterfaces();
-      Object.values(interfaces).forEach(iface => {
-        (iface ?? []).forEach(addr => {
-          if (addr.internal) return;
-          if (addr.family !== "IPv4") return;
-          try {
-            attachInstance(mdns({ interface: addr.address }), addr.address);
-          } catch (err) {
-            logger.warn(
-              { err, iface: addr.address },
-              `${this.runTag()}Konnte mDNS auf Interface nicht starten`
-            );
-          }
-        });
-      });
     }
 
     if (this.mdnsInstances.length === 0) {
