@@ -609,15 +609,22 @@ def switch_device(config: dict, inching, new_state):
                         % inching
                     )
 
-    SonoffSwitch(
-        host=config["host"],
-        callback_after_update=update_callback,
-        inching_seconds=int(inching) if inching else None,
-        logger=logger,
-        device_id=config["device_id"],
-        api_key=config["api_key"],
-        outlet=config["outlet"],
-    )
+    # DUALR3/multifun_switch liefert anfangs haeufig Teil-Updates ohne
+    # "switch". Dann wuerde der Callback sonst ggf. nie laufen und on/off
+    # nicht ausgelöst werden.
+    SonoffDevice.invoke_callback_on_multifun_partial = True
+    try:
+        SonoffSwitch(
+            host=config["host"],
+            callback_after_update=update_callback,
+            inching_seconds=int(inching) if inching else None,
+            logger=logger,
+            device_id=config["device_id"],
+            api_key=config["api_key"],
+            outlet=config["outlet"],
+        )
+    finally:
+        SonoffDevice.invoke_callback_on_multifun_partial = False
 
 
 if __name__ == "__main__":

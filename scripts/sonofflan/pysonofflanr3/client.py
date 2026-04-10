@@ -176,6 +176,19 @@ class SonoffLANModeClient:
         self._last_params = {"switch": "off"}
         self._times_added = 0
 
+    @staticmethod
+    def _format_received_payload(payload: Any) -> str:
+        if isinstance(payload, (bytes, bytearray)):
+            try:
+                txt = payload.decode("utf-8")
+                try:
+                    return _json_dumps_for_display(json.loads(txt), indent=None)
+                except ValueError:
+                    return txt
+            except UnicodeDecodeError:
+                return repr(payload)
+        return str(payload)
+
     def listen(self):
         """
         Setup a mDNS listener
@@ -320,7 +333,10 @@ class SonoffLANModeClient:
                     # decrypt the message
                     iv = info.properties.get(b"iv")
                     data = sonoffcrypto.decrypt(data1, iv, self.api_key)
-                    self.logger.debug("decrypted data: %s", data)
+                    self.logger.info(
+                        "decrypted data received: %s",
+                        self._format_received_payload(data),
+                    )
 
             else:
                 self.encrypted = False
