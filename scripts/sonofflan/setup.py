@@ -73,8 +73,9 @@ PROJECT_URLS = {
     "Itead Dev Docs": "https://github.com/itead/Sonoff_Devices_DIY_Tools/tree/master/other/",
 }
 
-# Nur das lokale ``pysonofflanr3`` unter HERE; kein Auspacken/Überschreiben dieser Dateien.
-packages = find_packages(where=HERE, include=["pysonofflanr3"])
+# Nur das lokale ``pysonofflanr3`` im aktuellen Setup-Verzeichnis.
+# WICHTIG: setuptools erwartet hier relative Pfade.
+packages = find_packages(where=".", include=["pysonofflanr3"])
 if not packages:
     sys.stderr.write(f"Kein Paket 'pysonofflanr3' unter {HERE!r} gefunden.\n")
     sys.exit(1)
@@ -104,7 +105,7 @@ setup(
     include_package_data=True,
     keywords="pysonofflanr3, homeassistant",
     name="pysonofflanr3",
-    package_dir={"": HERE},
+    package_dir={"": "."},
     packages=packages,
     setup_requires=setup_requirements,
     test_suite="tests",
