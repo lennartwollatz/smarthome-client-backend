@@ -133,6 +133,17 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
   private async sendAndResolve(device: SonoffLanEndDevice, args: string[]): Promise<Record<string, unknown> | null> {
     const timeoutMs = 10_000;
     const python = sonoffCliPython();
+    logger.debug(
+      {
+        python,
+        args,
+        commandLine: `${python} ${args.join(" ")}`,
+        address: device.getLanAddress(),
+        ewelinkDeviceId: device.getEwelinkDeviceId(),
+        apiKey: device.getLanApiKey(),
+      },
+      "Sonoff Python-Aufruf (sendAndResolve)"
+    );
 
     return new Promise(resolve => {
       const child = spawn(python, args, sonoffCliSpawnOptions());
@@ -278,6 +289,18 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
       const ewelinkId = (d as any).ewelinkDeviceId ?? "";
       const backendId = d.id;
       const args = this.liveStreamArgsForDevice(d);
+      logger.debug(
+        {
+          python,
+          args,
+          commandLine: `${python} ${args.join(" ")}`,
+          ewelinkDeviceId: ewelinkId,
+          backendDeviceId: backendId,
+          address: (d as any).lanAddress ?? "",
+          apiKey: (d as any).lanApiKey ?? "",
+        },
+        "Sonoff Python-Aufruf (LAN-Livestream)"
+      );
       const child = spawn(python, args, spawnOpts);
       this.liveStreamByEwelinkId.set(ewelinkId, child);
 
