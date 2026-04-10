@@ -66,36 +66,45 @@ export abstract class HeosDeviceDiscover extends ModuleDeviceDiscover<HeosDevice
     this.stopMdnsDiscovery();
     const serviceType = this.getMdnsServiceType();
 
-    const interfaces = os.networkInterfaces();
-    Object.values(interfaces).forEach(iface => {
-      (iface ?? []).forEach(addr => {
-        if (addr.internal) return;
-        if (addr.family !== "IPv4") return;
-        try {
-          const instance = mdns({ interface: addr.address });
-          this.mdnsInstances.push(instance);
-          instance.on("response", (response: any) => {
-            this.handleMdnsResponse(response);
-          });
-          // query periodically while discovery is active
-          const query = () => {
-            instance.query({ questions: [{ name: serviceType, type: "PTR" }] });
-          };
-          query();
-          const timer = setInterval(query, 2000);
-          this.mdnsTimers.push(timer);
-          logger.info(
-            { iface: addr.address, serviceType },
-            `${this.runTag()}mDNS Discovery gestartet`
-          );
-        } catch (err) {
-          logger.warn(
-            { err, iface: addr.address },
-            `${this.runTag()}Konnte mDNS auf Interface nicht starten`
-          );
-        }
+    const attachInstance = (instance: MdnsInstance, ifaceLabel: string) => {
+      this.mdnsInstances.push(instance);
+      instance.on("response", (response: any) => {
+        this.handleMdnsResponse(response);
       });
-    });
+      const query = () => {
+        instance.query({ questions: [{ name: serviceType, type: "PTR" }] });
+      };
+      query();
+      const timer = setInterval(query, 2000);
+      this.mdnsTimers.push(timer);
+      logger.info({ iface: ifaceLabel, serviceType }, `${this.runTag()}mDNS Discovery gestartet`);
+    };
+
+    // Linux: eine Socket-Instanz ohne Bind an eine einzelne IP — sonst fehlen oft Multicast-Antworten,
+    // während avahi-browse dieselben Dienste sieht (symptom: totalDevices 0 trotz laufendem mDNS).
+    if (os.platform() === "linux") {
+      try {
+        attachInstance(mdns({}), "0.0.0.0 (alle IPv4-Schnittstellen)");
+      } catch (err) {
+        logger.warn({ err }, `${this.runTag()}Konnte mDNS (Linux gesamt) nicht starten`);
+      }
+    } else {
+      const interfaces = os.networkInterfaces();
+      Object.values(interfaces).forEach(iface => {
+        (iface ?? []).forEach(addr => {
+          if (addr.internal) return;
+          if (addr.family !== "IPv4") return;
+          try {
+            attachInstance(mdns({ interface: addr.address }), addr.address);
+          } catch (err) {
+            logger.warn(
+              { err, iface: addr.address },
+              `${this.runTag()}Konnte mDNS auf Interface nicht starten`
+            );
+          }
+        });
+      });
+    }
 
     if (this.mdnsInstances.length === 0) {
       logger.warn(`${this.runTag()}Keine mDNS-Instanz fuer Discovery erzeugt`);
