@@ -62,20 +62,17 @@ export class SonoffEventStreamManager extends ModuleEventStreamManager<SonoffDev
     }
 
     if (payload.ok === true && (payload.basicInfo !== undefined || payload.switch !== undefined)) {
-      const basicInfo = payload.basicInfo as Record<string, unknown> | undefined;
-      const basicSwitches = basicInfo?.switches;
-      const topSwitches = payload.switches;
-      const hasSwitchList =
-        (Array.isArray(topSwitches) && topSwitches.length > 0) ||
-        (Array.isArray(basicSwitches) && basicSwitches.length > 0);
-
-      if (hasSwitchList && (device instanceof SonoffSwitch || device instanceof SonoffSwitchEnergy)) {
-        void (device as SonoffSwitch | SonoffSwitchEnergy).updateValuesFromPayload(payload, true);
+      if (device instanceof SonoffSwitchEnergy) {
+        const stats = payload.statistics as Record<string, unknown> | undefined;
+        if (stats?.ok === true) {
+          void (device as SonoffSwitchEnergy).updateStatisticsFromPayload(stats, true);
+        }
+        void (device as SonoffSwitchEnergy).updateValuesFromPayload(payload, true);
         return;
       }
 
-      if (payload.data && device instanceof SonoffSwitchEnergy) {
-        void (device as SonoffSwitchEnergy).updateStatisticsFromPayload(payload, true);
+      if (device instanceof SonoffSwitch) {
+        void (device as SonoffSwitch).updateValuesFromPayload(payload, true);
         return;
       }
 

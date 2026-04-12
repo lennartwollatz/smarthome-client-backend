@@ -468,9 +468,17 @@ class SonoffLANModeClient:
         )
 
     def send_empty_zeroconf_switches(self):
-        """POST /zeroconf/switches mit leerem Payload (Mehrkanal / DUALR3 u. ä.)."""
+        """POST /zeroconf/switches — Zustandsabfrage (Mehrkanal / DUALR3).
+
+        Innen **muss** ein JSON mit ``switches``-Schlüssel stehen. Ein leeres ``{}``
+        wird verschlüsselt als ``"{}"``; manche Firmware antwortet dann mit HTTP 400
+        („request body is not a valid JSON format“ im Klartext nach Entschlüsselung).
+        """
+        inner: Dict = {}
+        if self.type in (b"strip", b"multifun_switch"):
+            inner = {"switches": []}
         return self.send(
-            self.get_update_payload(self.device_id, {}),
+            self.get_update_payload(self.device_id, inner),
             self.url + "/zeroconf/switches",
         )
 
@@ -495,15 +503,19 @@ class SonoffLANModeClient:
 
         self._last_params = params
 
-        if self.type in (b"strip", b"multifun_switch") and params != {} and params is not None:
+        if self.type in (b"strip", b"multifun_switch"):
+            # Nur Abfrage /zeroconf/switches: {"switches": []} unverändert lassen
+            if params == {"switches": []}:
+                pass
+            elif params != {} and params is not None:
 
-            if self.outlet is None:
-                self.outlet = 0
+                if self.outlet is None:
+                    self.outlet = 0
 
-            switches = {"switches": [{"switch": "off", "outlet": 0}]}
-            switches["switches"][0]["switch"] = params["switch"]
-            switches["switches"][0]["outlet"] = int(self.outlet)
-            params = switches
+                switches = {"switches": [{"switch": "off", "outlet": 0}]}
+                switches["switches"][0]["switch"] = params["switch"]
+                switches["switches"][0]["outlet"] = int(self.outlet)
+                params = switches
 
         payload = {
             "sequence": str(

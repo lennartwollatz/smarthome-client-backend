@@ -58,21 +58,55 @@ export class SonoffSwitch extends DeviceSwitch implements SonoffLanEndDevice {
   }
 
   updateValuesFromPayload(payload: Record<string, unknown>, trigger: boolean = false): void {
-    if (payload?.ok === true) {
-      if ((payload.basicInfo as Record<string, unknown>)?.switches) {
-        for (const switchConfig of ((payload.basicInfo as Record<string, unknown>)?.switches as Record<string, unknown>[])) {
-          const outlet = switchConfig.outlet;
-          const switchState = switchConfig.switch;
-          if(this.buttons[String(outlet)]) {
-            if(switchState === "on") { 
-              if( super.getButton(String(outlet))?.on === false) {
-                super.on(String(outlet), false, trigger);
-              }
-            } else {
-              if( super.getButton(String(outlet))?.on === true) {
-                super.off(String(outlet), false, trigger);
-              }
-            }
+    if (payload?.ok !== true) {
+      return;
+    }
+    const bi = payload.basicInfo as Record<string, unknown> | undefined;
+
+    const fromTop =
+      Array.isArray(payload.switches) && (payload.switches as unknown[]).length > 0
+        ? (payload.switches as Record<string, unknown>[])
+        : null;
+    const fromBasic =
+      Array.isArray(bi?.switches) && (bi!.switches as unknown[]).length > 0
+        ? (bi!.switches as Record<string, unknown>[])
+        : null;
+    const list = fromTop ?? fromBasic;
+
+    if (list && list.length > 0) {
+      for (const switchConfig of list) {
+        const outlet = switchConfig.outlet;
+        const switchState = switchConfig.switch;
+        if (outlet === undefined || switchState === undefined || !this.buttons[String(outlet)]) {
+          continue;
+        }
+        if (switchState === "on") {
+          if (super.getButton(String(outlet))?.on === false) {
+            super.on(String(outlet), false, trigger);
+          }
+        } else {
+          if (super.getButton(String(outlet))?.on === true) {
+            super.off(String(outlet), false, trigger);
+          }
+        }
+      }
+      return;
+    }
+
+    const singleFromBasic = typeof bi?.switch === "string" ? bi.switch : undefined;
+    const singleFromRoot = typeof payload.switch === "string" ? payload.switch : undefined;
+    const single = singleFromBasic ?? singleFromRoot;
+    const keys = Object.keys(this.buttons);
+    if (typeof single === "string" && keys.length === 1) {
+      const only = keys[0];
+      if (this.buttons[only]) {
+        if (single === "on") {
+          if (super.getButton(only)?.on === false) {
+            super.on(only, false, trigger);
+          }
+        } else {
+          if (super.getButton(only)?.on === true) {
+            super.off(only, false, trigger);
           }
         }
       }

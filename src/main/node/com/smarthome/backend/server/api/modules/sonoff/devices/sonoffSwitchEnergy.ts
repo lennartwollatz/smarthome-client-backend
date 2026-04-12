@@ -57,29 +57,89 @@ export class SonoffSwitchEnergy extends DeviceSwitchEnergy implements SonoffLanE
   }
 
   async updateValuesFromPayload(payload: Record<string, unknown>, trigger: boolean = false): Promise<void> {
-    if (payload?.ok === true) {
-      const buttons = [];
-      const switchesList =
-        Array.isArray(payload.switches) && (payload.switches as unknown[]).length > 0
-          ? (payload.switches as Record<string, unknown>[])
-          : (((payload.basicInfo as Record<string, unknown> | undefined)?.switches ??
-              null) as Record<string, unknown>[] | null);
-      if (switchesList && switchesList.length > 0) {
-        for (const switchConfig of switchesList) {
-          const outlet = switchConfig.outlet;
-          buttons.push(String(outlet));
-          const switchState = switchConfig.switch;
-          if(this.buttons[String(outlet)]) {
-            if(switchState === "on") { 
-              if( super.getButton(String(outlet))?.on === false) {
-                super.on(String(outlet), false, trigger);
-              }
-            } else {
-              if( super.getButton(String(outlet))?.on === true) {
-                super.off(String(outlet), false, trigger);
-              }
-            }
+    if (payload?.ok !== true) {
+      return;
+    }
+    const bi = payload.basicInfo as Record<string, unknown> | undefined;
+    const zc = payload.zeroconfSwitches as Record<string, unknown> | undefined;
+    const zcData =
+      zc?.ok === true && typeof zc.data === "object" && zc.data !== null
+        ? (zc.data as Record<string, unknown>)
+        : undefined;
+
+    let switchesList: Record<string, unknown>[] | null =
+      Array.isArray(payload.switches) && (payload.switches as unknown[]).length > 0
+        ? (payload.switches as Record<string, unknown>[])
+        : null;
+    if (!switchesList?.length && Array.isArray(bi?.switches) && (bi!.switches as unknown[]).length > 0) {
+      switchesList = bi!.switches as Record<string, unknown>[];
+    }
+    if (!switchesList?.length && Array.isArray(zcData?.switches) && (zcData!.switches as unknown[]).length > 0) {
+      switchesList = zcData!.switches as Record<string, unknown>[];
+    }
+
+    if (switchesList && switchesList.length > 0) {
+      for (const switchConfig of switchesList) {
+        const outlet = switchConfig.outlet;
+        const switchState = switchConfig.switch;
+        if (outlet === undefined || switchState === undefined || !this.buttons[String(outlet)]) {
+          continue;
+        }
+        if (switchState === "on") {
+          if (super.getButton(String(outlet))?.on === false) {
+            super.on(String(outlet), false, trigger);
           }
+        } else {
+          if (super.getButton(String(outlet))?.on === true) {
+            super.off(String(outlet), false, trigger);
+          }
+        }
+      }
+      return;
+    }
+
+    const buttonIds = Object.keys(this.buttons);
+    if (buttonIds.length === 1 && typeof payload.switch === "string") {
+      const only = buttonIds[0];
+      if (this.buttons[only]) {
+        if (payload.switch === "on") {
+          if (super.getButton(only)?.on === false) {
+            super.on(only, false, trigger);
+          }
+        } else {
+          if (super.getButton(only)?.on === true) {
+            super.off(only, false, trigger);
+          }
+        }
+      }
+      return;
+    }
+
+    const stats = payload.statistics as Record<string, unknown> | undefined;
+    const data =
+      stats?.ok === true && typeof stats.data === "object" && stats.data !== null
+        ? (stats.data as Record<string, unknown>)
+        : undefined;
+    if (!data || buttonIds.length < 2) {
+      return;
+    }
+    const threshold = 100;
+    for (const bid of buttonIds) {
+      const raw = data[`actPow_0${bid}`];
+      if (raw === undefined || raw === null) {
+        continue;
+      }
+      const on = Number(raw) >= threshold;
+      if (!this.buttons[bid]) {
+        continue;
+      }
+      if (on) {
+        if (super.getButton(bid)?.on === false) {
+          super.on(bid, false, trigger);
+        }
+      } else {
+        if (super.getButton(bid)?.on === true) {
+          super.off(bid, false, trigger);
         }
       }
     }
@@ -87,17 +147,23 @@ export class SonoffSwitchEnergy extends DeviceSwitchEnergy implements SonoffLanE
 
   async updateStatisticsFromPayload(payload: Record<string, unknown>, trigger: boolean = false): Promise<void> {
     const buttons = Object.keys(this.buttons);
-    //{"ok":true,"httpStatus":200,"data":{"current_00":2,"voltage_00":23616,"actPow_00":537,"reactPow_00":385,"apparentPow_00":661,"current_01":56,"voltage_01":23616,"actPow_01":9483,"reactPow_01":9288,"apparentPow_01":13274}}
-    if(payload?.ok === true){
-      const data = payload?.data as Record<string, unknown>;
-      for (const button of buttons) {
-        //const current = data[`current_0${button}`]; //Strom in Ampere (A) * 100
-        //const voltage = data[`voltage_0${button}`]; //Spannung in Volt (V) * 100
-        const actPow = data[`actPow_0${button}`]; //Echte Leistung in Watt (W) * 100 
-        //const reactPow = data[`reactPow_0${button}`]; //Blindleistung in Watt (W) * 100
-        //const apparentPow = data[`apparentPow_0${button}`]; //Scheinleistung in Watt (W) * 100 
-        await this.setEnergyUsage(button, Number(actPow) / 100, false, trigger);
+    if (payload?.ok !== true) {
+      return;
+    }
+    const data = payload.data as Record<string, unknown> | undefined;
+    if (!data || typeof data !== "object") {
+      return;
+    }
+    for (const button of buttons) {
+      const actPow = data[`actPow_0${button}`];
+      if (actPow === undefined || actPow === null) {
+        continue;
       }
+      const watts = Number(actPow) / 100;
+      if (Number.isNaN(watts)) {
+        continue;
+      }
+      await this.setEnergyUsage(button, watts, false, trigger);
     }
   }
 

@@ -342,14 +342,17 @@ def _run_get_state(config: dict, live: bool = False) -> None:
     """getState: ein kombinierter Snapshot oder Live-Stream.
 
     Ohne ``live``: eine JSON-Zeile (Schalter + basicInfo + statistics + ggf. zeroconfSwitches), dann Ende.
-    Mit ``live``: laufend jedes entschlüsselte mDNS-JSON als Zeile; alle 5 s zusätzlich statistics.
+    Mit ``live``: laufend jedes entschlüsselte mDNS-JSON als Zeile; alle 5 s statistics nur bei ``multifun_switch``.
     """
 
     shared_state = {"once_emitted": False, "stats_loop_started": False}
 
     async def state_callback(self):
         if live:
-            if not shared_state["stats_loop_started"]:
+            if (
+                not shared_state["stats_loop_started"]
+                and self.client.type == b"multifun_switch"
+            ):
                 shared_state["stats_loop_started"] = True
                 self.loop.create_task(_live_statistics_stdout_loop(self, 5.0))
             return
@@ -384,7 +387,7 @@ def _run_get_state(config: dict, live: bool = False) -> None:
 GET_STATE_HELP = (
     "Eine JSON-Zeile: Schaltzustände + ``basicInfo`` + ``statistics`` (Verbrauch aller Kanäle); "
     "bei ≥2 Kanälen zusätzlich ``zeroconfSwitches`` (HTTP /zeroconf/switches). "
-    "Mit ``--live``: fortlaufend jedes mDNS-Teil-JSON auf stdout; alle 5 s eine statistics-Zeile. "
+    "Mit ``--live``: fortlaufend jedes mDNS-Teil-JSON auf stdout; alle 5 s statistics nur bei multifun_switch. "
     "Prozess endet nur ohne ``--live``; Live per SIGINT/SIGTERM. Mit ``-l OFF`` nur JSON."
 )
 
@@ -396,7 +399,7 @@ GET_STATE_HELP = (
     is_flag=True,
     default=False,
     help=(
-        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 5 s statistics. "
+        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 5 s statistics nur bei multifun_switch. "
         "Ende mit SIGINT/SIGTERM."
     ),
 )
@@ -414,7 +417,7 @@ def get_state_dash(config: dict, live: bool):
     is_flag=True,
     default=False,
     help=(
-        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 5 s statistics. "
+        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 5 s statistics nur bei multifun_switch. "
         "Ende mit SIGINT/SIGTERM."
     ),
 )
@@ -643,7 +646,7 @@ def _is_multi_switch_device(device) -> bool:
 
 
 async def _live_statistics_stdout_loop(device, interval: float = 5.0) -> None:
-    """getState --live: regelmäßig POST /zeroconf/statistics als JSON-Zeile."""
+    """getState --live: regelmäßig POST /zeroconf/statistics (nur multifun_switch)."""
     interval = max(0.5, float(interval))
     while True:
         try:

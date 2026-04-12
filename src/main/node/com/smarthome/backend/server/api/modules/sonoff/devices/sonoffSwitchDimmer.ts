@@ -48,28 +48,40 @@ export class SonoffSwitchDimmer extends DeviceSwitchDimmer implements SonoffLanE
   }
 
   updateValuesFromPayload(payload: Record<string, unknown>, trigger: boolean = false): void {
-    if (payload?.ok === true) {
-      const outlet = "0";
-      const switchState = (payload.basicInfo as Record<string, unknown>).switch;
-      const brightness = (payload.basicInfo as Record<string, unknown>).brightness;
-      const power = (payload.basicInfo as Record<string, unknown>).power;
+    if (payload?.ok !== true) {
+      return;
+    }
+    const outlet = "0";
+    const bi = payload.basicInfo as Record<string, unknown> | undefined;
+    if (!bi || !this.buttons[outlet]) {
+      return;
+    }
 
-      if(this.buttons[String(outlet)]) {
-        if(switchState === "on") { 
-          if( super.getButton(String(outlet))?.on === false) {
-            super.on(String(outlet), false, trigger);
-          }
-        } else {
-          if( super.getButton(String(outlet))?.on === true) {
-            super.off(String(outlet), false, trigger);
-          }
-        }
+    const switchState = bi.switch;
+    const brightness = bi.brightness;
+    const power = bi.power;
 
-        if( super.getButton(String(outlet))?.brightness !== Number(brightness)) {
-          super.setBrightness(String(outlet), Number(brightness), false, trigger);
-        }
+    if (switchState === "on") {
+      if (super.getButton(outlet)?.on === false) {
+        super.on(outlet, false, trigger);
+      }
+    } else if (switchState === "off") {
+      if (super.getButton(outlet)?.on === true) {
+        super.off(outlet, false, trigger);
+      }
+    }
 
-        super.setEnergyUsage(String(outlet), Number(power) / 100, false, trigger);
+    if (brightness !== undefined && brightness !== null) {
+      const b = Number(brightness);
+      if (!Number.isNaN(b) && super.getButton(outlet)?.brightness !== b) {
+        super.setBrightness(outlet, b, false, trigger);
+      }
+    }
+
+    if (power !== undefined && power !== null) {
+      const p = Number(power);
+      if (!Number.isNaN(p)) {
+        super.setEnergyUsage(outlet, p / 100, false, trigger);
       }
     }
   }
