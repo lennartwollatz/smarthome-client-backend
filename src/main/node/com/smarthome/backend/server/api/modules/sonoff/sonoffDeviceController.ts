@@ -56,6 +56,38 @@ function sonoffCliSpawnOptions(): SpawnOptions {
   };
 }
 
+/**
+ * Debug: exakter Node-`spawn`-Aufruf auf stdout — inkl. `--api_key` und aller CLI-Argumente.
+ * Nicht für Produktionslogs mit externer Aggregation verwenden (Geheimnis im Klartext).
+ */
+function logSonoffPythonInvocation(context: string, python: string, args: string[]): void {
+  const spawnOpts = sonoffCliSpawnOptions();
+  const psQuote = (s: string) => `'${String(s).replace(/'/g, "''")}'`;
+  const approxCmdline = [python, ...args.map(a => (/[\s]/.test(a) ? psQuote(a) : a))].join(" ");
+  console.log(`[SonoffDeviceController] Python spawn — ${context}`);
+  console.log(
+    JSON.stringify(
+      {
+        context,
+        spawn: { file: python, args },
+        argv0: python,
+        argvFull: [python, ...args],
+        cwd: process.cwd(),
+        SONOFF_PYTHON: process.env.SONOFF_PYTHON ?? null,
+        platform: process.platform,
+        spawnOptions: {
+          windowsHide: spawnOpts.windowsHide,
+          stdio: spawnOpts.stdio,
+          envInheritedFromProcess: true,
+        },
+        approxCmdlineForCopyPaste: approxCmdline,
+      },
+      null,
+      2
+    )
+  );
+}
+
 export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEvent, Device> {
   /** Ein Live-Prozess pro eWeLink-Gerätid (getState --live). */
   private readonly liveStreamByEwelinkId = new Map<string, ChildProcess>();
@@ -133,6 +165,11 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
   private async sendAndResolve(device: SonoffLanEndDevice, args: string[]): Promise<Record<string, unknown> | null> {
     const timeoutMs = 10_000;
     const python = sonoffCliPython();
+    logSonoffPythonInvocation(
+      `sendAndResolve ${device.getEwelinkDeviceId()} @ ${device.getLanAddress()}`,
+      python,
+      args
+    );
 
     return new Promise(resolve => {
       const child = spawn(python, args, sonoffCliSpawnOptions());
@@ -304,6 +341,7 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
       const ewelinkId = (d as any).ewelinkDeviceId ?? "";
       const backendId = d.id;
       const args = this.liveStreamArgsForDevice(d);
+      logSonoffPythonInvocation(`LAN-Livestream ${ewelinkId} (backend ${backendId})`, python, args);
       const child = spawn(python, args, spawnOpts);
       this.liveStreamByEwelinkId.set(ewelinkId, child);
 
