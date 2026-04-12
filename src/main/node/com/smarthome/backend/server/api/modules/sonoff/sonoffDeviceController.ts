@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { logger } from "../../../../logger.js";
 import { Device } from "../../../../model/devices/Device.js";
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
@@ -42,14 +44,48 @@ function extractLastDecryptedJsonFromPysonoffLog(log: string): Record<string, un
   return last;
 }
 
-/** Wie `sendAndResolve`: Python für pysonofflanr3-CLI (SONOFF_PYTHON oder Plattform-Default). */
-function sonoffCliPython(): string {
-  return process.env.SONOFF_PYTHON?.trim() || (process.platform === "win32" ? "python" : "python3");
+function sonoffLanVenvUsable(dir: string): boolean {
+  if (process.platform === "win32") {
+    return existsSync(path.join(dir, ".venv", "Scripts", "python.exe"));
+  }
+  return (
+    existsSync(path.join(dir, ".venv", "bin", "python")) ||
+    existsSync(path.join(dir, ".venv", "bin", "python3"))
+  );
 }
 
-/** Gleiche Spawn-Basis wie `sendAndResolve` (kein cwd, keine Shell, env wie der Node-Prozess). */
-function sonoffCliSpawnOptions(): SpawnOptions {
+/** Absolutes Verzeichnis ``smarthome-client-backend/scripts/sonofflan`` (venv mit pysonofflanr3). */
+function sonoffLanScriptsDir(): string {
+  const cwd = process.cwd();
+  const fromMainNode = path.resolve(cwd, "../../../scripts/sonofflan");
+  const fromRepoRoot = path.resolve(cwd, "scripts/sonofflan");
+  if (sonoffLanVenvUsable(fromMainNode)) return fromMainNode;
+  if (sonoffLanVenvUsable(fromRepoRoot)) return fromRepoRoot;
+  throw new Error(
+    `pysonofflan venv fehlt unter ${fromMainNode} oder ${fromRepoRoot} (erwartet .venv mit pysonofflanr3)`
+  );
+}
+
+/**
+ * Relativ zu {@link sonoffLanScriptsDir} — unter Linux: ``./.venv/bin/python`` (oder ``python3`` falls nur dieser existiert).
+ */
+function sonoffCliPythonRelative(lanDir: string): string {
+  if (process.platform === "win32") {
+    return path.join(".venv", "Scripts", "python.exe");
+  }
+  if (existsSync(path.join(lanDir, ".venv", "bin", "python"))) {
+    return "./.venv/bin/python";
+  }
+  if (existsSync(path.join(lanDir, ".venv", "bin", "python3"))) {
+    return "./.venv/bin/python3";
+  }
+  return "./.venv/bin/python";
+}
+
+/** Spawn mit ``cwd = scripts/sonofflan`` (Modul ``pysonofflanr3`` liegt dort). */
+function sonoffCliSpawnOptions(cwd: string): SpawnOptions {
   return {
+    cwd,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: process.env,
@@ -60,22 +96,27 @@ function sonoffCliSpawnOptions(): SpawnOptions {
  * Debug: exakter Node-`spawn`-Aufruf auf stdout — inkl. `--api_key` und aller CLI-Argumente.
  * Nicht für Produktionslogs mit externer Aggregation verwenden (Geheimnis im Klartext).
  */
-function logSonoffPythonInvocation(context: string, python: string, args: string[]): void {
-  const spawnOpts = sonoffCliSpawnOptions();
+function logSonoffPythonInvocation(
+  context: string,
+  lanDir: string,
+  pythonRelative: string,
+  args: string[]
+): void {
+  const spawnOpts = sonoffCliSpawnOptions(lanDir);
   const psQuote = (s: string) => `'${String(s).replace(/'/g, "''")}'`;
-  const approxCmdline = [python, ...args.map(a => (/[\s]/.test(a) ? psQuote(a) : a))].join(" ");
+  const argStr = args.map(a => (/[\s]/.test(a) ? psQuote(a) : a)).join(" ");
+  const approxCmdline = `(cd ${psQuote(lanDir)} && ${pythonRelative} ${argStr})`;
   console.log(`[SonoffDeviceController] Python spawn — ${context}`);
   console.log(
     JSON.stringify(
       {
         context,
-        spawn: { file: python, args },
-        argv0: python,
-        argvFull: [python, ...args],
-        cwd: process.cwd(),
-        SONOFF_PYTHON: process.env.SONOFF_PYTHON ?? null,
+        spawn: { file: pythonRelative, args, cwd: lanDir },
+        argvFull: [pythonRelative, ...args],
+        nodeProcessCwd: process.cwd(),
         platform: process.platform,
         spawnOptions: {
+          cwd: lanDir,
           windowsHide: spawnOpts.windowsHide,
           stdio: spawnOpts.stdio,
           envInheritedFromProcess: true,
@@ -105,7 +146,7 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
     if (!ok) {
       logger.warn(
         { deviceId: device.id, address: device.address },
-        "Sonoff LAN-Verifikation fehlgeschlagen (API-Key / Geraet-ID / erreichbar?)"
+        "Sonoff LAN-Verifikation fehlgeschlagen (scripts/sonofflan/.venv / API-Key / Geraet-ID / erreichbar?)"
       );
       return null;
     }
@@ -116,8 +157,18 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
   }
 
   private async verifyLan(address: string, _port: number, ewelinkDeviceId: string, apiKey: string): Promise<boolean> {
-    const status = await this.getStatus(new SonoffBasicDevice(ewelinkDeviceId, address, _port, apiKey));
-    return ((status as Record<string, unknown>)?.ok as boolean) ?? false;
+    try {
+      const status = await this.getStatus(
+        new SonoffBasicDevice(ewelinkDeviceId, address, _port, apiKey)
+      );
+      return ((status as Record<string, unknown>)?.ok as boolean) ?? false;
+    } catch (err) {
+      logger.warn(
+        { err, address, ewelinkDeviceId },
+        "Sonoff LAN-Verifikation: Python-Aufruf fehlgeschlagen (scripts/sonofflan/.venv vorhanden?)"
+      );
+      return false;
+    }
   }
 
   private async setSwitchStatus(device: SonoffLanEndDevice, outlet:string, on_off:boolean): Promise<Record<string, unknown> | null> {
@@ -164,15 +215,18 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
 
   private async sendAndResolve(device: SonoffLanEndDevice, args: string[]): Promise<Record<string, unknown> | null> {
     const timeoutMs = 10_000;
-    const python = sonoffCliPython();
+    const lanDir = sonoffLanScriptsDir();
+    const python = sonoffCliPythonRelative(lanDir);
+    const spawnOpts = sonoffCliSpawnOptions(lanDir);
     logSonoffPythonInvocation(
       `sendAndResolve ${device.getEwelinkDeviceId()} @ ${device.getLanAddress()}`,
+      lanDir,
       python,
       args
     );
 
     return new Promise(resolve => {
-      const child = spawn(python, args, sonoffCliSpawnOptions());
+      const child = spawn(python, args, spawnOpts);
       let stdout = "";
       let stderr = "";
       let stdoutLineBuffer = "";
@@ -316,14 +370,23 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
       logger.warn("Sonoff LAN-Livestream: keine Geräte");
       return;
     }
-    const python = sonoffCliPython();
-    const spawnOpts = sonoffCliSpawnOptions();
+    let lanDir: string;
+    let python: string;
+    let spawnOpts: SpawnOptions;
+    try {
+      lanDir = sonoffLanScriptsDir();
+      python = sonoffCliPythonRelative(lanDir);
+      spawnOpts = sonoffCliSpawnOptions(lanDir);
+    } catch (err) {
+      logger.error({ err }, "Sonoff LAN-Livestream: scripts/sonofflan/.venv fehlt, Abbruch");
+      return;
+    }
 
     for (const d of lan) {
       const ewelinkId = (d as any).ewelinkDeviceId ?? "";
       const backendId = d.id;
       const args = this.liveStreamArgsForDevice(d);
-      logSonoffPythonInvocation(`LAN-Livestream ${ewelinkId} (backend ${backendId})`, python, args);
+      logSonoffPythonInvocation(`LAN-Livestream ${ewelinkId} (backend ${backendId})`, lanDir, python, args);
       const child = spawn(python, args, spawnOpts);
       this.liveStreamByEwelinkId.set(ewelinkId, child);
 
