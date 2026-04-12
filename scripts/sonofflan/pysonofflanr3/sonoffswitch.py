@@ -44,6 +44,7 @@ class SonoffSwitch(SonoffDevice):
         device_id: str = None,
         api_key: str = None,
         outlet: int = None,
+        lan_http_direct: bool = False,
     ) -> None:
 
         self.inching_seconds = inching_seconds
@@ -67,6 +68,7 @@ class SonoffSwitch(SonoffDevice):
             device_id=device_id,
             api_key=api_key,
             outlet=outlet,
+            lan_http_direct=lan_http_direct,
         )
 
     @property
@@ -168,6 +170,15 @@ class SonoffSwitch(SonoffDevice):
         self.logger.debug("Switch update pre-callback filter running")
 
         if self.basic_info is None:
+            if getattr(self, "_lan_http_direct", False) and self.parent_callback_after_update is not None:
+                await self.parent_callback_after_update(self)
+                return
+            if (
+                SonoffDevice.allow_listener_parent_without_basic
+                and self.parent_callback_after_update is not None
+            ):
+                await self.parent_callback_after_update(self)
+                return
             self.logger.debug(
                 "Basic info still none, waiting for init message"
             )

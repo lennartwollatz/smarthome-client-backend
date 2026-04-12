@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import signal
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -16,8 +17,42 @@ from pysonofflanr3.client import (
 )
 from pysonofflanr3.sonoffdevice import SonoffDevice, _switch_dict_for_outlet
 
-# ``getState --live`` (nur multifun_switch): periodischer HTTP-Abgleich Verbrauch — **statistics**, nicht switches.
-_LIVE_STATISTICS_INTERVAL_SEC = 30.0
+# getState-Listener: periodischer HTTP-Abgleich Verbrauch — **statistics** (alle Kanäle), ohne Session.
+STATISTICS_LISTENER_INTERVAL_SEC = 10.0
+
+_listener_shutdown_holder: Dict[str, Any] = {"device": None}
+_listener_signals_installed = False
+
+
+def _install_listener_shutdown_signals() -> None:
+    global _listener_signals_installed
+    if _listener_signals_installed:
+        return
+    _listener_signals_installed = True
+
+    def _handler(_signum, _frame):
+        dev = _listener_shutdown_holder.get("device")
+        if dev is not None:
+            try:
+                dev.shutdown_event_loop()
+            except Exception:
+                pass
+        else:
+            sys.exit(130)
+
+    for sig_name in ("SIGINT", "SIGTERM"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            pass
+
+
+def _lan_http_direct_enabled(config: dict) -> bool:
+    """Mit gesetztem ``--host``: kein mDNS, direkt ``http://host:8081`` (Snapshot/statistics/switch/…)."""
+    return bool((config.get("host") or "").strip())
 
 if sys.version_info < (3, 6):  # pragma: no cover
     print(
@@ -104,7 +139,7 @@ def _cli_zeroconf_empty_post(
     path_segment: str,
     json_stdout_only: bool = False,
 ):
-    """Nach mDNS-Verbindung: genau ein HTTP POST auf /zeroconf/<path_segment> mit leerem Payload.
+    """Nach Verbindung (mDNS oder HTTP direkt bei ``--host``): ein HTTP POST auf /zeroconf/<path_segment>.
 
     json_stdout_only: nur eine kompakte JSON-Zeile auf stdout (kein print_device_details).
     """
@@ -148,12 +183,20 @@ def _cli_zeroconf_empty_post(
             device.shutdown_event_loop()
 
     if not json_stdout_only:
-        logger.info(
-            "%s: mDNS, dann POST …/zeroconf/%s (Host %s)",
-            title,
-            path_segment,
-            config["host"],
-        )
+        if _lan_http_direct_enabled(config):
+            logger.info(
+                "%s: HTTP direkt …/zeroconf/%s (Host %s)",
+                title,
+                path_segment,
+                config["host"],
+            )
+        else:
+            logger.info(
+                "%s: mDNS, dann POST …/zeroconf/%s (Host %s)",
+                title,
+                path_segment,
+                config["host"],
+            )
     SonoffDevice.invoke_callback_on_multifun_partial = True
     try:
         SonoffSwitch(
@@ -163,56 +206,7 @@ def _cli_zeroconf_empty_post(
             device_id=config["device_id"],
             api_key=config["api_key"],
             outlet=config["outlet"],
-        )
-    finally:
-        SonoffDevice.invoke_callback_on_multifun_partial = False
-
-
-def _cli_statistics_live(config: dict, interval: float) -> None:
-    """HTTP /zeroconf/statistics wiederholt; jede Antwort eine JSON-Zeile auf stdout."""
-    interval = max(0.5, float(interval))
-    ran = {"started": False}
-
-    async def callback(device):
-        if not device.available:
-            return
-        if ran["started"]:
-            return
-        ran["started"] = True
-
-        async def poll_loop():
-            while True:
-                try:
-                    response = await device.loop.run_in_executor(
-                        None, device.client.send_statistics
-                    )
-                    inner = parse_zeroconf_http_response(
-                        device.api_key, response.content
-                    )
-                    if inner:
-                        device.merge_basic_info_from_response(inner)
-                    single = dict(
-                        _http_response_as_dict(
-                            device.api_key, response.content
-                        )
-                    )
-                    single["ok"] = True
-                    _stdout_json_line(single)
-                except Exception as ex:
-                    _stdout_json_line({"ok": False, "error": str(ex)})
-                await asyncio.sleep(interval)
-
-        device.loop.create_task(poll_loop())
-
-    SonoffDevice.invoke_callback_on_multifun_partial = True
-    try:
-        SonoffSwitch(
-            host=config["host"],
-            callback_after_update=callback,
-            logger=logger,
-            device_id=config["device_id"],
-            api_key=config["api_key"],
-            outlet=config["outlet"],
+            lan_http_direct=_lan_http_direct_enabled(config),
         )
     finally:
         SonoffDevice.invoke_callback_on_multifun_partial = False
@@ -272,8 +266,8 @@ def _cli_statistics_live(config: dict, interval: float) -> None:
     default="INFO",
     help=(
         "OFF = keine Log-Ausgaben "
-        "(nur JSON auf stdout bei statistics/switch/switches/getState|get-state: "
-        "ok/switch/switches/basicInfo/statistics, ggf. zeroconfSwitches)."
+        "(nur JSON auf stdout bei statistics/switch/switches/snapshot|get-snapshot/getSnapshot: "
+        "ok/switch/switches/basicInfo/statistics, ggf. zeroconfSwitches; getState: fortlaufend mDNS+statistics)."
     ),
 )
 @click.version_option()
@@ -324,6 +318,13 @@ def state(config: dict):
     """Connect to device and print current state."""
 
     async def state_callback(device):
+        if getattr(device, "_lan_http_direct", False) and device.basic_info is None and device.available:
+            r = await device.loop.run_in_executor(
+                None, device.client.send_empty_zeroconf_switch
+            )
+            inner = parse_zeroconf_http_response(device.api_key, r.content)
+            if inner:
+                device.merge_basic_info_from_response(inner)
         if device.basic_info is not None:
             if device.available:
                 print_device_details(device)
@@ -338,28 +339,60 @@ def state(config: dict):
         device_id=config["device_id"],
         api_key=config["api_key"],
         outlet=config["outlet"],
+        lan_http_direct=_lan_http_direct_enabled(config),
     )
 
 
-def _run_get_state(config: dict, live: bool = False) -> None:
-    """getState: ein kombinierter Snapshot oder Live-Stream.
+def _run_state_listener(config: dict) -> None:
+    """getState: dauerhaft mDNS (entschlüsseltes JSON je Zeile) + alle 10 s statistics (HTTP ohne Session)."""
 
-    Ohne ``live``: eine JSON-Zeile (Schalter + basicInfo + statistics + ggf. zeroconfSwitches), dann Ende.
-    Mit ``live``: laufend jedes entschlüsselte mDNS-JSON als Zeile; alle 30 s statistics nur bei ``multifun_switch``.
-    """
-
-    shared_state = {"once_emitted": False, "stats_loop_started": False}
+    shared_state = {"stats_started": False}
 
     async def state_callback(self):
-        if live:
-            if (
-                not shared_state["stats_loop_started"]
-                and self.client.type == b"multifun_switch"
-            ):
-                shared_state["stats_loop_started"] = True
-                self.loop.create_task(
-                    _live_statistics_stdout_loop(self, _LIVE_STATISTICS_INTERVAL_SEC)
-                )
+        _listener_shutdown_holder["device"] = self
+        if not shared_state["stats_started"] and getattr(self.client, "url", None):
+            shared_state["stats_started"] = True
+            self.loop.create_task(
+                _statistics_ephemeral_stdout_loop(self, STATISTICS_LISTENER_INTERVAL_SEC)
+            )
+
+    logger.info("Initialising SonoffSwitch with host %s" % config["host"])
+
+    _listener_shutdown_holder["device"] = None
+    _install_listener_shutdown_signals()
+    SonoffDevice.mirror_decrypted_mdns_json_to_stdout = True
+    SonoffDevice.invoke_callback_on_multifun_partial = True
+    SonoffDevice.allow_listener_parent_without_basic = True
+    try:
+        SonoffSwitch(
+            host=config["host"],
+            callback_after_update=state_callback,
+            shared_state=shared_state,
+            logger=logger,
+            device_id=config["device_id"],
+            api_key=config["api_key"],
+            outlet=config["outlet"],
+            lan_http_direct=False,
+        )
+    finally:
+        _listener_shutdown_holder["device"] = None
+        SonoffDevice.allow_listener_parent_without_basic = False
+        SonoffDevice.invoke_callback_on_multifun_partial = False
+        SonoffDevice.mirror_decrypted_mdns_json_to_stdout = False
+
+
+def _run_state_snapshot(config: dict) -> None:
+    """Eine JSON-Zeile: Schalter + basicInfo + statistics (+ ggf. zeroconfSwitches), dann Ende."""
+
+    shared_state = {"once_emitted": False}
+
+    async def state_callback(self):
+        if getattr(self, "_lan_http_direct", False):
+            if shared_state["once_emitted"]:
+                return
+            shared_state["once_emitted"] = True
+            await _emit_get_state_after_http_primer_async(self)
+            self.shutdown_event_loop()
             return
         if self.basic_info is None:
             return
@@ -371,8 +404,6 @@ def _run_get_state(config: dict, live: bool = False) -> None:
 
     logger.info("Initialising SonoffSwitch with host %s" % config["host"])
 
-    if live:
-        SonoffDevice.mirror_decrypted_mdns_json_to_stdout = True
     SonoffDevice.invoke_callback_on_multifun_partial = True
     try:
         SonoffSwitch(
@@ -383,33 +414,30 @@ def _run_get_state(config: dict, live: bool = False) -> None:
             device_id=config["device_id"],
             api_key=config["api_key"],
             outlet=config["outlet"],
+            lan_http_direct=_lan_http_direct_enabled(config),
         )
     finally:
         SonoffDevice.invoke_callback_on_multifun_partial = False
-        SonoffDevice.mirror_decrypted_mdns_json_to_stdout = False
 
 
 GET_STATE_HELP = (
+    "Dauerhafter Listener: mDNS (jede entschlüsselte Teilmeldung eine JSON-Zeile auf stdout) und "
+    "alle 10 s ``POST /zeroconf/statistics`` (Verbindung nach jeder Antwort geschlossen; alle Kanäle). "
+    "Ende mit SIGINT/SIGTERM. Einmaliger kombinierter Abruf: ``snapshot`` / ``get-snapshot`` / ``getSnapshot``. "
+    "Mit ``--host`` nur bei Snapshot: kein mDNS, direkt HTTP (Port 8081). Mit ``-l OFF`` nur JSON."
+)
+
+SNAPSHOT_HELP = (
     "Eine JSON-Zeile: Schaltzustände + ``basicInfo`` + ``statistics`` (Verbrauch aller Kanäle); "
-    "bei ≥2 Kanälen zusätzlich ``zeroconfSwitches`` (HTTP /zeroconf/switches). "
-    "Mit ``--live``: fortlaufend jedes mDNS-Teil-JSON auf stdout; alle 30 s statistics nur bei multifun_switch. "
-    "Prozess endet nur ohne ``--live``; Live per SIGINT/SIGTERM. Mit ``-l OFF`` nur JSON."
+    "bei ≥2 Kanälen zusätzlich ``zeroconfSwitches``. Mit ``--host``: kein mDNS, direkt HTTP (Port 8081). "
+    "Mit ``-l OFF`` nur JSON."
 )
 
 
 @cli.command("get-state", help=GET_STATE_HELP)
 @pass_config
-@click.option(
-    "--live",
-    is_flag=True,
-    default=False,
-    help=(
-        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 30 s statistics nur bei multifun_switch. "
-        "Ende mit SIGINT/SIGTERM."
-    ),
-)
-def get_state_dash(config: dict, live: bool):
-    _run_get_state(config, live=live)
+def get_state_dash(config: dict):
+    _run_state_listener(config)
 
 
 @cli.command(
@@ -417,45 +445,38 @@ def get_state_dash(config: dict, live: bool):
     help=GET_STATE_HELP + " Gleiche Funktion wie ``get-state``.",
 )
 @pass_config
-@click.option(
-    "--live",
-    is_flag=True,
-    default=False,
-    help=(
-        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 30 s statistics nur bei multifun_switch. "
-        "Ende mit SIGINT/SIGTERM."
-    ),
+def get_state_camel(config: dict):
+    _run_state_listener(config)
+
+
+@cli.command("get-snapshot", help=SNAPSHOT_HELP)
+@pass_config
+def get_snapshot_dash(config: dict):
+    _run_state_snapshot(config)
+
+
+@cli.command(
+    "getSnapshot",
+    help=SNAPSHOT_HELP + " Gleiche Funktion wie ``get-snapshot``.",
 )
-def get_state_camel(config: dict, live: bool):
-    _run_get_state(config, live=live)
+@pass_config
+def get_snapshot_camel(config: dict):
+    _run_state_snapshot(config)
+
+
+@cli.command("snapshot", help=SNAPSHOT_HELP)
+@pass_config
+def snapshot_cmd(config: dict):
+    _run_state_snapshot(config)
 
 
 @cli.command()
 @pass_config
-@click.option(
-    "--interval",
-    type=float,
-    default=2.0,
-    show_default=True,
-    help="Sekunden zwischen HTTP-Abfragen, nur mit --live.",
-)
-@click.option(
-    "--live",
-    is_flag=True,
-    default=False,
-    help=(
-        "Fortlaufend POST /zeroconf/statistics; jede Antwort eine JSON-Zeile auf stdout "
-        "(Prozess bis SIGINT/SIGTERM). Abstand: --interval."
-    ),
-)
-def statistics(config: dict, live: bool, interval: float):
+def statistics(config: dict):
     """POST /zeroconf/statistics mit leerem Payload (verschlüsselt wenn nötig).
 
     Entspricht dem SonoffLAN-Befehl „statistics“ (u. a. für unterstützte POW-/Mess-Geräte).
     """
-    if live:
-        _cli_statistics_live(config, interval)
-        return
     _cli_zeroconf_empty_post(
         config,
         "statistics",
@@ -650,15 +671,17 @@ def _is_multi_switch_device(device) -> bool:
     return t in (b"multifun_switch", b"strip")
 
 
-async def _live_statistics_stdout_loop(device, interval: Optional[float] = None) -> None:
-    """getState --live: regelmäßig POST /zeroconf/statistics (nur multifun_switch)."""
+async def _statistics_ephemeral_stdout_loop(
+    device, interval: Optional[float] = None
+) -> None:
+    """getState-Listener: regelmäßig POST /zeroconf/statistics ohne HTTP-Session."""
     if interval is None:
-        interval = _LIVE_STATISTICS_INTERVAL_SEC
+        interval = STATISTICS_LISTENER_INTERVAL_SEC
     interval = max(0.5, float(interval))
     while True:
         try:
             resp = await device.loop.run_in_executor(
-                None, device.client.send_statistics
+                None, device.client.send_statistics_ephemeral
             )
             _stdout_json_line(
                 _zeroconf_http_aux_block(
@@ -677,6 +700,17 @@ async def _live_statistics_stdout_loop(device, interval: Optional[float] = None)
                 }
             )
         await asyncio.sleep(interval)
+
+
+async def _emit_get_state_after_http_primer_async(device) -> None:
+    """Ohne mDNS: einmal ``/zeroconf/switch`` (leer), dann wie üblich JSON-Zeile bauen."""
+    r0 = await device.loop.run_in_executor(
+        None, device.client.send_empty_zeroconf_switch
+    )
+    inner0 = parse_zeroconf_http_response(device.api_key, r0.content)
+    if inner0:
+        device.merge_basic_info_from_response(inner0)
+    await _emit_get_state_json_stdout_async(device)
 
 
 async def _emit_get_state_json_stdout_async(device) -> None:
@@ -858,6 +892,15 @@ def switch_device(config: dict, inching, new_state):
     logger.info("Initialising SonoffSwitch with host %s" % config["host"])
 
     async def update_callback(device: SonoffSwitch):
+        if not device.available:
+            return
+        if getattr(device, "_lan_http_direct", False) and device.basic_info is None:
+            r = await device.loop.run_in_executor(
+                None, device.client.send_empty_zeroconf_switch
+            )
+            inner = parse_zeroconf_http_response(device.api_key, r.content)
+            if inner:
+                device.merge_basic_info_from_response(inner)
         if device.basic_info is not None:
 
             if device.available:
@@ -897,6 +940,7 @@ def switch_device(config: dict, inching, new_state):
             device_id=config["device_id"],
             api_key=config["api_key"],
             outlet=config["outlet"],
+            lan_http_direct=_lan_http_direct_enabled(config),
         )
     finally:
         SonoffDevice.invoke_callback_on_multifun_partial = False

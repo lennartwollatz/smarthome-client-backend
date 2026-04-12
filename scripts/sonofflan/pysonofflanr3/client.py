@@ -172,6 +172,7 @@ class SonoffLANModeClient:
         self.last_request = None
         self.encrypted = False
         self.type = None
+        self.properties: Dict = {}
         self._info_cache = None
         self._last_params = {"switch": "off"}
         self._times_added = 0
@@ -188,6 +189,25 @@ class SonoffLANModeClient:
             except UnicodeDecodeError:
                 return repr(payload)
         return str(payload)
+
+    def connect_direct_http(self, port: int = 8081) -> None:
+        """Ohne mDNS: Session und ``http://<host>:<port>`` sofort nutzen (üblich 8081).
+
+        ``encrypted`` folgt dem Vorhandensein von ``api_key``. ``type`` bleibt unbekannt
+        (``None``) — Mehrkanal-Geräte ggf. weiter per mDNS/``listen()`` anbinden.
+        """
+        self.service_browser = None
+        self.my_service_name = None
+        if not (self.host or "").strip():
+            raise ValueError("connect_direct_http requires host")
+        self.set_url(self.host.strip(), str(int(port)))
+        self.create_http_session()
+        self.set_retries(0)
+        self.encrypted = bool(self.api_key and str(self.api_key).strip())
+        self.type = None
+        did = (self.device_id or "").strip()
+        self.properties = {b"id": did.encode("utf-8")} if did else {}
+        self.connected_event.set()
 
     def listen(self):
         """
@@ -475,6 +495,8 @@ class SonoffLANModeClient:
         („request body is not a valid JSON format“ im Klartext nach Entschlüsselung).
         """
         inner: Dict = {}
+        if self.type in (b"strip", b"multifun_switch"):
+            inner = {"switches": []}
         self.logger.debug("send_empty_zeroconf_switches")
         return self.send(
             self.get_update_payload(self.device_id, inner),
@@ -498,20 +520,46 @@ class SonoffLANModeClient:
 
         return response
 
+    @staticmethod
+    def _ephemeral_post_headers():
+        return collections.OrderedDict(
+            (
+                ("Content-Type", "application/json;charset=UTF-8"),
+                ("Connection", "close"),
+                ("Accept", "application/json"),
+                ("Accept-Language", "en-gb"),
+            )
+        )
+
+    def send_statistics_ephemeral(self):
+        """POST /zeroconf/statistics ohne ``http_session`` (TCP nach Antwort schließen)."""
+        url = self.url + "/zeroconf/statistics"
+        payload = self.get_update_payload(self.device_id, {})
+        data = json.dumps(payload, separators=(",", ":"))
+        resp = requests.post(
+            url,
+            data=data,
+            headers=self._ephemeral_post_headers(),
+        )
+        try:
+            _ = resp.content
+        finally:
+            resp.close()
+        return resp
+
     def get_update_payload(self, device_id: str, params: dict) -> Dict:
 
         self._last_params = params
 
-
         if params != {} and params is not None:
+            if self.type in (b"strip", b"multifun_switch"):
+                if self.outlet is None:
+                    self.outlet = 0
 
-            if self.outlet is None:
-                self.outlet = 0
-
-            switches = {"switches": [{"switch": "off", "outlet": 0}]}
-            switches["switches"][0]["switch"] = params["switch"]
-            switches["switches"][0]["outlet"] = int(self.outlet)
-            params = switches
+                switches = {"switches": [{"switch": "off", "outlet": 0}]}
+                switches["switches"][0]["switch"] = params["switch"]
+                switches["switches"][0]["outlet"] = int(self.outlet)
+                params = switches
 
         payload = {
             "sequence": str(

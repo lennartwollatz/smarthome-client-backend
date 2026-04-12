@@ -26,13 +26,13 @@ import json
 def format_encryption_msg(payload, api_key, data):
 
     payload["selfApikey"] = "123"
-    # see https://github.com/itead/Sonoff_Devices_DIY_Tools/issues/5)
     iv = generate_iv()
     payload["iv"] = b64encode(iv).decode("utf-8")
     payload["encrypt"] = True
-
+    dump = json.dumps(data, separators=(",", ":"))
+    print(dump)
     payload["data"] = encrypt(
-        json.dumps(data, separators=(",", ":")), iv, api_key
+        dump, iv, api_key
     )
 
 

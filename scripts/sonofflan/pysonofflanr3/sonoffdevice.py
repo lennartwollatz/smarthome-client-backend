@@ -77,8 +77,10 @@ class SonoffDevice(object):
     """Wenn True: multifun_switch löst callback_after_update auch bei reinen Telemetrie-Updates aus (nur CLI Leer-POST)."""
 
     invoke_callback_on_multifun_partial = False
-    # Wenn True: jedes entschlüsselte mDNS-JSON (dict) als eine Zeile auf stdout (getState --live).
+    # Wenn True: jedes entschlüsselte mDNS-JSON (dict) als eine Zeile auf stdout (getState-Listener).
     mirror_decrypted_mdns_json_to_stdout = False
+    # CLI getState-Listener: pre_callback ruft parent auch ohne basic_info (mDNS „{}“, früh url).
+    allow_listener_parent_without_basic = False
 
     def __init__(
         self,
@@ -93,12 +95,14 @@ class SonoffDevice(object):
         device_id: str = "",
         api_key: str = "",
         outlet: int = None,
+        lan_http_direct: bool = False,
     ) -> None:
         """
         Create a new SonoffDevice instance.
 
         :param str host: host name or ip address on which the device listens
         :param context: optional child ID for context in a parent device
+        :param lan_http_direct: Wenn True und ``host`` gesetzt: kein mDNS, sofort HTTP (Port 8081).
         """
         self.callback_after_update = callback_after_update
         self.host = host
@@ -167,7 +171,12 @@ class SonoffDevice(object):
             self.message_acknowledged_event = asyncio.Event()
             self.params_updated_event = asyncio.Event()
 
-            self.client.listen()
+            use_direct = bool(lan_http_direct and (host or "").strip())
+            self._lan_http_direct = use_direct
+            if use_direct:
+                self.client.connect_direct_http(8081)
+            else:
+                self.client.listen()
 
             self.tasks.append(
                 self.loop.create_task(self.send_availability_loop())
@@ -177,6 +186,14 @@ class SonoffDevice(object):
                 self.send_updated_params_loop()
             )
             self.tasks.append(self.send_updated_params_task)
+
+            if use_direct:
+
+                async def _lan_http_direct_kick():
+                    if self.callback_after_update is not None:
+                        await self.callback_after_update(self)
+
+                self.tasks.append(self.loop.create_task(_lan_http_direct_kick()))
 
             if self.new_loop:
                 hotfix(self.loop)  # see Cltr-C hotfix earlier in routine
@@ -599,7 +616,10 @@ class SonoffDevice(object):
         :return: Device ID.
         :rtype: str
         """
-        return self.client.properties[b"id"].decode("utf-8")
+        raw = self.client.properties.get(b"id")
+        if raw is None:
+            return (self.client.device_id or "").strip()
+        return raw.decode("utf-8")
 
     async def turn_off(self) -> None:
         """
