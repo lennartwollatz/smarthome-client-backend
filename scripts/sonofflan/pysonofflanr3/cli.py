@@ -16,6 +16,9 @@ from pysonofflanr3.client import (
 )
 from pysonofflanr3.sonoffdevice import SonoffDevice, _switch_dict_for_outlet
 
+# ``getState --live`` (nur multifun_switch): periodischer HTTP-Abgleich Verbrauch — **statistics**, nicht switches.
+_LIVE_STATISTICS_INTERVAL_SEC = 30.0
+
 if sys.version_info < (3, 6):  # pragma: no cover
     print(
         "To use this script you need python 3.6 or newer! got %s"
@@ -342,7 +345,7 @@ def _run_get_state(config: dict, live: bool = False) -> None:
     """getState: ein kombinierter Snapshot oder Live-Stream.
 
     Ohne ``live``: eine JSON-Zeile (Schalter + basicInfo + statistics + ggf. zeroconfSwitches), dann Ende.
-    Mit ``live``: laufend jedes entschlüsselte mDNS-JSON als Zeile; alle 5 s statistics nur bei ``multifun_switch``.
+    Mit ``live``: laufend jedes entschlüsselte mDNS-JSON als Zeile; alle 30 s statistics nur bei ``multifun_switch``.
     """
 
     shared_state = {"once_emitted": False, "stats_loop_started": False}
@@ -354,7 +357,9 @@ def _run_get_state(config: dict, live: bool = False) -> None:
                 and self.client.type == b"multifun_switch"
             ):
                 shared_state["stats_loop_started"] = True
-                self.loop.create_task(_live_statistics_stdout_loop(self, 5.0))
+                self.loop.create_task(
+                    _live_statistics_stdout_loop(self, _LIVE_STATISTICS_INTERVAL_SEC)
+                )
             return
         if self.basic_info is None:
             return
@@ -387,7 +392,7 @@ def _run_get_state(config: dict, live: bool = False) -> None:
 GET_STATE_HELP = (
     "Eine JSON-Zeile: Schaltzustände + ``basicInfo`` + ``statistics`` (Verbrauch aller Kanäle); "
     "bei ≥2 Kanälen zusätzlich ``zeroconfSwitches`` (HTTP /zeroconf/switches). "
-    "Mit ``--live``: fortlaufend jedes mDNS-Teil-JSON auf stdout; alle 5 s statistics nur bei multifun_switch. "
+    "Mit ``--live``: fortlaufend jedes mDNS-Teil-JSON auf stdout; alle 30 s statistics nur bei multifun_switch. "
     "Prozess endet nur ohne ``--live``; Live per SIGINT/SIGTERM. Mit ``-l OFF`` nur JSON."
 )
 
@@ -399,7 +404,7 @@ GET_STATE_HELP = (
     is_flag=True,
     default=False,
     help=(
-        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 5 s statistics nur bei multifun_switch. "
+        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 30 s statistics nur bei multifun_switch. "
         "Ende mit SIGINT/SIGTERM."
     ),
 )
@@ -417,7 +422,7 @@ def get_state_dash(config: dict, live: bool):
     is_flag=True,
     default=False,
     help=(
-        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 5 s statistics nur bei multifun_switch. "
+        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 30 s statistics nur bei multifun_switch. "
         "Ende mit SIGINT/SIGTERM."
     ),
 )
@@ -645,8 +650,10 @@ def _is_multi_switch_device(device) -> bool:
     return t in (b"multifun_switch", b"strip")
 
 
-async def _live_statistics_stdout_loop(device, interval: float = 5.0) -> None:
+async def _live_statistics_stdout_loop(device, interval: Optional[float] = None) -> None:
     """getState --live: regelmäßig POST /zeroconf/statistics (nur multifun_switch)."""
+    if interval is None:
+        interval = _LIVE_STATISTICS_INTERVAL_SEC
     interval = max(0.5, float(interval))
     while True:
         try:
