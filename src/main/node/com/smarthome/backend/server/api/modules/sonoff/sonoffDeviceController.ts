@@ -267,24 +267,6 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
     return await this.sendAndResolve(device, args);
   }
 
-  async getStatistics(device: SonoffLanEndDevice): Promise<Record<string, unknown> | null> {
-    const args = [
-      "-m",
-      "pysonofflanr3.cli",
-      "--host",
-      device.getLanAddress(),
-      "--device_id",
-      device.getEwelinkDeviceId(),
-      "--api_key",
-      device.getLanApiKey(),
-      "-l",
-      "CRITICAL",
-      "statistics",
-    ];
-    
-    return await this.sendAndResolve(device, args);
-  }
-
   async toggleSwitch(device: SonoffLanEndDevice, buttonId: string): Promise<boolean> {
     const response = await this.setSwitchStatus(device, buttonId, !(device.getButton(buttonId)?.on ?? false));
     return ((response as Record<string, unknown>)?.ok as boolean) ?? false;
@@ -361,13 +343,14 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
           } catch {
             continue;
           }
+          const reachable = !("ok" in parsed) || parsed.ok === true;
           callback({
             event: "lanState",
             name: "lanState",
             deviceId: backendId,
             ewelinkDeviceId: ewelinkId,
-            online: parsed.ok === true,
-            reachable: parsed.ok === true,
+            online: reachable,
+            reachable,
             payload: parsed,
           });
         }

@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import click
 import click_log
@@ -14,7 +14,7 @@ from pysonofflanr3.client import (
     format_zeroconf_http_body_as_json,
     parse_zeroconf_http_response,
 )
-from pysonofflanr3.sonoffdevice import SonoffDevice
+from pysonofflanr3.sonoffdevice import SonoffDevice, _switch_dict_for_outlet
 
 if sys.version_info < (3, 6):  # pragma: no cover
     print(
@@ -269,7 +269,8 @@ def _cli_statistics_live(config: dict, interval: float) -> None:
     default="INFO",
     help=(
         "OFF = keine Log-Ausgaben "
-        "(nur JSON auf stdout bei statistics/switch/switches/getState|get-state)."
+        "(nur JSON auf stdout bei statistics/switch/switches/getState|get-state: "
+        "ok/switch/switches/basicInfo/statistics, ggf. zeroconfSwitches)."
     ),
 )
 @click.version_option()
@@ -338,28 +339,32 @@ def state(config: dict):
 
 
 def _run_get_state(config: dict, live: bool = False) -> None:
-    """mDNS-Zustand (merged basic_info) als JSON-Zeile(n) auf stdout.
+    """getState: ein kombinierter Snapshot oder Live-Stream.
 
-    Ohne ``live``: genau eine Zeile, dann Prozessende.
-    Mit ``live``: bei jedem Update eine weitere Zeile; Prozess läuft bis SIGINT/SIGTERM.
+    Ohne ``live``: eine JSON-Zeile (Schalter + basicInfo + statistics + ggf. zeroconfSwitches), dann Ende.
+    Mit ``live``: laufend jedes entschlüsselte mDNS-JSON als Zeile; alle 5 s zusätzlich statistics.
     """
 
-    shared_state = {"once_emitted": False}
+    shared_state = {"once_emitted": False, "stats_loop_started": False}
 
     async def state_callback(self):
+        if live:
+            if not shared_state["stats_loop_started"]:
+                shared_state["stats_loop_started"] = True
+                self.loop.create_task(_live_statistics_stdout_loop(self, 5.0))
+            return
         if self.basic_info is None:
             return
-        if not live:
-            if shared_state["once_emitted"]:
-                return
-            shared_state["once_emitted"] = True
-            _emit_get_state_json_stdout(self)
-            self.shutdown_event_loop()
+        if shared_state["once_emitted"]:
             return
-        _emit_get_state_json_stdout(self)
+        shared_state["once_emitted"] = True
+        await _emit_get_state_json_stdout_async(self)
+        self.shutdown_event_loop()
 
     logger.info("Initialising SonoffSwitch with host %s" % config["host"])
 
+    if live:
+        SonoffDevice.mirror_decrypted_mdns_json_to_stdout = True
     SonoffDevice.invoke_callback_on_multifun_partial = True
     try:
         SonoffSwitch(
@@ -373,13 +378,14 @@ def _run_get_state(config: dict, live: bool = False) -> None:
         )
     finally:
         SonoffDevice.invoke_callback_on_multifun_partial = False
+        SonoffDevice.mirror_decrypted_mdns_json_to_stdout = False
 
 
 GET_STATE_HELP = (
-    "Zustand aus mDNS (merged basic_info), eine JSON-Zeile auf stdout "
-    "(wie ``listen`` ohne ``--follow``). Ausgabe: "
-    '{"ok":true,"state":{...}} — mit ``-l OFF`` nur diese Zeile. '
-    "Mit ``--live`` fortlaufend eine Zeile pro Geräte-Update."
+    "Eine JSON-Zeile: Schaltzustände + ``basicInfo`` + ``statistics`` (Verbrauch aller Kanäle); "
+    "bei ≥2 Kanälen zusätzlich ``zeroconfSwitches`` (HTTP /zeroconf/switches). "
+    "Mit ``--live``: fortlaufend jedes mDNS-Teil-JSON auf stdout; alle 5 s eine statistics-Zeile. "
+    "Prozess endet nur ohne ``--live``; Live per SIGINT/SIGTERM. Mit ``-l OFF`` nur JSON."
 )
 
 
@@ -390,8 +396,8 @@ GET_STATE_HELP = (
     is_flag=True,
     default=False,
     help=(
-        "Bei jedem mDNS-/Zustands-Update eine weitere JSON-Zeile auf stdout; "
-        "Prozess beendet sich nicht (beenden mit SIGINT/SIGTERM)."
+        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 5 s statistics. "
+        "Ende mit SIGINT/SIGTERM."
     ),
 )
 def get_state_dash(config: dict, live: bool):
@@ -408,8 +414,8 @@ def get_state_dash(config: dict, live: bool):
     is_flag=True,
     default=False,
     help=(
-        "Bei jedem mDNS-/Zustands-Update eine weitere JSON-Zeile auf stdout; "
-        "Prozess beendet sich nicht (beenden mit SIGINT/SIGTERM)."
+        "mDNS: jedes entschlüsselte JSON als Zeile auf stdout; alle 5 s statistics. "
+        "Ende mit SIGINT/SIGTERM."
     ),
 )
 def get_state_camel(config: dict, live: bool):
@@ -554,11 +560,153 @@ def _emit_basic_info_json_stdout(device) -> None:
     sys.stdout.flush()
 
 
-def _emit_get_state_json_stdout(device) -> None:
-    """getState: eine Zeile {"ok":true,"state":{...basic_info}} auf stdout."""
-    out = {"ok": True, "state": dict(device.basic_info or {})}
+def _build_get_state_payload(device) -> Dict[str, Any]:
+    """Shape wie Node (SonoffSwitch): ok, switch, switches, basicInfo."""
+    info = dict(device.basic_info or {})
+    switches_arr = info.get("switches")
+    outlet = device.outlet
+    if outlet is None:
+        outlet = 0
+
+    root_switch_val = None
+    top_switches = None
+
+    if isinstance(switches_arr, list) and switches_arr:
+        sw_sel = _switch_dict_for_outlet(switches_arr, int(outlet))
+        if sw_sel is not None:
+            root_switch_val = sw_sel.get("switch")
+        if root_switch_val is None:
+            first = switches_arr[0]
+            if isinstance(first, dict):
+                root_switch_val = first.get("switch")
+        if len(switches_arr) > 1:
+            top_switches = [
+                dict(x) if isinstance(x, dict) else x for x in switches_arr
+            ]
+    else:
+        root_switch_val = info.get("switch")
+
+    if root_switch_val is None:
+        root_switch_val = info.get("switch")
+
+    return {
+        "ok": True,
+        "switch": root_switch_val,
+        "switches": top_switches,
+        "basicInfo": info,
+    }
+
+
+def _zeroconf_http_aux_block(
+    device,
+    response,
+    endpoint: str,
+    tried: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """HTTP-/zeroconf-Antwort für JSON (statistics, switches, …)."""
+    tl = list(tried) if tried is not None else [endpoint]
+    code = int(getattr(response, "status_code", 0) or 0)
+    try:
+        body = _http_response_as_dict(device.api_key, response.content)
+    except Exception as ex:
+        return {
+            "ok": False,
+            "httpStatus": code,
+            "data": {},
+            "endpoint": endpoint,
+            "tried": tl,
+            "error": str(ex),
+        }
+    err = body.get("error", -1)
+    data = body.get("data")
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        data = {"_value": data}
+    ok = code == 200 and err == 0
+    return {
+        "ok": ok,
+        "httpStatus": code,
+        "data": data,
+        "endpoint": endpoint,
+        "tried": tl,
+    }
+
+
+def _is_multi_switch_device(device) -> bool:
+    """Mehrkanal per mDNS (DUALR3 / Strip): optional HTTP zeroconf/switches ergänzen."""
+    switches_arr = (device.basic_info or {}).get("switches")
+    if not isinstance(switches_arr, list) or len(switches_arr) < 2:
+        return False
+    t = device.client.type
+    return t in (b"multifun_switch", b"strip")
+
+
+async def _live_statistics_stdout_loop(device, interval: float = 5.0) -> None:
+    """getState --live: regelmäßig POST /zeroconf/statistics als JSON-Zeile."""
+    interval = max(0.5, float(interval))
+    while True:
+        try:
+            resp = await device.loop.run_in_executor(
+                None, device.client.send_statistics
+            )
+            _stdout_json_line(
+                _zeroconf_http_aux_block(
+                    device, resp, "statistics", ["statistics"]
+                )
+            )
+        except Exception as ex:
+            _stdout_json_line(
+                {
+                    "ok": False,
+                    "httpStatus": 0,
+                    "data": {},
+                    "endpoint": "statistics",
+                    "tried": ["statistics"],
+                    "error": str(ex),
+                }
+            )
+        await asyncio.sleep(interval)
+
+
+async def _emit_get_state_json_stdout_async(device) -> None:
+    """getState: eine Zeile inkl. Verbrauch (statistics) und ggf. zeroconfSwitches."""
+    payload = _build_get_state_payload(device)
+    if _is_multi_switch_device(device):
+        try:
+            response = await device.loop.run_in_executor(
+                None, device.client.send_empty_zeroconf_switches
+            )
+            payload["zeroconfSwitches"] = _zeroconf_http_aux_block(
+                device, response, "getState", ["getState"]
+            )
+        except Exception as ex:
+            payload["zeroconfSwitches"] = {
+                "ok": False,
+                "httpStatus": 0,
+                "data": {},
+                "endpoint": "getState",
+                "tried": ["getState"],
+                "error": str(ex),
+            }
+    try:
+        stats_resp = await device.loop.run_in_executor(
+            None, device.client.send_statistics
+        )
+        payload["statistics"] = _zeroconf_http_aux_block(
+            device, stats_resp, "statistics", ["statistics"]
+        )
+    except Exception as ex:
+        payload["statistics"] = {
+            "ok": False,
+            "httpStatus": 0,
+            "data": {},
+            "endpoint": "statistics",
+            "tried": ["statistics"],
+            "error": str(ex),
+        }
     sys.stdout.write(
-        json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=str)
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
         + "\n"
     )
     sys.stdout.flush()

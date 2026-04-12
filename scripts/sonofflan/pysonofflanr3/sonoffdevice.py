@@ -77,6 +77,8 @@ class SonoffDevice(object):
     """Wenn True: multifun_switch löst callback_after_update auch bei reinen Telemetrie-Updates aus (nur CLI Leer-POST)."""
 
     invoke_callback_on_multifun_partial = False
+    # Wenn True: jedes entschlüsselte mDNS-JSON (dict) als eine Zeile auf stdout (getState --live).
+    mirror_decrypted_mdns_json_to_stdout = False
 
     def __init__(
         self,
@@ -392,6 +394,20 @@ class SonoffDevice(object):
             self.message_ping_event.set()
 
             response = json.loads(message.decode("utf-8"))
+
+            if SonoffDevice.mirror_decrypted_mdns_json_to_stdout and isinstance(
+                response, dict
+            ):
+                sys.stdout.write(
+                    json.dumps(
+                        response,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        default=str,
+                    )
+                    + "\n"
+                )
+                sys.stdout.flush()
 
             switch_status = None
 

@@ -44,8 +44,11 @@ export class SonoffSwitchEnergy extends DeviceSwitchEnergy implements SonoffLanE
       await this.updateValuesFromPayload(status, false);
 
       //{"ok":true,"httpStatus":200,"data":{"current_00":2,"voltage_00":23616,"actPow_00":537,"reactPow_00":385,"apparentPow_00":661,"current_01":56,"voltage_01":23616,"actPow_01":9483,"reactPow_01":9288,"apparentPow_01":13274}}
-      if((status.statistics as Record<string, unknown>)?.ok === true){
-        await this.updateStatisticsFromPayload(status.statistics as Record<string, unknown>, false);
+      const stats = (status as Record<string, unknown>).statistics as
+        | Record<string, unknown>
+        | undefined;
+      if (stats?.ok === true) {
+        await this.updateStatisticsFromPayload(stats, false);
       }
     }
   }
@@ -56,8 +59,13 @@ export class SonoffSwitchEnergy extends DeviceSwitchEnergy implements SonoffLanE
   async updateValuesFromPayload(payload: Record<string, unknown>, trigger: boolean = false): Promise<void> {
     if (payload?.ok === true) {
       const buttons = [];
-      if (payload?.switches) {
-        for (const switchConfig of (payload?.switches as Record<string, unknown>[])) {
+      const switchesList =
+        Array.isArray(payload.switches) && (payload.switches as unknown[]).length > 0
+          ? (payload.switches as Record<string, unknown>[])
+          : (((payload.basicInfo as Record<string, unknown> | undefined)?.switches ??
+              null) as Record<string, unknown>[] | null);
+      if (switchesList && switchesList.length > 0) {
+        for (const switchConfig of switchesList) {
           const outlet = switchConfig.outlet;
           buttons.push(String(outlet));
           const switchState = switchConfig.switch;
