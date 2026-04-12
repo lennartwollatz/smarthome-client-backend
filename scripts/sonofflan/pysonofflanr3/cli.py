@@ -833,6 +833,27 @@ def _print_all_switch_entries(basic_info: dict):
         )
 
 
+def _multifun_outlet_switch_known(device: SonoffSwitch) -> bool:
+    """True, wenn der Kanalzustand aus basic_info (mDNS) kommt — nicht nur geraten.
+
+    multifun_switch sendet oft zuerst nur Messwerte ohne ``switches[]``. Dann liefert
+    ``is_on``/``is_off`` fälschlich AUS (kein Kanal in basic_info), und ein ``off``-Befehl
+    würde sonst sofort beenden ohne HTTP (siehe User-Log).
+    """
+    if getattr(device.client, "type", None) != b"multifun_switch":
+        return True
+    bi = device.basic_info or {}
+    out = device.outlet if device.outlet is not None else 0
+    if isinstance(bi.get("switches"), list):
+        sw = _switch_dict_for_outlet(bi["switches"], int(out))
+        if sw is not None and sw.get("switch") is not None:
+            return True
+    sw_top = bi.get("switch")
+    if isinstance(sw_top, str) and sw_top in ("on", "off"):
+        return True
+    return False
+
+
 def switch_device(config: dict, inching, new_state):
     logger.info("Initialising SonoffSwitch with host %s" % config["host"])
 
@@ -844,17 +865,18 @@ def switch_device(config: dict, inching, new_state):
                 if inching is None:
                     print_device_details(device)
 
-                    if device.is_on:
-                        if new_state == "on":
-                            device.shutdown_event_loop()
-                        else:
-                            await device.turn_off()
+                    known = _multifun_outlet_switch_known(device)
 
-                    elif device.is_off:
-                        if new_state == "off":
+                    if new_state == "on":
+                        if known and device.is_on:
                             device.shutdown_event_loop()
-                        else:
+                        elif not (known and device.is_on):
                             await device.turn_on()
+                    elif new_state == "off":
+                        if known and device.is_off:
+                            device.shutdown_event_loop()
+                        elif not (known and device.is_off):
+                            await device.turn_off()
 
                 else:
                     logger.info(
