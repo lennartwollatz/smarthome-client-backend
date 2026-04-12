@@ -165,6 +165,56 @@ def _cli_zeroconf_empty_post(
         SonoffDevice.invoke_callback_on_multifun_partial = False
 
 
+def _cli_statistics_live(config: dict, interval: float) -> None:
+    """HTTP /zeroconf/statistics wiederholt; jede Antwort eine JSON-Zeile auf stdout."""
+    interval = max(0.5, float(interval))
+    ran = {"started": False}
+
+    async def callback(device):
+        if not device.available:
+            return
+        if ran["started"]:
+            return
+        ran["started"] = True
+
+        async def poll_loop():
+            while True:
+                try:
+                    response = await device.loop.run_in_executor(
+                        None, device.client.send_statistics
+                    )
+                    inner = parse_zeroconf_http_response(
+                        device.api_key, response.content
+                    )
+                    if inner:
+                        device.merge_basic_info_from_response(inner)
+                    single = dict(
+                        _http_response_as_dict(
+                            device.api_key, response.content
+                        )
+                    )
+                    single["ok"] = True
+                    _stdout_json_line(single)
+                except Exception as ex:
+                    _stdout_json_line({"ok": False, "error": str(ex)})
+                await asyncio.sleep(interval)
+
+        device.loop.create_task(poll_loop())
+
+    SonoffDevice.invoke_callback_on_multifun_partial = True
+    try:
+        SonoffSwitch(
+            host=config["host"],
+            callback_after_update=callback,
+            logger=logger,
+            device_id=config["device_id"],
+            api_key=config["api_key"],
+            outlet=config["outlet"],
+        )
+    finally:
+        SonoffDevice.invoke_callback_on_multifun_partial = False
+
+
 @click.group(invoke_without_command=True)
 @click.option(
     "--host",
@@ -287,19 +337,26 @@ def state(config: dict):
     )
 
 
-def _run_get_state(config: dict) -> None:
-    """mDNS-Zustand (merged basic_info) als eine JSON-Zeile auf stdout."""
+def _run_get_state(config: dict, live: bool = False) -> None:
+    """mDNS-Zustand (merged basic_info) als JSON-Zeile(n) auf stdout.
+
+    Ohne ``live``: genau eine Zeile, dann Prozessende.
+    Mit ``live``: bei jedem Update eine weitere Zeile; Prozess läuft bis SIGINT/SIGTERM.
+    """
 
     shared_state = {"once_emitted": False}
 
     async def state_callback(self):
         if self.basic_info is None:
             return
-        if shared_state["once_emitted"]:
+        if not live:
+            if shared_state["once_emitted"]:
+                return
+            shared_state["once_emitted"] = True
+            _emit_get_state_json_stdout(self)
+            self.shutdown_event_loop()
             return
-        shared_state["once_emitted"] = True
         _emit_get_state_json_stdout(self)
-        self.shutdown_event_loop()
 
     logger.info("Initialising SonoffSwitch with host %s" % config["host"])
 
@@ -321,14 +378,24 @@ def _run_get_state(config: dict) -> None:
 GET_STATE_HELP = (
     "Zustand aus mDNS (merged basic_info), eine JSON-Zeile auf stdout "
     "(wie ``listen`` ohne ``--follow``). Ausgabe: "
-    '{"ok":true,"state":{...}} — mit ``-l OFF`` nur diese Zeile.'
+    '{"ok":true,"state":{...}} — mit ``-l OFF`` nur diese Zeile. '
+    "Mit ``--live`` fortlaufend eine Zeile pro Geräte-Update."
 )
 
 
 @cli.command("get-state", help=GET_STATE_HELP)
 @pass_config
-def get_state_dash(config: dict):
-    _run_get_state(config)
+@click.option(
+    "--live",
+    is_flag=True,
+    default=False,
+    help=(
+        "Bei jedem mDNS-/Zustands-Update eine weitere JSON-Zeile auf stdout; "
+        "Prozess beendet sich nicht (beenden mit SIGINT/SIGTERM)."
+    ),
+)
+def get_state_dash(config: dict, live: bool):
+    _run_get_state(config, live=live)
 
 
 @cli.command(
@@ -336,17 +403,45 @@ def get_state_dash(config: dict):
     help=GET_STATE_HELP + " Gleiche Funktion wie ``get-state``.",
 )
 @pass_config
-def get_state_camel(config: dict):
-    _run_get_state(config)
+@click.option(
+    "--live",
+    is_flag=True,
+    default=False,
+    help=(
+        "Bei jedem mDNS-/Zustands-Update eine weitere JSON-Zeile auf stdout; "
+        "Prozess beendet sich nicht (beenden mit SIGINT/SIGTERM)."
+    ),
+)
+def get_state_camel(config: dict, live: bool):
+    _run_get_state(config, live=live)
 
 
 @cli.command()
 @pass_config
-def statistics(config: dict):
+@click.option(
+    "--interval",
+    type=float,
+    default=2.0,
+    show_default=True,
+    help="Sekunden zwischen HTTP-Abfragen, nur mit --live.",
+)
+@click.option(
+    "--live",
+    is_flag=True,
+    default=False,
+    help=(
+        "Fortlaufend POST /zeroconf/statistics; jede Antwort eine JSON-Zeile auf stdout "
+        "(Prozess bis SIGINT/SIGTERM). Abstand: --interval."
+    ),
+)
+def statistics(config: dict, live: bool, interval: float):
     """POST /zeroconf/statistics mit leerem Payload (verschlüsselt wenn nötig).
 
     Entspricht dem SonoffLAN-Befehl „statistics“ (u. a. für unterstützte POW-/Mess-Geräte).
     """
+    if live:
+        _cli_statistics_live(config, interval)
+        return
     _cli_zeroconf_empty_post(
         config,
         "statistics",
