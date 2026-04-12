@@ -503,7 +503,7 @@ class SonoffLANModeClient:
         self._last_params = params
 
 
-        elif params != {} and params is not None:
+        if params != {} and params is not None:
 
             if self.outlet is None:
                 self.outlet = 0
