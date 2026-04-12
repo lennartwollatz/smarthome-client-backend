@@ -636,6 +636,41 @@ def _zeroconf_http_aux_block(
     }
 
 
+def _zeroconf_switches_block_with_mdns_fallback(device, response) -> Dict[str, Any]:
+    """HTTP /zeroconf/switches + fehlende Schalt-Daten aus mDNS-merge (basic_info).
+
+    Viele Firmware-Varianten antworten nur mit ACK (error=0, ggf. encrypt=true) **ohne**
+    entschlüsselbares ``data``/``iv`` — der eigentliche Zustand kommt parallel per
+    **mDNS** (eWeLink-Service, verschlüsselte ``data1``/…-Properties), nicht per TCP-Multicast.
+    """
+    block = _zeroconf_http_aux_block(device, response, "getState", ["getState"])
+    if block.get("ok") is not True:
+        return block
+    inner = block.get("data")
+    if not isinstance(inner, dict):
+        inner = {}
+    bi = dict(device.basic_info or {})
+    patched = False
+    if not inner.get("switches") and isinstance(bi.get("switches"), list):
+        inner["switches"] = list(bi["switches"])
+        patched = True
+    for k in ("configure", "pulses", "workMode"):
+        if k in bi and k not in inner:
+            inner[k] = bi[k]
+            patched = True
+    for k, v in bi.items():
+        if (k.startswith("swMode_") or k.startswith("swReverse_")) and k not in inner:
+            inner[k] = v
+            patched = True
+    if patched:
+        block = {
+            **block,
+            "data": inner,
+            "switchesDetailSource": "mDNS",
+        }
+    return block
+
+
 def _is_multi_switch_device(device) -> bool:
     """Mehrkanal per mDNS (DUALR3 / Strip): optional HTTP zeroconf/switches ergänzen."""
     switches_arr = (device.basic_info or {}).get("switches")
@@ -680,8 +715,8 @@ async def _emit_get_state_json_stdout_async(device) -> None:
             response = await device.loop.run_in_executor(
                 None, device.client.send_empty_zeroconf_switches
             )
-            payload["zeroconfSwitches"] = _zeroconf_http_aux_block(
-                device, response, "getState", ["getState"]
+            payload["zeroconfSwitches"] = _zeroconf_switches_block_with_mdns_fallback(
+                device, response
             )
         except Exception as ex:
             payload["zeroconfSwitches"] = {
