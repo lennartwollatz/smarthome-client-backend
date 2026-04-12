@@ -54,6 +54,11 @@ def _lan_http_direct_enabled(config: dict) -> bool:
     """Mit gesetztem ``--host``: kein mDNS, direkt ``http://host:8081`` (Snapshot/statistics/switch/…)."""
     return bool((config.get("host") or "").strip())
 
+
+def _config_multichannel(config: dict) -> bool:
+    """CLI ``--multi``: Mehrkanal (multifun_switch / DUAL R3) — ``/zeroconf/switches`` erzwingen."""
+    return bool(config.get("multi"))
+
 if sys.version_info < (3, 6):  # pragma: no cover
     print(
         "To use this script you need python 3.6 or newer! got %s"
@@ -138,10 +143,12 @@ def _cli_zeroconf_empty_post(
     client_method: str,
     path_segment: str,
     json_stdout_only: bool = False,
+    executor_factory=None,
 ):
     """Nach Verbindung (mDNS oder HTTP direkt bei ``--host``): ein HTTP POST auf /zeroconf/<path_segment>.
 
     json_stdout_only: nur eine kompakte JSON-Zeile auf stdout (kein print_device_details).
+    executor_factory: wenn gesetzt, ``callable(device) -> no-arg callable`` statt ``client_method``.
     """
     ran = {"v": False}
 
@@ -152,7 +159,10 @@ def _cli_zeroconf_empty_post(
             return
         ran["v"] = True
         try:
-            fn = getattr(device.client, client_method)
+            if executor_factory is not None:
+                fn = executor_factory(device)
+            else:
+                fn = getattr(device.client, client_method)
             response = await device.loop.run_in_executor(None, fn)
             if not json_stdout_only:
                 logger.info(
@@ -207,6 +217,7 @@ def _cli_zeroconf_empty_post(
             api_key=config["api_key"],
             outlet=config["outlet"],
             lan_http_direct=_lan_http_direct_enabled(config),
+            multichannel=_config_multichannel(config),
         )
     finally:
         SonoffDevice.invoke_callback_on_multifun_partial = False
@@ -253,7 +264,18 @@ def _cli_zeroconf_empty_post(
     help=(
         "Kanal-Index für Mehrkanal-Geräte (z. B. SONOFF DUALR3: 0 oder 1). "
         "Steuert den mDNS/HTTP-Kontext sowie die Anzeige „State (selected outlet)“. "
-        "Für Strom u. a. werden bei `state` alle Kanäle ausgegeben, sobald `switches` in den Daten liegt."
+        "Für Strom u. a. werden bei `state` alle Kanäle ausgegeben, sobald `switches` in den Daten liegt. "
+        "Zum Schalten die Unterbefehle `on` bzw. `off` nach den Optionen setzen (z. B. `--outlet 0 off`). "
+        "Mit ``--multi`` Mehrkanal-Gerät kennzeichnen (siehe dort)."
+    ),
+)
+@click.option(
+    "--multi",
+    is_flag=True,
+    default=False,
+    help=(
+        "Gerät als Mehrkanal-/multifun_switch behandeln (z. B. SONOFF DUAL R3), "
+        "v. a. mit ``--host`` ohne mDNS: immer ``POST …/zeroconf/switches`` und ``switches``-Payload."
     ),
 )
 @click.pass_context
@@ -271,8 +293,12 @@ def _cli_zeroconf_empty_post(
     ),
 )
 @click.version_option()
-def cli(ctx, host, device_id, api_key, inching, wait, outlet, loglevel):
-    """A cli tool for controlling Sonoff Smart Switches/Plugs in LAN Mode."""
+def cli(ctx, host, device_id, api_key, inching, wait, outlet, multi, loglevel):
+    """Sonoff LAN Mode per CLI.
+
+    Schalten: Unterbefehl ``on`` oder ``off`` (Beispiel:
+    ``--host … --device_id … --api_key … --outlet 0 off``).
+    """
     apply_loglevel(loglevel.upper() if isinstance(loglevel, str) else loglevel)
 
     if ctx.invoked_subcommand == "discover":
@@ -290,6 +316,7 @@ def cli(ctx, host, device_id, api_key, inching, wait, outlet, loglevel):
         "inching": inching,
         "wait": wait,
         "outlet": outlet,
+        "multi": multi,
     }
 
 
@@ -315,9 +342,11 @@ def discover():
 @cli.command()
 @pass_config
 def state(config: dict):
-    """Connect to device and print current state."""
+    """Gerätezustand: mit ``--host`` mDNS + HTTP-Probe, passende mDNS-Antwort als JSON; sonst wie bisher."""
 
     async def state_callback(device):
+        if getattr(device, "_state_mdns_hybrid", False):
+            return
         if getattr(device, "_lan_http_direct", False) and device.basic_info is None and device.available:
             r = await device.loop.run_in_executor(
                 None, device.client.send_empty_zeroconf_switch
@@ -340,6 +369,8 @@ def state(config: dict):
         api_key=config["api_key"],
         outlet=config["outlet"],
         lan_http_direct=_lan_http_direct_enabled(config),
+        multichannel=_config_multichannel(config),
+        state_mdns_hybrid=_lan_http_direct_enabled(config),
     )
 
 
@@ -373,6 +404,7 @@ def _run_state_listener(config: dict) -> None:
             api_key=config["api_key"],
             outlet=config["outlet"],
             lan_http_direct=False,
+            multichannel=_config_multichannel(config),
         )
     finally:
         _listener_shutdown_holder["device"] = None
@@ -415,6 +447,7 @@ def _run_state_snapshot(config: dict) -> None:
             api_key=config["api_key"],
             outlet=config["outlet"],
             lan_http_direct=_lan_http_direct_enabled(config),
+            multichannel=_config_multichannel(config),
         )
     finally:
         SonoffDevice.invoke_callback_on_multifun_partial = False
@@ -487,27 +520,43 @@ def statistics(config: dict):
 
 
 @cli.command("switch")
+@click.argument(
+    "state",
+    required=False,
+    type=click.Choice(["on", "off"], case_sensitive=False),
+)
 @pass_config
-def zeroconf_switch(config: dict):
-    """POST /zeroconf/switch mit leerem Payload — Ein-Kanal-Geräte (z. B. Plug)."""
-    _cli_zeroconf_empty_post(
-        config,
-        "switch",
-        "send_empty_zeroconf_switch",
-        "switch",
-        json_stdout_only=True,
-    )
+def zeroconf_switch(config: dict, state: Optional[str]):
+    """Ohne Argument: POST ``/zeroconf/switch`` mit ``data`` ``{}``; mit ``on``/``off``: schalten."""
+    if state is None:
+        _cli_zeroconf_empty_post(
+            config,
+            "switch",
+            "send_zeroconf_switch_empty_query",
+            "switch",
+            json_stdout_only=True,
+        )
+    else:
+        st = state.lower()
+        _cli_zeroconf_empty_post(
+            config,
+            "switch %s" % st,
+            "send_switch_command",
+            "switch",
+            json_stdout_only=True,
+            executor_factory=lambda d, s=st: (lambda: d.client.send_switch_command(s)),
+        )
 
 
 @cli.command("switches")
 @pass_config
 def zeroconf_switches(config: dict):
-    """POST /zeroconf/switches mit leerem Payload — Mehrkanal (z. B. DUALR3, Strip)."""
+    """POST ``/zeroconf/switch`` mit ``data`` = ``{"switches": []}`` (Mehrkanal-Abfrage)."""
     _cli_zeroconf_empty_post(
         config,
         "switches",
-        "send_empty_zeroconf_switches",
-        "switches",
+        "send_zeroconf_switches_empty_list_query",
+        "switch",
         json_stdout_only=True,
     )
 
@@ -574,6 +623,7 @@ def listen(config: dict, follow: bool):
             device_id=config["device_id"],
             api_key=config["api_key"],
             outlet=config["outlet"],
+            multichannel=_config_multichannel(config),
         )
     finally:
         SonoffDevice.invoke_callback_on_multifun_partial = False
@@ -664,6 +714,8 @@ def _zeroconf_http_aux_block(
 
 def _is_multi_switch_device(device) -> bool:
     """Mehrkanal per mDNS (DUALR3 / Strip): optional HTTP zeroconf/switches ergänzen."""
+    if getattr(device.client, "_force_multichannel_zeroconf", False):
+        return True
     switches_arr = (device.basic_info or {}).get("switches")
     if not isinstance(switches_arr, list) or len(switches_arr) < 2:
         return False
@@ -892,6 +944,7 @@ def switch_device(config: dict, inching, new_state):
     logger.info("Initialising SonoffSwitch with host %s" % config["host"])
 
     async def update_callback(device: SonoffSwitch):
+        device.client.set_zeroconf_primer_switch_state(new_state)
         if not device.available:
             return
         if getattr(device, "_lan_http_direct", False) and device.basic_info is None:
@@ -927,6 +980,15 @@ def switch_device(config: dict, inching, new_state):
                         % inching
                     )
 
+        # Primer-POST (z. B. /switches mit Zielzustand) kann schon den Zustand setzen;
+        # dann ist turn_* ein No-Op ohne params_updated_event — send_updated_params_loop würde sonst blockieren.
+        if (
+            getattr(device, "_lan_http_direct", False)
+            and getattr(device, "_exit_after_lan_http_switch", False)
+            and not device.params_updated_event.is_set()
+        ):
+            device.shutdown_event_loop()
+
     # DUALR3/multifun_switch liefert anfangs haeufig Teil-Updates ohne
     # "switch". Dann wuerde der Callback sonst ggf. nie laufen und on/off
     # nicht ausgelöst werden.
@@ -941,6 +1003,10 @@ def switch_device(config: dict, inching, new_state):
             api_key=config["api_key"],
             outlet=config["outlet"],
             lan_http_direct=_lan_http_direct_enabled(config),
+            exit_after_lan_http_switch=(
+                inching is None and _lan_http_direct_enabled(config)
+            ),
+            multichannel=_config_multichannel(config),
         )
     finally:
         SonoffDevice.invoke_callback_on_multifun_partial = False

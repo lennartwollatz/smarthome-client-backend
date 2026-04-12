@@ -155,6 +155,7 @@ class SonoffLANModeClient:
         device_id: str = "",
         api_key: str = "",
         outlet: int = None,
+        force_multichannel_zeroconf: bool = False,
     ):
 
         self.host = host
@@ -176,6 +177,16 @@ class SonoffLANModeClient:
         self._info_cache = None
         self._last_params = {"switch": "off"}
         self._times_added = 0
+        # Ohne mDNS (nur --host): type bleibt None — Hint aus basic_info oder Fehlerantwort.
+        self._prefer_switches_zeroconf = False
+        # CLI ``--multi``: immer Mehrkanal-Endpoint (DUAL R3 / multifun_switch ohne mDNS-Typ).
+        self._force_multichannel_zeroconf = bool(force_multichannel_zeroconf)
+        # Erster POST ``/zeroconf/switches`` (Primer): ``on``/``off`` aus CLI (``switch_device``).
+        self._primer_switch_state: Optional[str] = None
+        # SonoffDevice übergibt timeout; ohne Nutzung blockiert requests bei ausbleibender Antwort endlos.
+        self.request_timeout = float(timeout) if timeout is not None else float(
+            SonoffLANModeClient.DEFAULT_TIMEOUT
+        )
 
     @staticmethod
     def _format_received_payload(payload: Any) -> str:
@@ -205,9 +216,24 @@ class SonoffLANModeClient:
         self.set_retries(0)
         self.encrypted = bool(self.api_key and str(self.api_key).strip())
         self.type = None
+        self._prefer_switches_zeroconf = False
         did = (self.device_id or "").strip()
         self.properties = {b"id": did.encode("utf-8")} if did else {}
         self.connected_event.set()
+
+    def set_zeroconf_primer_switch_state(self, state: Optional[str]) -> None:
+        """Für ``send_empty_zeroconf_switches``: Ziel-``switch`` (``on``/``off``) vor dem Schalt-POST."""
+        st = (state or "").strip().lower()
+        self._primer_switch_state = st if st in ("on", "off") else None
+
+    def use_zeroconf_switches_endpoint(self) -> bool:
+        """True: POST …/zeroconf/switches (Mehrkanal); False: …/zeroconf/switch (Ein-Kanal)."""
+        if self._force_multichannel_zeroconf:
+            return True
+        t = self.type
+        if t in (b"strip", b"multifun_switch"):
+            return True
+        return bool(self._prefer_switches_zeroconf)
 
     def listen(self):
         """
@@ -428,11 +454,12 @@ class SonoffLANModeClient:
                 self.set_retries(0)
 
     def send_switch(self, request: Union[str, Dict]):
-
-        if self.type in (b"strip", b"multifun_switch"):
-            response = self.send(request, self.url + "/zeroconf/switches")
-        else:
-            response = self.send(request, self.url + "/zeroconf/switch")
+        path = (
+            "/zeroconf/switches"
+            if self.use_zeroconf_switches_endpoint()
+            else "/zeroconf/switch"
+        )
+        response = self.send(request, self.url + path)
 
         try:
             response_json = json.loads(response.content.decode("utf-8"))
@@ -458,6 +485,16 @@ class SonoffLANModeClient:
                 response,
                 response.content,
             )
+        return response
+
+    def send_switch_command(self, state: str):
+        """Schalten (``on``/``off``) über ``/zeroconf/switch`` bzw. ``/zeroconf/switches``."""
+        st = (state or "").strip().lower()
+        if st not in ("on", "off"):
+            raise ValueError("state must be 'on' or 'off', got %r" % (state,))
+        return self.send_switch(
+            self.get_update_payload(self.device_id, {"switch": st})
+        )
 
     def send_signal_strength(self):
 
@@ -480,24 +517,64 @@ class SonoffLANModeClient:
             self.url + "/zeroconf/statistics",
         )
 
-    def send_empty_zeroconf_switch(self):
-        """POST /zeroconf/switch mit leerem Payload (Ein-Kanal, Abfrage je nach Firmware)."""
+    def send_zeroconf_switch_empty_query(self):
+        """POST ``/zeroconf/switch`` mit leerem Klartext-``data`` ``{}`` (CLI-Subbefehl ``switch`` ohne Argument)."""
         return self.send(
             self.get_update_payload(self.device_id, {}),
             self.url + "/zeroconf/switch",
         )
 
-    def send_empty_zeroconf_switches(self):
-        """POST /zeroconf/switches — Zustandsabfrage (Mehrkanal / DUALR3).
+    def send_empty_zeroconf_switch(self):
+        """Zustands-Abfrage: leerer Payload auf ``/zeroconf/switch`` oder ``/switches`` (Mehrkanal)."""
+        if self.use_zeroconf_switches_endpoint():
+            return self.send_empty_zeroconf_switches()
+        r = self.send(
+            self.get_update_payload(self.device_id, {}),
+            self.url + "/zeroconf/switch",
+        )
+        if self.type is None and not self._prefer_switches_zeroconf:
+            try:
+                body = json.loads(r.content.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                return r
+            if body.get("error", 0) != 0:
+                self._prefer_switches_zeroconf = True
+                return self.send_empty_zeroconf_switches()
+        return r
 
-        Innen **muss** ein JSON mit ``switches``-Schlüssel stehen. Ein leeres ``{}``
-        wird verschlüsselt als ``"{}"``; manche Firmware antwortet dann mit HTTP 400
-        („request body is not a valid JSON format“ im Klartext nach Entschlüsselung).
+    def send_empty_zeroconf_switches(self):
+        """POST /zeroconf/switches — Mehrkanal (DUALR3): inneres JSON mit ``switches[]``.
+
+        Klartext (bzw. verschlüsselter Inhalt von ``data``): ``{"switches":[{"outlet":n,"switch":"on|off"}]}``.
+        ``switch`` kommt aus :meth:`set_zeroconf_primer_switch_state`, sonst ``off``.
         """
-        inner: Dict = {}
-        if self.type in (b"strip", b"multifun_switch"):
-            inner = {"switches": []}
-        self.logger.debug("send_empty_zeroconf_switches")
+        outlet = 0 if self.outlet is None else int(self.outlet)
+        hint = self._primer_switch_state
+        if hint not in ("on", "off"):
+            hint = "off"
+        inner = {"switches": [{"outlet": outlet, "switch": hint}]}
+        self.logger.debug("send_empty_zeroconf_switches inner=%s", inner)
+        return self.send(
+            self.get_update_payload(self.device_id, inner),
+            self.url + "/zeroconf/switches",
+        )
+
+    def send_zeroconf_switches_empty_list_query(self):
+        """POST ``/zeroconf/switch`` mit Klartext-``data`` = ``{"switches": []}`` (CLI-Subbefehl ``switches``)."""
+        inner = {"switches": []}
+        self.logger.debug(
+            "send_zeroconf_switches_empty_list_query inner=%s", inner
+        )
+        return self.send(
+            self.get_update_payload(self.device_id, inner),
+            self.url + "/zeroconf/switch",
+        )
+
+    def send_state_probe_switches_empty(self):
+        """POST ``/zeroconf/switches`` — CLI ``state`` (Hybrid): ``{"switches":[{"outlet":n,"switch":"on"}]}``."""
+        outlet = 0 if self.outlet is None else int(self.outlet)
+        inner = {"switches": [{"outlet": outlet, "switch": "on"}]}
+        self.logger.debug("send_state_probe_switches_empty inner=%s", inner)
         return self.send(
             self.get_update_payload(self.device_id, inner),
             self.url + "/zeroconf/switches",
@@ -513,10 +590,20 @@ class SonoffLANModeClient:
 
         data = json.dumps(request, separators=(",", ":"))
         self.logger.debug("Sending http message to %s: %s", url, data)
-        response = self.http_session.post(url, data=data)
-        self.logger.debug(
-            "response received: %s %s", response, response.content
+        response = self.http_session.post(
+            url, data=data, timeout=self.request_timeout
         )
+        try:
+            body = response.content
+            self.logger.debug(
+                "response received: %s %s", response, body
+            )
+        finally:
+            # TCP nicht offen halten (Keep-Alive); nach Auswertung sofort freigeben.
+            try:
+                response.close()
+            except Exception:
+                pass
 
         return response
 
@@ -540,6 +627,7 @@ class SonoffLANModeClient:
             url,
             data=data,
             headers=self._ephemeral_post_headers(),
+            timeout=self.request_timeout,
         )
         try:
             _ = resp.content
@@ -551,15 +639,21 @@ class SonoffLANModeClient:
 
         self._last_params = params
 
-        if params != {} and params is not None:
-            if self.type in (b"strip", b"multifun_switch"):
-                if self.outlet is None:
-                    self.outlet = 0
+        use_multi_shape = (
+            params not in ({}, None)
+            and params != {"data": {}}
+            and isinstance(params, dict)
+            and "switch" in params
+            and "switches" not in params
+            and self.use_zeroconf_switches_endpoint()
+        )
+        if use_multi_shape:
+            if self.outlet is None:
+                self.outlet = 0
 
-                switches = {"switches": [{"switch": "off", "outlet": 0}]}
-                switches["switches"][0]["switch"] = params["switch"]
-                switches["switches"][0]["outlet"] = int(self.outlet)
-                params = switches
+            ou = int(self.outlet)
+            st = params["switch"]
+            params = {"switches": [{"outlet": ou, "switch": st}]}
 
         payload = {
             "sequence": str(
@@ -590,7 +684,7 @@ class SonoffLANModeClient:
 
     def create_http_session(self):
 
-        # create an http session so we can use http keep-alives
+        # Session bleibt; pro Request ``Connection: close`` + :meth:`send` schließt die Response.
         self.http_session = requests.Session()
 
         # add the http headers
@@ -598,7 +692,7 @@ class SonoffLANModeClient:
         headers = collections.OrderedDict(
             {
                 "Content-Type": "application/json;charset=UTF-8",
-                # "Connection": "keep-alive",
+                "Connection": "close",
                 "Accept": "application/json",
                 "Accept-Language": "en-gb",
                 # "Content-Length": "0",

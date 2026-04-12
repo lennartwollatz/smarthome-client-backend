@@ -30,7 +30,6 @@ def format_encryption_msg(payload, api_key, data):
     payload["iv"] = b64encode(iv).decode("utf-8")
     payload["encrypt"] = True
     dump = json.dumps(data, separators=(",", ":"))
-    print(dump)
     payload["data"] = encrypt(
         dump, iv, api_key
     )

@@ -45,6 +45,9 @@ class SonoffSwitch(SonoffDevice):
         api_key: str = None,
         outlet: int = None,
         lan_http_direct: bool = False,
+        exit_after_lan_http_switch: bool = False,
+        multichannel: bool = False,
+        state_mdns_hybrid: bool = False,
     ) -> None:
 
         self.inching_seconds = inching_seconds
@@ -69,6 +72,9 @@ class SonoffSwitch(SonoffDevice):
             api_key=api_key,
             outlet=outlet,
             lan_http_direct=lan_http_direct,
+            exit_after_lan_http_switch=exit_after_lan_http_switch,
+            multichannel=multichannel,
+            state_mdns_hybrid=state_mdns_hybrid,
         )
 
     @property

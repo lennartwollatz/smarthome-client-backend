@@ -42,6 +42,34 @@ def _merge_switches_by_outlet(previous: list, incoming: list) -> list:
     return [by_outlet[k] for k in sorted(by_outlet.keys())]
 
 
+def _zeroconf_http_post_ok(response) -> bool:
+    """POST /zeroconf/switch|switches: HTTP 200 und JSON ``error`` 0."""
+    if response is None or int(getattr(response, "status_code", 0) or 0) != 200:
+        return False
+    try:
+        body = json.loads(response.content.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, AttributeError):
+        return False
+    return int(body.get("error", -1)) == 0
+
+
+def _state_hybrid_mdns_payload_matches(d: Dict) -> bool:
+    """Voller Zustand wie DUAL R3 nach HTTP-Probe: ``switches[]`` + ``ssid`` + ``bssid``."""
+    if not isinstance(d, dict):
+        return False
+    sw = d.get("switches")
+    if not isinstance(sw, list) or len(sw) < 1:
+        return False
+    for item in sw:
+        if not isinstance(item, dict):
+            return False
+        if "switch" not in item or "outlet" not in item:
+            return False
+    if not isinstance(d.get("ssid"), str) or not isinstance(d.get("bssid"), str):
+        return False
+    return True
+
+
 def _switch_dict_for_outlet(
     switches: Optional[List], outlet: int
 ) -> Optional[dict]:
@@ -96,6 +124,9 @@ class SonoffDevice(object):
         api_key: str = "",
         outlet: int = None,
         lan_http_direct: bool = False,
+        exit_after_lan_http_switch: bool = False,
+        multichannel: bool = False,
+        state_mdns_hybrid: bool = False,
     ) -> None:
         """
         Create a new SonoffDevice instance.
@@ -103,6 +134,9 @@ class SonoffDevice(object):
         :param str host: host name or ip address on which the device listens
         :param context: optional child ID for context in a parent device
         :param lan_http_direct: Wenn True und ``host`` gesetzt: kein mDNS, sofort HTTP (Port 8081).
+        :param exit_after_lan_http_switch: Bei LAN-HTTP: nach erfolgreichem Schalt-POST Event-Loop beenden (CLI ``on``/``off``).
+        :param multichannel: Mehrkanal-Gerät (multifun_switch, z. B. DUAL R3) — CLI ``--multi``.
+        :param state_mdns_hybrid: CLI ``state`` mit ``--host``: mDNS vor HTTP, Antwort per mDNS.
         """
         self.callback_after_update = callback_after_update
         self.host = host
@@ -165,6 +199,7 @@ class SonoffDevice(object):
                 device_id=device_id,
                 api_key=api_key,
                 outlet=outlet,
+                force_multichannel_zeroconf=bool(multichannel),
             )
 
             self.message_ping_event = asyncio.Event()
@@ -173,23 +208,42 @@ class SonoffDevice(object):
 
             use_direct = bool(lan_http_direct and (host or "").strip())
             self._lan_http_direct = use_direct
+            self._exit_after_lan_http_switch = bool(
+                exit_after_lan_http_switch and use_direct
+            )
+            use_hybrid = bool(use_direct and state_mdns_hybrid)
+            self._state_mdns_hybrid = use_hybrid
+            self._state_hybrid_exited = False
+            self._state_hybrid_timer_handle = None
+
             if use_direct:
+                if use_hybrid:
+                    self.client.listen()
                 self.client.connect_direct_http(8081)
             else:
                 self.client.listen()
 
-            self.tasks.append(
-                self.loop.create_task(self.send_availability_loop())
-            )
+            # Nur mDNS: auf ``disconnected_event`` warten. Reines LAN-HTTP hat keinen Disconnect → sonst blockiert die Schleife.
+            if not use_direct:
+                self.tasks.append(
+                    self.loop.create_task(self.send_availability_loop())
+                )
 
-            self.send_updated_params_task = self.loop.create_task(
-                self.send_updated_params_loop()
-            )
+            if use_hybrid:
+                self.send_updated_params_task = self.loop.create_task(
+                    self._state_mdns_hybrid_supervisor()
+                )
+            else:
+                self.send_updated_params_task = self.loop.create_task(
+                    self.send_updated_params_loop()
+                )
             self.tasks.append(self.send_updated_params_task)
 
             if use_direct:
 
                 async def _lan_http_direct_kick():
+                    if use_hybrid:
+                        return
                     if self.callback_after_update is not None:
                         await self.callback_after_update(self)
 
@@ -201,6 +255,43 @@ class SonoffDevice(object):
 
         except asyncio.CancelledError:
             self.logger.debug("SonoffDevice loop ended, returning")
+
+    def _state_hybrid_timeout_shutdown(self) -> None:
+        if getattr(self, "_state_hybrid_exited", False):
+            return
+        self._state_hybrid_exited = True
+        self.logger.info(
+            "state (mDNS/HTTP-Hybrid): 5 s abgeschlossen ohne erwartete mDNS-Antwort."
+        )
+        self.shutdown_event_loop()
+
+    async def _state_mdns_hybrid_supervisor(self) -> None:
+        """mDNS lauscht bereits; kurze Pause, HTTP ``/zeroconf/switches`` mit ``switches:[]``, 5 s Timeout."""
+        self.logger.debug(
+            "state hybrid: kurze Wartezeit (mDNS), dann POST /zeroconf/switches "
+            "(switches mit outlet + switch on)"
+        )
+        try:
+            await asyncio.sleep(0.2)
+            await self.loop.run_in_executor(
+                None, self.client.send_state_probe_switches_empty
+            )
+        except Exception as ex:
+            self.logger.warning("state hybrid HTTP-Probe: %s", ex)
+        self._state_hybrid_timer_handle = self.loop.call_later(
+            5.0, self._state_hybrid_timeout_shutdown
+        )
+        try:
+            while True:
+                await asyncio.sleep(86400.0)
+        except asyncio.CancelledError:
+            th = getattr(self, "_state_hybrid_timer_handle", None)
+            if th is not None:
+                try:
+                    th.cancel()
+                except Exception:
+                    pass
+            raise
 
     async def send_availability_loop(self):
 
@@ -273,9 +364,24 @@ class SonoffDevice(object):
                     self.message_ping_event.clear()
                     self.message_acknowledged_event.clear()
 
-                    await self.loop.run_in_executor(
+                    response = await self.loop.run_in_executor(
                         None, self.client.send_switch, update_message
                     )
+
+                    if getattr(self, "_lan_http_direct", False) and _zeroconf_http_post_ok(
+                        response
+                    ):
+                        # Ohne mDNS feuert handle_message nicht — sonst Endlosschleife / kein Prozessende.
+                        self.message_ping_event.set()
+                        self.message_acknowledged_event.set()
+                        self.params_updated_event.clear()
+                        retry_count = 0
+                        self.logger.debug(
+                            "lan_http_direct: Schalt-POST ok, synthetische Quittung"
+                        )
+                        if getattr(self, "_exit_after_lan_http_switch", False):
+                            self.loop.call_soon(self.shutdown_event_loop)
+                        continue
 
                     await asyncio.wait_for(
                         self.message_ping_event.wait(),
@@ -350,11 +456,19 @@ class SonoffDevice(object):
         finally:
             self.logger.debug("send_updated_params_loop finally block reached")
 
+    def _sync_client_zeroconf_endpoint_hint(self) -> None:
+        """Mehrkanal (z. B. DUALR3): Client soll ``/zeroconf/switches`` nutzen."""
+        bi = self.basic_info or {}
+        sw = bi.get("switches")
+        if isinstance(sw, list) and len(sw) >= 2:
+            self.client._prefer_switches_zeroconf = True
+
     def merge_basic_info_from_response(self, response: dict) -> None:
         """HTTP zeroconf / Teilmeldungen in basic_info einarbeiten (DUALR3: switches + flache *_00-Keys mergen)."""
         if self.client.type != b"multifun_switch":
             self.basic_info = dict(response)
             self.basic_info["deviceid"] = self.host
+            self._sync_client_zeroconf_endpoint_hint()
             return
         if self.basic_info is None:
             merged = dict(response)
@@ -372,6 +486,7 @@ class SonoffDevice(object):
         merged.pop("deviceid", None)
         self.basic_info = merged
         self.basic_info["deviceid"] = self.host
+        self._sync_client_zeroconf_endpoint_hint()
 
     def update_params(self, params):
 
@@ -411,6 +526,31 @@ class SonoffDevice(object):
             self.message_ping_event.set()
 
             response = json.loads(message.decode("utf-8"))
+
+            if getattr(self, "_state_mdns_hybrid", False):
+                if isinstance(response, dict) and _state_hybrid_mdns_payload_matches(
+                    response
+                ):
+                    sys.stdout.write(
+                        json.dumps(
+                            response,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            default=str,
+                        )
+                        + "\n"
+                    )
+                    sys.stdout.flush()
+                    self._state_hybrid_exited = True
+                    th = getattr(self, "_state_hybrid_timer_handle", None)
+                    if th is not None:
+                        try:
+                            th.cancel()
+                        except Exception:
+                            pass
+                    self.loop.call_soon(self.shutdown_event_loop)
+                    return
+                return
 
             if SonoffDevice.mirror_decrypted_mdns_json_to_stdout and isinstance(
                 response, dict
@@ -531,6 +671,7 @@ class SonoffDevice(object):
             if self.client.type != b"multifun_switch":
                 self.basic_info = response
                 self.basic_info["deviceid"] = self.host
+                self._sync_client_zeroconf_endpoint_hint()
 
             self.client.connected_event.set()
             self.logger.info(
