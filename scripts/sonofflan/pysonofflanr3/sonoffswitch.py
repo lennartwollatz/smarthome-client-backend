@@ -2,8 +2,8 @@ import asyncio
 import logging
 from typing import Callable, Awaitable, Dict
 
-from pysonofflanr3 import SonoffDevice
 from pysonofflanr3 import SonoffLANModeClient
+from pysonofflanr3.sonoffdevice import SonoffDevice, _switch_dict_for_outlet
 
 
 class SonoffSwitch(SonoffDevice):
@@ -119,6 +119,15 @@ class SonoffSwitch(SonoffDevice):
         Returns whether device is on.
         :return: True if device is on, False otherwise
         """
+        out = self.outlet if self.outlet is not None else 0
+        if self.client.type in (b"strip", b"multifun_switch"):
+            switches = (self.basic_info or {}).get("switches")
+            sw = _switch_dict_for_outlet(
+                switches if isinstance(switches, list) else None,
+                out,
+            )
+            if sw is not None and sw.get("switch") is not None:
+                return sw["switch"] == "on"
         if "switch" in self.params:
             return self.params["switch"] == "on"
 

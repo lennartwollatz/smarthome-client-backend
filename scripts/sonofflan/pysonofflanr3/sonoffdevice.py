@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import sys
-from typing import Callable, Awaitable, Dict
+from typing import Callable, Awaitable, Dict, List, Optional
 import traceback
 from pysonofflanr3 import SonoffLANModeClient
 from pysonofflanr3 import utils
@@ -40,6 +40,37 @@ def _merge_switches_by_outlet(previous: list, incoming: list) -> list:
         base.update(sw)
         by_outlet[idx] = base
     return [by_outlet[k] for k in sorted(by_outlet.keys())]
+
+
+def _switch_dict_for_outlet(
+    switches: Optional[List], outlet: int
+) -> Optional[dict]:
+    """Eintrag für `outlet` suchen — nicht per Listenindex.
+
+    Teilmeldungen liefern oft nur einen Kanal; `switches[0]` wäre dann der falsche.
+    """
+    if not isinstance(switches, list) or not switches:
+        return None
+    o = int(outlet)
+    for sw in switches:
+        if not isinstance(sw, dict):
+            continue
+        if "outlet" in sw:
+            try:
+                if int(sw["outlet"]) == o:
+                    return sw
+            except (TypeError, ValueError):
+                continue
+    if 0 <= o < len(switches) and isinstance(switches[o], dict):
+        sw = switches[o]
+        if "outlet" not in sw:
+            return sw
+        try:
+            if int(sw.get("outlet", o)) == o:
+                return sw
+        except (TypeError, ValueError):
+            return sw
+    return None
 
 
 class SonoffDevice(object):
@@ -369,9 +400,16 @@ class SonoffDevice(object):
                 if self.outlet is None:
                     self.outlet = 0
 
-                switch_status = response["switches"][int(self.outlet)][
-                    "switch"
-                ]
+                sw_strip = _switch_dict_for_outlet(
+                    response.get("switches"), int(self.outlet)
+                )
+                if sw_strip is None or sw_strip.get("switch") is None:
+                    self.client.connected_event.set()
+                    self.logger.debug(
+                        "strip: no switch state for outlet %s", self.outlet
+                    )
+                    return
+                switch_status = sw_strip["switch"]
 
             elif self.client.type == b"multifun_switch":
                 # DUALR3 etc.: encrypted chunks may be energy/telemetry only, or
@@ -382,9 +420,27 @@ class SonoffDevice(object):
                 if "switches" in merged:
                     if self.outlet is None:
                         self.outlet = 0
-                    switch_status = merged["switches"][int(self.outlet)][
-                        "switch"
-                    ]
+                    sw_m = _switch_dict_for_outlet(
+                        merged.get("switches"), int(self.outlet)
+                    )
+                    switch_status = (
+                        sw_m.get("switch") if sw_m is not None else None
+                    )
+                    if switch_status is None and "switch" in merged:
+                        switch_status = merged["switch"]
+                    if switch_status is None:
+                        self.client.connected_event.set()
+                        self.logger.debug(
+                            "multifun_switch: partial update (no switch for "
+                            "outlet %s), merged",
+                            self.outlet,
+                        )
+                        if (
+                            SonoffDevice.invoke_callback_on_multifun_partial
+                            and self.callback_after_update is not None
+                        ):
+                            await self.callback_after_update(self)
+                        return
                 elif "switch" in merged:
                     switch_status = merged["switch"]
                 else:
@@ -409,9 +465,17 @@ class SonoffDevice(object):
                 if "switches" in response:
                     if self.outlet is None:
                         self.outlet = 0
-                    switch_status = response["switches"][int(self.outlet)][
-                        "switch"
-                    ]
+                    sw_plug = _switch_dict_for_outlet(
+                        response.get("switches"), int(self.outlet)
+                    )
+                    if sw_plug is None or sw_plug.get("switch") is None:
+                        self.client.connected_event.set()
+                        self.logger.debug(
+                            "plug: switches without state for outlet %s",
+                            self.outlet,
+                        )
+                        return
+                    switch_status = sw_plug["switch"]
                 elif "switch" in response:
                     switch_status = response["switch"]
                 else:
