@@ -229,6 +229,7 @@ export class DeviceManager implements EntityManager {
   }
 
   getDevice(deviceId: string): Device | null {
+    console.log(this.devices);
     return this.devices.get(deviceId) ?? null;
   }
 
