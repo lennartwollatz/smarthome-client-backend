@@ -148,7 +148,7 @@ export class DeviceManager implements EntityManager {
    * @returns aktualisiertes Gerät oder `null`, wenn kein Gerät existiert oder der Patch ungültig ist.
    */
   async updateDeviceSettings(deviceId: string, patch: Record<string, unknown>): Promise<Device | null> {
-    logger.warn({ deviceId, patch }, "updateDeviceSettings");
+    logger.error({ deviceId, patch }, "updateDeviceSettings");
     console.log(this.devices);
     const existing = this.getDevice(deviceId);
     if (!existing) {
