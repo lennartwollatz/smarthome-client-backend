@@ -7,6 +7,7 @@ import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
 import { SonoffEvent } from "./sonoffEvent.js";
 import { SonoffDeviceDiscovered } from "./sonoffDeviceDiscovered.js";
 import { SonoffBasicDevice, SonoffLanEndDevice } from "./devices/sonoffDevice.js";
+import { isSonoffSwitchLanPayloadOk } from "./devices/sonoffSwitchLanPayload.js";
 
 
 /** Letztes JSON aus pysonofflanr3 Debug-Zeile `decrypted data: b'{...}'` (mDNS). */
@@ -130,7 +131,7 @@ function logSonoffPythonInvocation(
 }
 
 export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEvent, Device> {
-  /** Ein Live-Prozess pro eWeLink-Gerätid (getState --live). */
+  /** Ein Live-Prozess pro eWeLink-Gerätid (Python ``getState`` = mDNS-Listener + statistics). */
   private readonly liveStreamByEwelinkId = new Map<string, ChildProcess>();
 
 
@@ -161,7 +162,7 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
       const status = await this.getStatus(
         new SonoffBasicDevice(ewelinkDeviceId, address, _port, apiKey)
       );
-      return ((status as Record<string, unknown>)?.ok as boolean) ?? false;
+      return isSonoffSwitchLanPayloadOk(status as Record<string, unknown> | null);
     } catch (err) {
       logger.warn(
         { err, address, ewelinkDeviceId },
@@ -251,7 +252,7 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
           decryptedPayload = extractLastDecryptedJsonFromPysonoffLog(`${stdout}\n${stderr}`);
         }
         const ok = exitCode === 0 || decryptedPayload !== null;
-        if (!ok || decryptedPayload?.ok !== true) {
+        if (!ok || !isSonoffSwitchLanPayloadOk(decryptedPayload)) {
           logger.debug(
             { code: exitCode, address: device.getLanAddress(), stderrTail: stderr.trim().slice(-800) },
             "Sonoff verifyLan: pysonofflanr3 state fehlgeschlagen"
@@ -315,9 +316,9 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
       device.getLanApiKey(),
       "-l",
       "CRITICAL",
-      "getState",
+      "state",
     ];
-    
+
     return await this.sendAndResolve(device, args);
   }
 
@@ -355,13 +356,12 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
       "-l",
       "CRITICAL",
       "getState",
-      "--live"
     ];
     return args;
   }
 
   /**
-   * mDNS-Livestream: **ein** Python-Prozess pro Gerät (`getState --live`), kein stdin-JSON.
+   * mDNS-Livestream: **ein** Python-Prozess pro Gerät (`getState`: mDNS + statistics), kein stdin-JSON.
    */
   async startLanLiveEventStream(devices: Device[], callback: (event: SonoffEvent) => void): Promise<void> {
     await this.stopLanLiveEventStream();

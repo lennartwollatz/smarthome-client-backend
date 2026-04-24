@@ -2,6 +2,7 @@ import { logger } from "../../../../../logger.js";
 import { DeviceSwitchEnergy } from "../../../../../model/devices/DeviceSwitchEnergy.js";
 import { SonoffDeviceController } from "../sonoffDeviceController.js";
 import { SonoffLanEndDevice } from "./sonoffDevice.js";
+import { normalizeSonoffSwitchLanPayload } from "./sonoffSwitchLanPayload.js";
 
 export class SonoffSwitchEnergy extends DeviceSwitchEnergy implements SonoffLanEndDevice {
   ewelinkDeviceId = "";
@@ -37,109 +38,41 @@ export class SonoffSwitchEnergy extends DeviceSwitchEnergy implements SonoffLanE
     return this.lanApiKey;
   }
 
-  //{"ok":true,"switch":"on","switches":[{"switch":"on","outlet":0},{"switch":"on","outlet":1}],"basicInfo":{"current_01":54,"voltage_01":23367,"actPow_01":8880,"reactPow_01":9193,"apparentPow_01":12781,"ssid":"Wollatz","bssid":"3C:A6:2F:03:B9:E9","deviceid":"192.168.178.171","switches":[{"switch":"on","outlet":0},{"switch":"on","outlet":1}]},"zeroconfSwitches":{"ok":true,"httpStatus":200,"data":{"workMode":1,"swMode_00":2,"swMode_01":2,"swReverse_00":0,"swReverse_01":0,"switches":[{"switch":"on","outlet":0},{"switch":"on","outlet":1}],"configure":[{"startup":"on","outlet":0},{"startup":"on","outlet":1}],"pulses":[{"pulse":"off","width":1000,"outlet":0},{"pulse":"off","width":1000,"outlet":1}],"overload_00":{"minActPow":{"enabled":0,"value":10},"maxVoltage":{"enabled":0,"value":24000},"minVoltage":{"enabled":0,"value":10},"maxCurrent":{"enabled":0,"value":1500},"maxActPow":{"enabled":0,"value":360000}},"overload_01":{"minActPow":{"enabled":0,"value":10},"maxVoltage":{"enabled":0,"value":24000},"minVoltage":{"enabled":0,"value":10},"maxCurrent":{"enabled":0,"value":1500},"maxActPow":{"enabled":0,"value":360000}},"sledBright":100,"staMac":"2043A8C2AB4C","rssi":-73,"oneKwhData_00":0,"oneKwhData_01":0},"endpoint":"getState","tried":["getState"]}}
   async updateValues(): Promise<void> {
     const status = await this.sonoffController?.getStatus(this);
-    if (status?.ok === true) {
-      await this.updateValuesFromPayload(status, false);
-
-      //{"ok":true,"httpStatus":200,"data":{"current_00":2,"voltage_00":23616,"actPow_00":537,"reactPow_00":385,"apparentPow_00":661,"current_01":56,"voltage_01":23616,"actPow_01":9483,"reactPow_01":9288,"apparentPow_01":13274}}
-      const stats = (status as Record<string, unknown>).statistics as
-        | Record<string, unknown>
-        | undefined;
-      if (stats?.ok === true) {
-        await this.updateStatisticsFromPayload(stats, false);
-      }
+    if (!status) {
+      return;
     }
+    this.updateValuesFromPayload(status as Record<string, unknown>, false);
   }
 
   async delete(): Promise<void> {
   }
 
-  async updateValuesFromPayload(payload: Record<string, unknown>, trigger: boolean = false): Promise<void> {
-    if (payload?.ok !== true) {
+  /**
+   * Nur Payloads der Form
+   * ``{ switches: [{ switch, outlet }, …], ssid, bssid }``
+   * (bzw. gleiche Daten nach {@link normalizeSonoffSwitchLanPayload}).
+   */
+  updateValuesFromPayload(payload: Record<string, unknown>, trigger: boolean = false): void {
+    const flat = normalizeSonoffSwitchLanPayload(payload);
+    if (!flat) {
       return;
     }
-    const bi = payload.basicInfo as Record<string, unknown> | undefined;
-    const zc = payload.zeroconfSwitches as Record<string, unknown> | undefined;
-    const zcData =
-      zc?.ok === true && typeof zc.data === "object" && zc.data !== null
-        ? (zc.data as Record<string, unknown>)
-        : undefined;
-
-    let switchesList: Record<string, unknown>[] | null =
-      Array.isArray(payload.switches) && (payload.switches as unknown[]).length > 0
-        ? (payload.switches as Record<string, unknown>[])
-        : null;
-    if (!switchesList?.length && Array.isArray(bi?.switches) && (bi!.switches as unknown[]).length > 0) {
-      switchesList = bi!.switches as Record<string, unknown>[];
-    }
-    if (!switchesList?.length && Array.isArray(zcData?.switches) && (zcData!.switches as unknown[]).length > 0) {
-      switchesList = zcData!.switches as Record<string, unknown>[];
-    }
-
-    if (switchesList && switchesList.length > 0) {
-      for (const switchConfig of switchesList) {
-        const outlet = switchConfig.outlet;
-        const switchState = switchConfig.switch;
-        if (outlet === undefined || switchState === undefined || !this.buttons[String(outlet)]) {
-          continue;
-        }
-        if (switchState === "on") {
-          if (super.getButton(String(outlet))?.on === false) {
-            super.on(String(outlet), false, trigger);
-          }
-        } else {
-          if (super.getButton(String(outlet))?.on === true) {
-            super.off(String(outlet), false, trigger);
-          }
-        }
-      }
-      return;
-    }
-
-    const buttonIds = Object.keys(this.buttons);
-    if (buttonIds.length === 1 && typeof payload.switch === "string") {
-      const only = buttonIds[0];
-      if (this.buttons[only]) {
-        if (payload.switch === "on") {
-          if (super.getButton(only)?.on === false) {
-            super.on(only, false, trigger);
-          }
-        } else {
-          if (super.getButton(only)?.on === true) {
-            super.off(only, false, trigger);
-          }
-        }
-      }
-      return;
-    }
-
-    const stats = payload.statistics as Record<string, unknown> | undefined;
-    const data =
-      stats?.ok === true && typeof stats.data === "object" && stats.data !== null
-        ? (stats.data as Record<string, unknown>)
-        : undefined;
-    if (!data || buttonIds.length < 2) {
-      return;
-    }
-    const threshold = 100;
-    for (const bid of buttonIds) {
-      const raw = data[`actPow_0${bid}`];
-      if (raw === undefined || raw === null) {
+    const list = flat.switches as Record<string, unknown>[];
+    for (const switchConfig of list) {
+      const outlet = switchConfig.outlet;
+      const switchState = switchConfig.switch;
+      if (outlet === undefined || switchState === undefined || !this.buttons[String(outlet)]) {
         continue;
       }
-      const on = Number(raw) >= threshold;
-      if (!this.buttons[bid]) {
-        continue;
-      }
-      if (on) {
-        if (super.getButton(bid)?.on === false) {
-          super.on(bid, false, trigger);
+      if (switchState === "on") {
+        if (super.getButton(String(outlet))?.on === false) {
+          super.on(String(outlet), false, trigger);
         }
       } else {
-        if (super.getButton(bid)?.on === true) {
-          super.off(bid, false, trigger);
+        if (super.getButton(String(outlet))?.on === true) {
+          super.off(String(outlet), false, trigger);
         }
       }
     }

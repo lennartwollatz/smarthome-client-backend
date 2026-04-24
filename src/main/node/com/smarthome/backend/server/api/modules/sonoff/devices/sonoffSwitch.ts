@@ -2,6 +2,7 @@ import { logger } from "../../../../../logger.js";
 import { DeviceSwitch } from "../../../../../model/devices/DeviceSwitch.js";
 import { SonoffDeviceController } from "../sonoffDeviceController.js";
 import { SonoffLanEndDevice } from "./sonoffDevice.js";
+import { normalizeSonoffSwitchLanPayload } from "./sonoffSwitchLanPayload.js";
 
 export class SonoffSwitch extends DeviceSwitch implements SonoffLanEndDevice {
   /** eWeLink deviceid */
@@ -46,68 +47,41 @@ export class SonoffSwitch extends DeviceSwitch implements SonoffLanEndDevice {
   }
 
 
-  //{"ok":true,"switch":"on","switches":null,"basicInfo":{"fwVersion":"1.2.0","ssid":"Wollatz","bssid":"3C:A6:2F:03:B9:E9","rssi":-49,"staMac":"54:32:04:8B:6C:30","sledOnline":"on","swMode":2,"swCtrlReverse":"off","relaySeparation":0,"configure":[{"outlet":0,"enableDelay":0,"width":21000,"startup":"off"}],"pulses":[{"outlet":0,"pulse":"off","switch":"off","width":500}],"switches":[{"outlet":0,"switch":"on"}],"triggerType":8,"autoUpgrade":{"enable":false,"range":["02:00","04:00"]},"deviceid":"192.168.178.95"}}
   async updateValues(): Promise<void> {
     const status = await this.sonoffController?.getStatus(this);
-    if(status) {
-      this.updateValuesFromPayload(status, false);
+    if (!status) {
+      return;
     }
+    this.updateValuesFromPayload(status as Record<string, unknown>, false);
   }
 
   async delete(): Promise<void> {
   }
 
+  /**
+   * Nur Payloads der Form
+   * ``{ switches: [{ switch, outlet }, …], ssid, bssid }``
+   * (bzw. gleiche Daten nach {@link normalizeSonoffSwitchLanPayload}).
+   */
   updateValuesFromPayload(payload: Record<string, unknown>, trigger: boolean = false): void {
-    if (payload?.ok !== true) {
+    const flat = normalizeSonoffSwitchLanPayload(payload);
+    if (!flat) {
       return;
     }
-    const bi = payload.basicInfo as Record<string, unknown> | undefined;
-
-    const fromTop =
-      Array.isArray(payload.switches) && (payload.switches as unknown[]).length > 0
-        ? (payload.switches as Record<string, unknown>[])
-        : null;
-    const fromBasic =
-      Array.isArray(bi?.switches) && (bi!.switches as unknown[]).length > 0
-        ? (bi!.switches as Record<string, unknown>[])
-        : null;
-    const list = fromTop ?? fromBasic;
-
-    if (list && list.length > 0) {
-      for (const switchConfig of list) {
-        const outlet = switchConfig.outlet;
-        const switchState = switchConfig.switch;
-        if (outlet === undefined || switchState === undefined || !this.buttons[String(outlet)]) {
-          continue;
-        }
-        if (switchState === "on") {
-          if (super.getButton(String(outlet))?.on === false) {
-            super.on(String(outlet), false, trigger);
-          }
-        } else {
-          if (super.getButton(String(outlet))?.on === true) {
-            super.off(String(outlet), false, trigger);
-          }
-        }
+    const list = flat.switches as Record<string, unknown>[];
+    for (const switchConfig of list) {
+      const outlet = switchConfig.outlet;
+      const switchState = switchConfig.switch;
+      if (outlet === undefined || switchState === undefined || !this.buttons[String(outlet)]) {
+        continue;
       }
-      return;
-    }
-
-    const singleFromBasic = typeof bi?.switch === "string" ? bi.switch : undefined;
-    const singleFromRoot = typeof payload.switch === "string" ? payload.switch : undefined;
-    const single = singleFromBasic ?? singleFromRoot;
-    const keys = Object.keys(this.buttons);
-    if (typeof single === "string" && keys.length === 1) {
-      const only = keys[0];
-      if (this.buttons[only]) {
-        if (single === "on") {
-          if (super.getButton(only)?.on === false) {
-            super.on(only, false, trigger);
-          }
-        } else {
-          if (super.getButton(only)?.on === true) {
-            super.off(only, false, trigger);
-          }
+      if (switchState === "on") {
+        if (super.getButton(String(outlet))?.on === false) {
+          super.on(String(outlet), false, trigger);
+        }
+      } else {
+        if (super.getButton(String(outlet))?.on === true) {
+          super.off(String(outlet), false, trigger);
         }
       }
     }

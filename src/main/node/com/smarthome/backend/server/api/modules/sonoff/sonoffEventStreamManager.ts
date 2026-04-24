@@ -8,6 +8,7 @@ import { Device } from "../../../../model/devices/Device.js";
 import { SonoffSwitchDimmer } from "./devices/sonoffSwitchDimmer.js";
 import { SonoffSwitch } from "./devices/sonoffSwitch.js";
 import { SonoffSwitchEnergy } from "./devices/sonoffSwitchEnergy.js";
+import { normalizeSonoffSwitchLanPayload } from "./devices/sonoffSwitchLanPayload.js";
 
 export class SonoffEventStreamManager extends ModuleEventStreamManager<SonoffDeviceController, SonoffEvent> {
   constructor(managerId: string, controller: SonoffDeviceController, deviceManager: DeviceManager) {
@@ -47,9 +48,11 @@ export class SonoffEventStreamManager extends ModuleEventStreamManager<SonoffDev
   }
 
   /**
-   * Werte aus dem Python-Live-Stream (getState --live) ins Modell übernehmen.
-   * Zeilen: kombinierter Snapshot ``{ ok, basicInfo, … }``, periodisch ``statistics``,
-   * oder rohe mDNS-Teilobjekte ohne ``ok``.
+   * Live-Zeilen von pysonofflanr3 ``getState`` ins Modell:
+   *
+   * - **Schalter-LAN:** ``{ switches, ssid, bssid }`` (ggf. in größerem JSON / ``basicInfo``).
+   * - **Leistung flach:** ``{ actPow_01, …, ssid, bssid }`` ohne ``ok``.
+   * - **Statistics-HTTP:** ``{ ok, endpoint: "statistics", data: { … } }``.
    */
   private applySonoffStreamPayloadToDevice(device: Device, payload: Record<string, unknown>): void {
     const endpoint = typeof payload.endpoint === "string" ? payload.endpoint : "";
@@ -61,62 +64,49 @@ export class SonoffEventStreamManager extends ModuleEventStreamManager<SonoffDev
       return;
     }
 
-    if (payload.ok === true && (payload.basicInfo !== undefined || payload.switch !== undefined)) {
-      if (device instanceof SonoffSwitchEnergy) {
-        const stats = payload.statistics as Record<string, unknown> | undefined;
-        if (stats?.ok === true) {
-          void (device as SonoffSwitchEnergy).updateStatisticsFromPayload(stats, true);
-        }
-        void (device as SonoffSwitchEnergy).updateValuesFromPayload(payload, true);
-        return;
+    if (device instanceof SonoffSwitchEnergy && payload.ok === true) {
+      const stats = payload.statistics as Record<string, unknown> | undefined;
+      if (stats?.ok === true && typeof stats.data === "object" && stats.data !== null) {
+        void (device as SonoffSwitchEnergy).updateStatisticsFromPayload(stats, true);
       }
+    }
 
+    const lanSwitch = normalizeSonoffSwitchLanPayload(payload);
+    if (lanSwitch !== null) {
       if (device instanceof SonoffSwitch) {
-        void (device as SonoffSwitch).updateValuesFromPayload(payload, true);
+        (device as SonoffSwitch).updateValuesFromPayload(payload, true);
         return;
       }
+      if (device instanceof SonoffSwitchEnergy) {
+        (device as SonoffSwitchEnergy).updateValuesFromPayload(payload, true);
+      }
+    }
 
+    if (payload.ok === true && (payload.basicInfo !== undefined || payload.switch !== undefined)) {
       if (device instanceof SonoffSwitchDimmer) {
         (device as SonoffSwitchDimmer).updateValuesFromPayload(payload, true);
+      } else if (device instanceof SonoffSwitch) {
+        (device as SonoffSwitch).updateValuesFromPayload(payload, true);
       }
       return;
     }
 
-    if (payload.ok === undefined) {
+    if (payload.ok === undefined || payload.ok === null) {
       const p = payload as Record<string, unknown>;
-      if (device instanceof SonoffSwitchEnergy) {
-        const keys = Object.keys(p);
-        const energyLike = keys.some(
-          k =>
-            k.startsWith("actPow_") ||
-            k.startsWith("current_") ||
-            k.startsWith("voltage_") ||
-            k.startsWith("reactPow_") ||
-            k.startsWith("apparentPow_")
-        );
-        if (energyLike) {
-          void (device as SonoffSwitchEnergy).updateStatisticsFromPayload({ ok: true, data: p }, true);
-        }
-        const swE = p.switches;
-        if (Array.isArray(swE) && swE.length > 0) {
-          void (device as SonoffSwitchEnergy).updateValuesFromPayload(
-            {
-              ok: true,
-              switches: swE as Record<string, unknown>[],
-              basicInfo: { switches: swE as Record<string, unknown>[] },
-            },
-            true
-          );
-        }
-      } else if (device instanceof SonoffSwitch) {
-        const sw = p.switches;
-        if (Array.isArray(sw) && sw.length > 0) {
-          void (device as SonoffSwitch).updateValuesFromPayload(
-            { ok: true, basicInfo: { switches: sw as Record<string, unknown>[] } },
-            true
-          );
-        }
+      if (device instanceof SonoffSwitchEnergy && this.payloadHasSonoffEnergyMetrics(p)) {
+        void (device as SonoffSwitchEnergy).updateStatisticsFromPayload({ ok: true, data: p }, true);
       }
     }
+  }
+
+  private payloadHasSonoffEnergyMetrics(p: Record<string, unknown>): boolean {
+    return Object.keys(p).some(
+      k =>
+        k.startsWith("actPow_") ||
+        k.startsWith("current_") ||
+        k.startsWith("voltage_") ||
+        k.startsWith("reactPow_") ||
+        k.startsWith("apparentPow_")
+    );
   }
 }

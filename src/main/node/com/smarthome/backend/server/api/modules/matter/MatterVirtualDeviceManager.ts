@@ -217,7 +217,7 @@ export class MatterVirtualDeviceManager {
     const { discriminator, passcode } = row;
     return {
       deviceId: row.deviceId.trim(),
-      keyword: row.keyword.trim(),
+      keyword: row.keyword.trim() ?? "location-device",
       pairingCode: ManualPairingCodeCodec.encode({ discriminator, passcode }),
       qrPairingCode: this.encodeQrPairingCode(discriminator, passcode),
       port: row.port,
@@ -1048,9 +1048,9 @@ export class MatterVirtualDeviceManager {
 
   private resolveVaNodeDisplayName(data: VoiceAssistantDeviceData): string {
     const dev = this.deviceManager.getDevice(data.deviceId);
-    const fromDevice = dev?.name?.trim();
+    const fromDevice = dev?.name?.trim() || "location-device";
     if (fromDevice) return fromDevice;
-    return data.keyword.trim();
+    return data.keyword.trim() || "location-device";
   }
 
   private resolveVaEndpointDisplayName(data: VoiceAssistantDeviceData, buttonId: string): string {
