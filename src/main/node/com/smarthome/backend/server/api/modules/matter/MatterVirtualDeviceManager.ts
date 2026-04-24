@@ -38,6 +38,8 @@ const PRESENCE_MODULE_ID = "presence";
 const PRESENCE_BASE_PORT = 5550;
 const PRESENCE_VENDOR_ID = 0xfff1;
 const PRESENCE_PRODUCT_ID = 0x8001;
+const HARDWARE_VERSION = "1.0.0";
+const SOFTWARE_VERSION = "1.0.0";
 
 const VA_MODULE_ID = "voice-assistant";
 const VA_BASE_PORT = 5600;
@@ -48,6 +50,7 @@ const VA_PRODUCT_ID = 0x8006;
 const MATTER_HOST_BASE_PORT = 5700;
 const MATTER_HOST_PRODUCT_ID = 0x8007;
 const MATTER_ID_MAX = 0xfffe;
+const MATTER_VIRTUAL_STORAGE_SCHEMA_VERSION = "v2";
 
 function sanitizeMatterId16(value: number, label: string): number {
   const parsed = Number(value);
@@ -661,6 +664,10 @@ export class MatterVirtualDeviceManager {
         productId: PRESENCE_PRODUCT_ID_SAFE,
         serialNumber: matterSerial,
         uniqueId: matterUniqueId,
+        hardwareVersion: 1,
+        hardwareVersionString: "1.0",
+        softwareVersion: 1,
+        softwareVersionString: "1.0.0",
       },
     });
 
@@ -745,7 +752,7 @@ export class MatterVirtualDeviceManager {
   private encodeQrPairingCode(discriminator: number, passcode: number): string {
     return QrPairingCodeCodec.encode([
       {
-        version: 0,
+        version: 1,
         vendorId: VendorId(VA_VENDOR_ID_SAFE),
         productId: VA_PRODUCT_ID_SAFE,
         flowType: CommissioningFlowType.Standard,
@@ -759,7 +766,7 @@ export class MatterVirtualDeviceManager {
   private encodeHostQrPairingCode(discriminator: number, passcode: number): string {
     return QrPairingCodeCodec.encode([
       {
-        version: 0,
+        version: 1,
         vendorId: VendorId(VA_VENDOR_ID_SAFE),
         productId: MATTER_HOST_PRODUCT_ID_SAFE,
         flowType: CommissioningFlowType.Standard,
@@ -788,8 +795,9 @@ export class MatterVirtualDeviceManager {
     const matterUniqueId = createHash("sha256").update(deviceId, "utf8").digest("hex").slice(0, 32);
     const matterSerial = `v${matterUniqueId}`.slice(0, 32);
     const safe = deviceId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const storageId =
+    const baseStorageId =
       safe.length > 0 && safe.length <= 64 ? safe : `va_${matterUniqueId.slice(0, 24)}`;
+    const storageId = `${baseStorageId}_${MATTER_VIRTUAL_STORAGE_SCHEMA_VERSION}`;
     const virtualNodeId = this.generateVirtualNodeId(deviceId);
     return { storageId, matterUniqueId, matterSerial, virtualNodeId };
   }
@@ -803,8 +811,9 @@ export class MatterVirtualDeviceManager {
     const matterUniqueId = createHash("sha256").update(deviceId, "utf8").digest("hex").slice(0, 32);
     const matterSerial = `h${matterUniqueId}`.slice(0, 32);
     const safe = deviceId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const storageId =
+    const baseStorageId =
       safe.length > 0 && safe.length <= 64 ? safe : `mhs_${matterUniqueId.slice(0, 24)}`;
+    const storageId = `${baseStorageId}_${MATTER_VIRTUAL_STORAGE_SCHEMA_VERSION}`;
     const virtualNodeId = this.generateVirtualNodeId(deviceId);
     return { storageId, matterUniqueId, matterSerial, virtualNodeId };
   }
@@ -905,6 +914,10 @@ export class MatterVirtualDeviceManager {
         productId: MATTER_HOST_PRODUCT_ID_SAFE,
         serialNumber: matterSerial,
         uniqueId: matterUniqueId,
+        hardwareVersion: 1,
+        hardwareVersionString: "1.0",
+        softwareVersion: 1,
+        softwareVersionString: "1.0.0",
       },
     });
 
@@ -1140,6 +1153,10 @@ export class MatterVirtualDeviceManager {
         productId: VA_PRODUCT_ID_SAFE,
         serialNumber: matterSerial,
         uniqueId: matterUniqueId,
+        hardwareVersion: 1,
+        hardwareVersionString: "1.0",
+        softwareVersion: 1,
+        softwareVersionString: "1.0.0",
       },
     });
 
