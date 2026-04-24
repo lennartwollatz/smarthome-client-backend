@@ -215,7 +215,6 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   }
 
   private async toMatterDevice(device: MatterDeviceDiscovered) {
-    console.log(device);
     const id = device.id;
     const nodeId = device.nodeId ?? "0";
     const vendorId = device.vendorId ?? undefined;
@@ -229,8 +228,6 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       vendorInfo?.productName
         ? `${vendorInfo.vendorName} ${vendorInfo.productName}`.trim()
         : (device.name ?? "Matter Device");
-
-    console.log(vendorInfo);
 
     const typeFromVendor = toDeviceType(vendorInfo?.deviceType ?? null);
 
