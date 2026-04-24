@@ -14,8 +14,6 @@ export function createDeviceRouter(deps: ServerDeps) {
     const deviceId = req.params.deviceId;
     const existing = deps.deviceManager.getDevice(deviceId);
     if (!existing) {
-      console.log(existing);
-      console.log(deviceId);
       res.status(404).json({ success: false, error: "Device not found" });
       return;
     }
