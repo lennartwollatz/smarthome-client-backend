@@ -2,6 +2,7 @@ import { logger } from "../../../../logger.js";
 import { Device } from "../../../../model/devices/Device.js";
 import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
+import { DeviceThermostat } from "../../../../model/devices/DeviceThermostat.js";
 import { DeviceVacuumCleaner } from "../../../../model/devices/DeviceVacuumCleaner.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { JsonRepository } from "../../../db/jsonRepository.js";
@@ -141,22 +142,26 @@ export class DeviceManager implements EntityManager {
   }
 
   /**
-   * Wendet den JSON-Body von PUT /api/devices/:id an (Metadaten, Buttons, Koordinaten).
-   * `temperatureGoal` ist nicht erlaubt (nur über das Matter-Modul).
+   * Wendet den JSON-Body von PUT /api/devices/:id an (Metadaten, Buttons, Koordinaten, …).
+   * Bei Thermostaten wird geänderte `temperatureGoal` per {@link DeviceThermostat.setTemperatureGoal} an das Gerät gesendet (z. B. Matter).
    * Bei Staubsaugern wird geänderte `cleanSequence` per {@link DeviceVacuumCleaner.setCleanSequence} an das Gerät gesendet.
    * @returns aktualisiertes Gerät oder `null`, wenn kein Gerät existiert oder der Patch ungültig ist.
    */
   async updateDeviceSettings(deviceId: string, patch: Record<string, unknown>): Promise<Device | null> {
     const existing = this.getDevice(deviceId);
     if (!existing) {
-      return null;
-    }
-    if ("temperatureGoal" in patch) {
+      console.log("Device " + deviceId + " not found");
       return null;
     }
 
-    if ("cleanSequence" in patch && existing instanceof DeviceVacuumCleaner) {
-      const seq = this.parseCleanSequenceFromPatch(patch["cleanSequence"]);
+    const patchForApply: Record<string, unknown> = { ...patch };
+
+    if ("temperatureGoal" in patch) {
+      delete patchForApply["temperatureGoal"];
+    }
+
+    if ("cleanSequence" in patchForApply && existing instanceof DeviceVacuumCleaner) {
+      const seq = this.parseCleanSequenceFromPatch(patchForApply["cleanSequence"]);
       if (seq !== undefined && !this.cleanSequencesEqual(existing.cleanSequence, seq)) {
         try {
           await existing.setCleanSequence(seq, true, true);
@@ -167,7 +172,7 @@ export class DeviceManager implements EntityManager {
       }
     }
 
-    this.applyApiPatchToDevice(existing, patch);
+    this.applyApiPatchToDevice(existing, patchForApply);
     this.saveDevice(existing);
     return existing;
   }
