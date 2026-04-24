@@ -33,6 +33,10 @@ export function createDeviceRouter(deps: ServerDeps) {
   });
 
   router.put("/:deviceId", async (req, res) => {
+    logger.error({ deviceId: req.params.deviceId, body: req.body }, "updateDeviceSettings");
+    console.log(req.body);
+    console.log(req.params.deviceId);
+    
     const patch = req.body as Record<string, unknown>;
     try {
       const device = await deps.deviceManager.updateDeviceSettings(req.params.deviceId, patch);

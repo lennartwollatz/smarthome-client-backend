@@ -158,7 +158,7 @@ export class DeviceManager implements EntityManager {
 
     const patchForApply: Record<string, unknown> = { ...patch };
 
-    if ("temperatureGoal" in patch) {
+    if ("temperatureGoal" in patchForApply) {
       console.log(patchForApply);
       delete patchForApply["temperatureGoal"];
       console.log(patchForApply);
