@@ -47,6 +47,29 @@ const VA_PRODUCT_ID = 0x8006;
 /** Virtueller Matter-Schalter (Server auf diesem Rechner), Modul-ID wie gekoppelte Matter-Geräte: {@link MATTERCONFIG.id} */
 const MATTER_HOST_BASE_PORT = 5700;
 const MATTER_HOST_PRODUCT_ID = 0x8007;
+const MATTER_ID_MAX = 0xfffe;
+
+function sanitizeMatterId16(value: number, label: string): number {
+  const parsed = Number(value);
+  const intValue = Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+  const clamped = Math.max(0, Math.min(MATTER_ID_MAX, intValue));
+  if (clamped !== intValue) {
+    logger.warn(
+      { label, raw: value, sanitized: clamped, max: MATTER_ID_MAX },
+      "Matter-ID außerhalb Bereich 0..0xFFFE; Wert wurde begrenzt"
+    );
+  }
+  return clamped;
+}
+
+const PRESENCE_VENDOR_ID_SAFE = sanitizeMatterId16(PRESENCE_VENDOR_ID, "PRESENCE_VENDOR_ID");
+const PRESENCE_PRODUCT_ID_SAFE = sanitizeMatterId16(PRESENCE_PRODUCT_ID, "PRESENCE_PRODUCT_ID");
+const VA_VENDOR_ID_SAFE = sanitizeMatterId16(VA_VENDOR_ID, "VA_VENDOR_ID");
+const VA_PRODUCT_ID_SAFE = sanitizeMatterId16(VA_PRODUCT_ID, "VA_PRODUCT_ID");
+const MATTER_HOST_PRODUCT_ID_SAFE = sanitizeMatterId16(
+  MATTER_HOST_PRODUCT_ID,
+  "MATTER_HOST_PRODUCT_ID"
+);
 
 const OnOffPlugInWithUserLabel = OnOffPlugInUnitDevice.with(UserLabelServer);
 
@@ -631,11 +654,11 @@ export class MatterVirtualDeviceManager {
       },
       basicInformation: {
         vendorName: "SmartHome",
-        vendorId: VendorId(PRESENCE_VENDOR_ID),
+        vendorId: VendorId(PRESENCE_VENDOR_ID_SAFE),
         nodeLabel: label,
         productName: label,
         productLabel: label,
-        productId: PRESENCE_PRODUCT_ID,
+        productId: PRESENCE_PRODUCT_ID_SAFE,
         serialNumber: matterSerial,
         uniqueId: matterUniqueId,
       },
@@ -723,8 +746,8 @@ export class MatterVirtualDeviceManager {
     return QrPairingCodeCodec.encode([
       {
         version: 0,
-        vendorId: VendorId(VA_VENDOR_ID),
-        productId: VA_PRODUCT_ID,
+        vendorId: VendorId(VA_VENDOR_ID_SAFE),
+        productId: VA_PRODUCT_ID_SAFE,
         flowType: CommissioningFlowType.Standard,
         discriminator,
         passcode,
@@ -737,8 +760,8 @@ export class MatterVirtualDeviceManager {
     return QrPairingCodeCodec.encode([
       {
         version: 0,
-        vendorId: VendorId(VA_VENDOR_ID),
-        productId: MATTER_HOST_PRODUCT_ID,
+        vendorId: VendorId(VA_VENDOR_ID_SAFE),
+        productId: MATTER_HOST_PRODUCT_ID_SAFE,
         flowType: CommissioningFlowType.Standard,
         discriminator,
         passcode,
@@ -875,11 +898,11 @@ export class MatterVirtualDeviceManager {
       },
       basicInformation: {
         vendorName: "SmartHome",
-        vendorId: VendorId(VA_VENDOR_ID),
+        vendorId: VendorId(VA_VENDOR_ID_SAFE),
         nodeLabel: nodeDisplayName,
         productName: nodeDisplayName,
         productLabel: nodeDisplayName,
-        productId: MATTER_HOST_PRODUCT_ID,
+        productId: MATTER_HOST_PRODUCT_ID_SAFE,
         serialNumber: matterSerial,
         uniqueId: matterUniqueId,
       },
@@ -1110,11 +1133,11 @@ export class MatterVirtualDeviceManager {
       },
       basicInformation: {
         vendorName: "SmartHome",
-        vendorId: VendorId(VA_VENDOR_ID),
+        vendorId: VendorId(VA_VENDOR_ID_SAFE),
         nodeLabel: nodeDisplayName,
         productName: nodeDisplayName,
         productLabel: nodeDisplayName,
-        productId: VA_PRODUCT_ID,
+        productId: VA_PRODUCT_ID_SAFE,
         serialNumber: matterSerial,
         uniqueId: matterUniqueId,
       },

@@ -27,6 +27,21 @@ const storageService = environment.get(StorageService);
 const environmentId = "1668012345678";
 const adminFabricLabel = "smarthome-backend";
 const controllerId = "controller-2";
+const MATTER_ID_MAX = 0xfffe;
+
+function sanitizeMatterIdText(value: string | undefined): string {
+  const parsed = Number(value ?? "");
+  if (!Number.isFinite(parsed)) return "0";
+  const intValue = Math.trunc(parsed);
+  const clamped = Math.max(0, Math.min(MATTER_ID_MAX, intValue));
+  if (clamped !== intValue) {
+    logger.warn(
+      { raw: value, sanitized: String(clamped), max: MATTER_ID_MAX },
+      "Matter Vendor/Product ID außerhalb Bereich 0..0xFFFE; Wert wurde begrenzt"
+    );
+  }
+  return String(clamped);
+}
 
 export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEvent, Device> {
   private commissioningController: CommissioningController | null = null;
@@ -99,7 +114,10 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
 
   private getDeviceInfo(vendorProduct: string): { vendorId: string, productId: string } {
     const [vendorId, productId] = vendorProduct.split("+");
-    return { vendorId: vendorId, productId: productId };
+    return {
+      vendorId: sanitizeMatterIdText(vendorId),
+      productId: sanitizeMatterIdText(productId),
+    };
   }
 
   async pairDevice(device: MatterDeviceDiscovered, payload: PairingPayload): Promise<MatterDeviceDiscovered | null> {
