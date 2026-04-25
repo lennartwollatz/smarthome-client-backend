@@ -23,6 +23,8 @@ from pywebostv.controls import (
     SourceControl,
     SystemControl,
     TvControl,
+    WebOSControlBase,
+    standard_validation,
 )
 from pywebostv.model import Application
 
@@ -35,6 +37,26 @@ CONTROL_MAP = {
     "system": SystemControl,
     "tv": TvControl,
 }
+
+# Default-Timeout für die meisten Calls (pywebostv-Default ist 60s).
+DEFAULT_REQUEST_TIMEOUT = 60
+
+# Bestimmte WebOS-APIs antworten unter Last häufig erst spät oder mit serverseitigem
+# „Timeout.“ — vor allem die App-Liste. Wir geben diesen Calls deutlich mehr Zeit
+# und versuchen sie bei „Timeout.“ ein paar Mal erneut.
+SLOW_CALL_TIMEOUTS = {
+    "application.list_apps": 90,
+    "tv.channel_list": 75,
+}
+
+# Anzahl Retries bei serverseitigem WebOS-Timeout („Timeout.“ als errorText).
+SLOW_CALL_RETRIES = {
+    "application.list_apps": 2,
+    "tv.channel_list": 2,
+}
+
+# Pause zwischen Retries bei serverseitigem Timeout.
+SLOW_CALL_RETRY_DELAY_S = 2.0
 
 
 def _serialize_value(value):
@@ -101,6 +123,90 @@ def _should_retry_connection_after_delay(message: str) -> bool:
     return "500" in message
 
 
+def _is_webos_timeout(exc: BaseException) -> bool:
+    """WebOS antwortet bei langsamen Calls (z. B. listApps) oft mit errorText='Timeout.'.
+    Das ist kein Verbindungsproblem, sondern serverseitig – ein erneuter Versuch klappt häufig.
+    """
+    msg = str(exc).strip().lower().rstrip(".")
+    return msg == "timeout"
+
+
+def _list_launch_points(client, timeout):
+    """Robuste Alternative zu ``ApplicationControl.list_apps``.
+
+    ``ssap://com.webos.applicationManager/listLaunchPoints`` listet die installierten
+    Apps inkl. Icons und liefert deutlich verlässlicher als ``listApps`` Daten zurück
+    (``listApps`` neigt unter Last zu serverseitigem ``Timeout.``).
+    """
+    base = WebOSControlBase(client)
+    res = base.request(
+        "ssap://com.webos.applicationManager/listLaunchPoints",
+        None,
+        block=True,
+        timeout=timeout,
+    )
+    if res.get("type") == "error":
+        raise IOError(res.get("error", "Unknown Communication Error"))
+    payload = res.get("payload") or {}
+    status, message = standard_validation(dict(payload))
+    if not status:
+        raise IOError(message)
+    launch_points = payload.get("launchPoints") or []
+    apps = []
+    for lp in launch_points:
+        if not isinstance(lp, dict):
+            continue
+        # Felder analog zu list_apps (id/title/icon) damit das TS-Backend keine
+        # Sonderbehandlung braucht. ``id`` fällt auf ``launchPointId``/``appId`` zurück.
+        app_id = lp.get("id") or lp.get("appId") or lp.get("launchPointId")
+        if not app_id:
+            continue
+        apps.append({
+            "id": app_id,
+            "title": lp.get("title") or lp.get("name") or app_id,
+            "icon": lp.get("icon") or lp.get("largeIcon") or lp.get("mediumIcon"),
+        })
+    return apps
+
+
+def _list_apps_with_fallback(client, timeout, retries):
+    """Versucht zuerst ``listLaunchPoints`` (schnell/robust). Bei serverseitigem
+    ``Timeout.`` mehrere Versuche; als letzter Fallback ``ApplicationControl.list_apps``.
+    """
+    last_exc = None
+    for attempt in range(max(retries, 0) + 1):
+        if attempt > 0:
+            time.sleep(SLOW_CALL_RETRY_DELAY_S)
+        try:
+            return _list_launch_points(client, timeout)
+        except Exception as exc:
+            last_exc = exc
+            if not _is_webos_timeout(exc):
+                break
+    try:
+        return ApplicationControl(client).list_apps(timeout=timeout)
+    except Exception:
+        if last_exc is not None:
+            raise last_exc
+        raise
+
+
+def _channel_list_with_retry(client, timeout, retries):
+    """Ruft ``tv.channel_list`` auf und retried bei serverseitigem ``Timeout.``."""
+    last_exc = None
+    for attempt in range(max(retries, 0) + 1):
+        if attempt > 0:
+            time.sleep(SLOW_CALL_RETRY_DELAY_S)
+        try:
+            return TvControl(client).channel_list(timeout=timeout)
+        except Exception as exc:
+            last_exc = exc
+            if not _is_webos_timeout(exc):
+                raise
+    assert last_exc is not None
+    raise last_exc
+
+
 def _call_event(client, event, params):
     if "." not in event:
         raise ValueError("event must be in format '<control>.<method>'")
@@ -108,6 +214,15 @@ def _call_event(client, event, params):
     control_name, method_name = event.split(".", 1)
     control_name = control_name.strip().lower()
     method_name = method_name.strip()
+
+    canonical_event = f"{control_name}.{method_name}"
+    timeout = SLOW_CALL_TIMEOUTS.get(canonical_event, DEFAULT_REQUEST_TIMEOUT)
+    retries = SLOW_CALL_RETRIES.get(canonical_event, 0)
+
+    if canonical_event == "application.list_apps" and params is None:
+        return _list_apps_with_fallback(client, timeout, retries)
+    if canonical_event == "tv.channel_list" and params is None:
+        return _channel_list_with_retry(client, timeout, retries)
 
     control_cls = CONTROL_MAP.get(control_name)
     if control_cls is None:
@@ -118,24 +233,29 @@ def _call_event(client, event, params):
     if method is None or not callable(method):
         raise ValueError(f"unknown method '{method_name}' for control '{control_name}'")
 
+    extra_kwargs = {}
+    if timeout != DEFAULT_REQUEST_TIMEOUT:
+        # pywebostv akzeptiert ``timeout`` für blockierende Calls (siehe controls.exec_command).
+        extra_kwargs["timeout"] = timeout
+
     if params is None:
-        return method()
+        return method(**extra_kwargs)
     if isinstance(params, list):
         if method_name == "launch" and len(params) > 0:
             params = list(params)
             params[0] = Application({"id": params[0]})
-        return method(*params)
+        return method(*params, **extra_kwargs)
     if isinstance(params, dict):
         if method_name == "notify" and "message" in params:
-            return method(params["message"])
+            return method(params["message"], **extra_kwargs)
         if method_name == "launch" and "id" in params:
             params = dict(params)
             app_id = params.pop("id")
-            return method(Application({"id": app_id}), **params)
-        return method(**params)
+            return method(Application({"id": app_id}), **{**params, **extra_kwargs})
+        return method(**{**params, **extra_kwargs})
     if method_name == "launch":
-        return method(Application({"id": params}))
-    return method(params)
+        return method(Application({"id": params}), **extra_kwargs)
+    return method(params, **extra_kwargs)
 
 
 def main():
