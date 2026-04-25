@@ -2,7 +2,6 @@ import { Router } from "express";
 import { logger } from "../../../../logger.js";
 import type { ServerDeps } from "../../server.js";
 import { MatterModuleManager } from "../../modules/matter/matterModuleManager.js";
-import type { MatterDeviceBoolConfig } from "../../modules/matter/matterDeviceBoolTypes.js";
 
 export function createMatterModuleRouter(deps: ServerDeps) {
   const router = Router();
@@ -16,49 +15,6 @@ export function createMatterModuleRouter(deps: ServerDeps) {
     } catch (error) {
       logger.error({ error }, "Fehler beim Discover von Matter-Geraeten");
       res.status(500).json({ error: "Fehler beim Discover von Matter-Geraeten" });
-    }
-  });
-
-  /** GET/PUT Bool-Zuordnungen (Matter-Endpoint → Quellgerät read/write). */
-  router.get("/devices/:deviceId/bool-mappings", (req, res) => {
-    try {
-      const id = req.params.deviceId;
-      const bridge = matterModule.getMatterDeviceBoolBridge();
-      const c = bridge.findByMatterId(id);
-      res.status(200).json(
-        c ?? { matterDeviceId: id, slots: [] } satisfies MatterDeviceBoolConfig
-      );
-    } catch (error) {
-      logger.error({ error }, "Matter bool-mappings GET");
-      res.status(500).json({ error: "Serverfehler" });
-    }
-  });
-
-  router.put("/devices/:deviceId/bool-mappings", async (req, res) => {
-    try {
-      const id = req.params.deviceId;
-      const body = req.body as { slots?: MatterDeviceBoolConfig["slots"] };
-      const cfg: MatterDeviceBoolConfig = { matterDeviceId: id, slots: body?.slots ?? [] };
-      if (String(cfg.matterDeviceId) !== id) {
-        res.status(400).json({ success: false, error: "matterDeviceId muss der URL entprechen" });
-        return;
-      }
-      await matterModule.getMatterDeviceBoolBridge().putConfigAndRestart(cfg);
-      res.status(200).json({ success: true, config: matterModule.getMatterDeviceBoolBridge().findByMatterId(id) });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "Ungueltige Konfiguration";
-      logger.error({ error }, "Matter bool-mappings PUT");
-      res.status(400).json({ success: false, error: msg });
-    }
-  });
-
-  router.delete("/devices/:deviceId/bool-mappings", async (req, res) => {
-    try {
-      await matterModule.getMatterDeviceBoolBridge().removeConfig(req.params.deviceId);
-      res.status(200).json({ success: true });
-    } catch (error) {
-      logger.error({ error }, "Matter bool-mappings DELETE");
-      res.status(500).json({ success: false, error: "Serverfehler" });
     }
   });
 
@@ -171,6 +127,41 @@ export function createMatterModuleRouter(deps: ServerDeps) {
     } catch (error) {
       logger.error({ error }, "Fehler beim Setzen der Temperatur-Schedules eines Matter-Thermostats");
       res.status(400).json({ error: "Invalid request" });
+    }
+  });
+
+  /** Virtueller Matter-Switch (VA/Host): Zuordnung zu Zielgerät true/false-Action */
+  router.get("/switch-target-binding/:matterDeviceId", (req, res) => {
+    try {
+      const b = matterModule.getMatterSwitchBinding(req.params.matterDeviceId);
+      res.status(200).json(b ?? null);
+    } catch (error) {
+      logger.error({ error }, "switch-target-binding GET");
+      res.status(500).json({ error: "Fehler beim Lesen der Zuordnung" });
+    }
+  });
+
+  router.put("/switch-target-binding", (req, res) => {
+    try {
+      const result = matterModule.saveMatterSwitchTargetBinding(req.body ?? {});
+      if (!result.success) {
+        res.status(400).json(result);
+        return;
+      }
+      res.status(200).json(result);
+    } catch (error) {
+      logger.error({ error }, "switch-target-binding PUT");
+      res.status(500).json({ error: "Fehler beim Speichern der Zuordnung" });
+    }
+  });
+
+  router.delete("/switch-target-binding/:matterDeviceId", (req, res) => {
+    try {
+      const ok = matterModule.removeMatterSwitchTargetBinding(req.params.matterDeviceId);
+      res.status(ok ? 200 : 404).json({ success: ok });
+    } catch (error) {
+      logger.error({ error }, "switch-target-binding DELETE");
+      res.status(500).json({ error: "Fehler beim Löschen der Zuordnung" });
     }
   });
 

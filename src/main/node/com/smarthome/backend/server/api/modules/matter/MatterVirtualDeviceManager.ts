@@ -33,8 +33,6 @@ import { VoiceAssistantTrigger } from "../../entities/actions/action/VoiceAssist
 import type { User } from "../../entities/users/User.js";
 import { UserManager } from "../../entities/users/userManager.js";
 import { MATTERCONFIG } from "./matterModule.js";
-import type { IMatterDeviceEndpointOps } from "./matterDeviceEndpointOps.js";
-import type { MatterDeviceBoolBridge } from "./MatterDeviceBoolBridge.js";
 
 const PRESENCE_MODULE_ID = "presence";
 const PRESENCE_BASE_PORT = 5550;
@@ -151,7 +149,7 @@ function snapshotDevice(device: Device): Device {
   return JSON.parse(JSON.stringify(device)) as Device;
 }
 
-export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
+export class MatterVirtualDeviceManager {
   private presenceServers = new Map<string, PresenceServerInfo>();
   private vaServers = new Map<string, VoiceAssistantServerInfo>();
   private matterHostServers = new Map<string, MatterHostServerInfo>();
@@ -160,8 +158,13 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
   private matterHostRepository: JsonRepository<MatterHostSwitchDeviceStored> | null = null;
   private eventManager: EventManager | null = null;
   private matterPulseSuppress = new Set<string>();
-  private matterDeviceBoolBridge: MatterDeviceBoolBridge | null = null;
-  private programmaticEndpointSuppress = new Set<string>();
+  /**
+   * Programmatisches Setzen des Matter-Endpoints (Ziel-Device → Spiegelung), damit
+   * kein Voice-Trigger und keine doppelte Binding-Action feuert.
+   */
+  private vaMatterStateSuppress = new Set<string>();
+  private hostMatterStateSuppress = new Set<string>();
+  private matterUserToggleFromHub?: (matterDeviceId: string, buttonId: string, isOn: boolean) => void;
   /**
    * In-Memory Reservierung von Matter-Ports zwischen `allocatePort()` und dem späteren
    * Eintrag in eine der Server-Maps (`presenceServers` / `vaServers` / `matterHostServers`).
@@ -183,94 +186,12 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
       "MatterHostSwitchDevice"
     );
     this.eventManager = eventManager;
-  }
-
-  public setMatterDeviceBoolBridge(bridge: MatterDeviceBoolBridge | null): void {
-    this.matterDeviceBoolBridge = bridge;
-  }
-
-  /**
-   * Muss von {@link MatterModuleManager} aufgerufen werden, nachdem der Bool-Bridge gesetzt wurde,
-   * damit Wiederherstellung Zusatz-Endpunkte (Bool-Mappings) mitlädt.
-   */
-  public startInitialize(): void {
     void this.initialize().catch(err => {
-      logger.error({ err }, "MatterVirtualDeviceManager: Wiederherstellung der virtuellen Geraete fehlgeschlagen");
+    logger.error({ err }, "MatterVirtualDeviceManager: Wiederherstellung der virtuellen Geraete fehlgeschlagen");
     });
   }
 
-  private endpointProgrammaticKey(deviceId: string, buttonId: string): string {
-    return `${deviceId}:${buttonId}`;
-  }
 
-  private markProgrammaticEndpoint(deviceId: string, buttonId: string): void {
-    this.programmaticEndpointSuppress.add(this.endpointProgrammaticKey(deviceId, buttonId));
-  }
-
-  private consumeProgrammaticEndpoint(deviceId: string, buttonId: string): boolean {
-    const k = this.endpointProgrammaticKey(deviceId, buttonId);
-    if (this.programmaticEndpointSuppress.has(k)) {
-      this.programmaticEndpointSuppress.delete(k);
-      return true;
-    }
-    return false;
-  }
-
-  private mergeVaButtonIds(data: VoiceAssistantDeviceData): string[] {
-    const base = voiceAssistantActionToButtonIds(data.actionType);
-    const extra = this.matterDeviceBoolBridge?.getExtraSlotIdsForMatterDevice(data.deviceId) ?? [];
-    return [...new Set([...base, ...extra])].sort();
-  }
-
-  private mergeHostButtonIds(deviceId: string): string[] {
-    const extra = this.matterDeviceBoolBridge?.getExtraSlotIdsForMatterDevice(deviceId) ?? [];
-    return [...new Set([VA_MATTER_BTN_ONOFF, ...extra])].sort();
-  }
-
-  public async setVirtualMatterEndpointState(matterDeviceId: string, buttonId: string, on: boolean): Promise<boolean> {
-    if (this.vaServers.has(matterDeviceId)) {
-      return this.vaSwitchSetEndpointState(matterDeviceId, buttonId, on);
-    }
-    if (this.matterHostServers.has(matterDeviceId)) {
-      return this.hostSwitchSetEndpointState(matterDeviceId, buttonId, on);
-    }
-    return false;
-  }
-
-  public async restartVirtualMatterByDeviceId(matterDeviceId: string): Promise<void> {
-    if (this.deviceDataMap.has(matterDeviceId)) {
-      const info = this.vaServers.get(matterDeviceId);
-      if (info) {
-        try {
-          await info.server.close();
-        } catch (err) {
-          logger.error({ err, matterDeviceId }, "VA-Server schliessen fuer Restart fehlgeschlagen");
-        }
-        this.vaServers.delete(matterDeviceId);
-      }
-      const data = this.deviceDataMap.get(matterDeviceId);
-      if (data) {
-        await this.startVaServer(data);
-      }
-      return;
-    }
-    const hostRow = this.matterHostRepository?.findById(matterDeviceId);
-    if (hostRow) {
-      const hostInfo = this.matterHostServers.get(matterDeviceId);
-      if (hostInfo) {
-        try {
-          await hostInfo.server.close();
-        } catch (err) {
-          logger.error({ err, matterDeviceId }, "Matter-Host-Server schliessen fuer Restart fehlgeschlagen");
-        }
-        this.matterHostServers.delete(matterDeviceId);
-      }
-      const full = this.storedRowToMatterHostData(hostRow);
-      if (full) {
-        await this.startMatterHostServer(full);
-      }
-    }
-  }
 
   /**
    * Startet alle persistierten Presence- und Voice-Assistant-Matter-Server mit gespeichertem Port
@@ -315,8 +236,6 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
         logger.error({ err, deviceId: data.deviceId }, "Matter-Host-Schalter: Wiederherstellung fehlgeschlagen");
       }
     }
-
-    this.matterDeviceBoolBridge?.startAfterVirtualDeviceLayer();
   }
 
   private userHasPersistedPresence(user: User): boolean {
@@ -423,7 +342,6 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
       this.deviceManager.saveDevice(existing);
     }
 
-    this.matterDeviceBoolBridge?.ensureButtonsForMatterFromStoredConfig(data.deviceId);
     await this.startVaServer(data);
   }
 
@@ -515,7 +433,6 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
       }
       this.deviceDataMap.delete(deviceId);
       this.persistRepository?.deleteById(deviceId);
-      this.matterDeviceBoolBridge?.deleteStoredConfig(deviceId);
       this.deviceManager.removeDevice(deviceId);
       await this.eraseVaMatterPersistence(deviceId);
       return true;
@@ -599,7 +516,6 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
       this.matterHostServers.delete(deviceId);
     }
     this.matterHostRepository?.deleteById(deviceId);
-    this.matterDeviceBoolBridge?.deleteStoredConfig(deviceId);
     await this.eraseMatterHostPersistence(deviceId);
     return true;
   }
@@ -609,7 +525,6 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
     if (!info) return false;
     const ep = info.endpoints[buttonId];
     if (!ep) return false;
-    this.markProgrammaticEndpoint(deviceId, buttonId);
     try {
       await ep.act(`matter-host-set-${buttonId}-${on}`, agent => {
         if (on) {
@@ -619,19 +534,20 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
         }
       });
     } catch (err) {
-      this.programmaticEndpointSuppress.delete(this.endpointProgrammaticKey(deviceId, buttonId));
       logger.error({ err, deviceId, buttonId, on }, "Matter-Host: Endpoint-Zustand setzen fehlgeschlagen");
       return false;
     }
     return true;
   }
 
+  /**
+   * Voice-Assistant-Matter-Server: On/Off am Endpoint setzen (z. B. Spiegelung vom Zielgerät).
+   */
   async vaSwitchSetEndpointState(deviceId: string, buttonId: string, on: boolean): Promise<boolean> {
     const info = this.vaServers.get(deviceId);
     if (!info) return false;
     const ep = info.endpoints[buttonId];
     if (!ep) return false;
-    this.markProgrammaticEndpoint(deviceId, buttonId);
     try {
       await ep.act(`va-set-${buttonId}-${on}`, agent => {
         if (on) {
@@ -641,11 +557,38 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
         }
       });
     } catch (err) {
-      this.programmaticEndpointSuppress.delete(this.endpointProgrammaticKey(deviceId, buttonId));
-      logger.error({ err, deviceId, buttonId, on }, "Voice-Assistant: Endpoint-Zustand setzen fehlgeschlagen");
+      logger.error({ err, deviceId, buttonId, on }, "Voice-Assistant Matter: Endpoint setzen fehlgeschlagen");
       return false;
     }
     return true;
+  }
+
+  setMatterUserToggleHandler(handler: ((matterDeviceId: string, buttonId: string, isOn: boolean) => void) | undefined): void {
+    this.matterUserToggleFromHub = handler;
+  }
+
+  /**
+   * Matter-Endpoint programmatisch setzen (Suppress: kein Workflow-Trigger / keine Doppel-Aktion).
+   */
+  async setMatterEndpointProgrammatically(deviceId: string, buttonId: string, on: boolean): Promise<boolean> {
+    const pk = this.pulseKey(deviceId, buttonId);
+    if (this.vaServers.has(deviceId)) {
+      this.vaMatterStateSuppress.add(pk);
+      const ok = await this.vaSwitchSetEndpointState(deviceId, buttonId, on);
+      if (!ok) {
+        this.vaMatterStateSuppress.delete(pk);
+      }
+      return ok;
+    }
+    if (this.matterHostServers.has(deviceId)) {
+      this.hostMatterStateSuppress.add(pk);
+      const ok = await this.hostSwitchSetEndpointState(deviceId, buttonId, on);
+      if (!ok) {
+        this.hostMatterStateSuppress.delete(pk);
+      }
+      return ok;
+    }
+    return false;
   }
 
   /**
@@ -1065,7 +1008,6 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
       this.applyMatterHostPairingFields(device, data);
       this.deviceManager.saveDevice(device);
     }
-    this.matterDeviceBoolBridge?.ensureButtonsForMatterFromStoredConfig(data.deviceId);
     await this.startMatterHostServer(data);
   }
 
@@ -1101,62 +1043,43 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
     });
 
     const endpoints: Record<string, Endpoint> = {};
-    const hostButtonIds = this.mergeHostButtonIds(data.deviceId);
-    for (const bid of hostButtonIds) {
-      const labelFromBool = this.matterDeviceBoolBridge
-        ?.findByMatterId(data.deviceId)
-        ?.slots?.find(s => s.slotId === bid)?.label?.trim();
-      const endpointLabel = this.truncateMatterUserLabelValue(
-        labelFromBool ||
-          (bid === VA_MATTER_BTN_ONOFF
-            ? `${this.resolveMatterHostDisplayName(data)} · An/Aus`
-            : bid)
-      );
-      const ep = new Endpoint(
-        OnOffPlugInWithUserLabel.set({
-          userLabel: {
-            labelList: [{ label: "name", value: endpointLabel }],
-          },
-        }),
-        { id: bid }
-      );
-      await server.add(ep);
-      endpoints[bid] = ep;
-    }
+    const bid = VA_MATTER_BTN_ONOFF;
+    const endpointLabel = this.truncateMatterUserLabelValue(
+      `${this.resolveMatterHostDisplayName(data)} · An/Aus`
+    );
+    const ep = new Endpoint(
+      OnOffPlugInWithUserLabel.set({
+        userLabel: {
+          labelList: [{ label: "name", value: endpointLabel }],
+        },
+      }),
+      { id: bid }
+    );
+    await server.add(ep);
+    endpoints[bid] = ep;
 
     const deviceId = data.deviceId;
-    for (const bid of hostButtonIds) {
-      const ep = endpoints[bid]!;
-      const ev = ep.events as {
-        onOff: { onOff$Changed: { on: (fn: (isOn: boolean, wasOn?: boolean) => void) => void } };
-      };
-      if (bid === VA_MATTER_BTN_ONOFF) {
-        ev.onOff.onOff$Changed.on((isOn: boolean) => runWithSource(EventSource.VOICE, () => {
-          if (this.consumeProgrammaticEndpoint(deviceId, bid)) {
-            this.updateMatterHostButtons(deviceId, { [bid]: isOn });
-            return;
-          }
-          this.updateMatterHostButtons(deviceId, { [bid]: isOn });
-          const d = this.deviceManager.getDevice(deviceId);
-          if (!d) return;
-          const snap = snapshotDevice(d);
-          if (isOn) {
-            void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, bid));
-          } else {
-            void this.eventManager!.triggerEvent(new EventSwitchButtonOff(deviceId, snap, bid));
-          }
-        }));
-        continue;
-      }
-      ev.onOff.onOff$Changed.on((isOn: boolean) => {
-        if (this.consumeProgrammaticEndpoint(deviceId, bid)) {
-          this.updateMatterHostButtons(deviceId, { [bid]: isOn });
-          return;
-        }
+    const ev = ep.events as {
+      onOff: { onOff$Changed: { on: (fn: (isOn: boolean, wasOn?: boolean) => void) => void } };
+    };
+    ev.onOff.onOff$Changed.on((isOn: boolean) => runWithSource(EventSource.VOICE, () => {
+      const pk = this.pulseKey(deviceId, bid);
+      if (this.hostMatterStateSuppress.has(pk)) {
+        this.hostMatterStateSuppress.delete(pk);
         this.updateMatterHostButtons(deviceId, { [bid]: isOn });
-        void this.matterDeviceBoolBridge?.onMatterUserToggledManagedSlot(deviceId, bid, isOn);
-      });
-    }
+        return;
+      }
+      this.updateMatterHostButtons(deviceId, { [bid]: isOn });
+      void this.matterUserToggleFromHub?.(deviceId, bid, isOn);
+      const d = this.deviceManager.getDevice(deviceId);
+      if (!d) return;
+      const snap = snapshotDevice(d);
+      if (isOn) {
+        void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, bid));
+      } else {
+        void this.eventManager!.triggerEvent(new EventSwitchButtonOff(deviceId, snap, bid));
+      }
+    }));
 
     server.run().catch(err => {
       logger.error({ err, deviceId }, "Matter-Host-Server beendet mit Fehler");
@@ -1290,12 +1213,6 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
   }
 
   private resolveVaEndpointDisplayName(data: VoiceAssistantDeviceData, buttonId: string): string {
-    const fromCfg = this.matterDeviceBoolBridge
-      ?.findByMatterId(data.deviceId)
-      ?.slots?.find(s => s.slotId === buttonId)?.label?.trim();
-    if (fromCfg) {
-      return this.truncateMatterUserLabelValue(fromCfg);
-    }
     const dev = this.deviceManager.getDevice(data.deviceId) as MatterSwitch | null;
     const fromButton = dev?.getButton(buttonId)?.name?.trim();
     if (fromButton) return fromButton;
@@ -1367,8 +1284,7 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
     });
 
     const endpoints: Record<string, Endpoint> = {};
-    const buttonIds = this.mergeVaButtonIds(data);
-    const isMedia = voiceAssistantActionToButtonIds(data.actionType).length > 1;
+    const buttonIds = voiceAssistantActionToButtonIds(data.actionType);
     for (const bid of buttonIds) {
       const endpointLabel = this.truncateMatterUserLabelValue(this.resolveVaEndpointDisplayName(data, bid));
       const ep = new Endpoint(
@@ -1392,78 +1308,80 @@ export class MatterVirtualDeviceManager implements IMatterDeviceEndpointOps {
       ev.onOff.onOff$Changed.on(handler);
     };
 
-    const fireVaOnoffWorkflow = (btn: string, isOn: boolean) => {
-      this.updateVaButtons(deviceId, { [btn]: isOn });
-      const d = this.deviceManager.getDevice(deviceId);
-      if (!d) return;
-      const snap = snapshotDevice(d);
-      if (isOn) {
-        void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, btn));
-      } else {
-        void this.eventManager!.triggerEvent(new EventSwitchButtonOff(deviceId, snap, btn));
-      }
-    };
-
-    for (const bid of buttonIds) {
-      const ep = endpoints[bid]!;
-      if (bid === VA_MATTER_BTN_PAUSE && isMedia) {
-        bindOnOff(ep, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
-          const pk = this.pulseKey(deviceId, VA_MATTER_BTN_PAUSE);
-          if (!isOn) {
-            if (this.matterPulseSuppress.has(pk)) {
-              this.matterPulseSuppress.delete(pk);
-              this.updateVaButtons(deviceId, { [VA_MATTER_BTN_PAUSE]: false });
-            }
-            return;
-          }
-          this.updateVaButtons(deviceId, { [VA_MATTER_BTN_PAUSE]: true });
-          const d = this.deviceManager.getDevice(deviceId);
-          if (!d) return;
-          const snap = snapshotDevice(d);
-          void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, VA_MATTER_BTN_PAUSE));
-          this.scheduleMomentaryOff(ep, deviceId, VA_MATTER_BTN_PAUSE);
-        }));
-        continue;
-      }
-      if (bid === VA_MATTER_BTN_CONTINUE && isMedia) {
-        bindOnOff(ep, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
-          const pk = this.pulseKey(deviceId, VA_MATTER_BTN_CONTINUE);
-          if (!isOn) {
-            if (this.matterPulseSuppress.has(pk)) {
-              this.matterPulseSuppress.delete(pk);
-              this.updateVaButtons(deviceId, { [VA_MATTER_BTN_CONTINUE]: false });
-            }
-            return;
-          }
-          this.updateVaButtons(deviceId, { [VA_MATTER_BTN_CONTINUE]: true });
-          const d = this.deviceManager.getDevice(deviceId);
-          if (!d) return;
-          const snap = snapshotDevice(d);
-          void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, VA_MATTER_BTN_CONTINUE));
-          this.scheduleMomentaryOff(ep, deviceId, VA_MATTER_BTN_CONTINUE);
-        }));
-        continue;
-      }
-      if (bid === VA_MATTER_BTN_ONOFF) {
-        bindOnOff(ep, (isOn: boolean) => {
-          if (this.consumeProgrammaticEndpoint(deviceId, bid)) {
-            this.updateVaButtons(deviceId, { [VA_MATTER_BTN_ONOFF]: isOn });
-            return;
-          }
-          runWithSource(EventSource.VOICE, () => {
-            fireVaOnoffWorkflow(VA_MATTER_BTN_ONOFF, isOn);
-          });
-        });
-        continue;
-      }
-      bindOnOff(ep, (isOn: boolean) => {
-        if (this.consumeProgrammaticEndpoint(deviceId, bid)) {
-          this.updateVaButtons(deviceId, { [bid]: isOn });
+    if (buttonIds.length === 1) {
+      const epOnoff = endpoints[VA_MATTER_BTN_ONOFF]!;
+      bindOnOff(epOnoff, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
+        const pk = this.pulseKey(deviceId, VA_MATTER_BTN_ONOFF);
+        if (this.vaMatterStateSuppress.has(pk)) {
+          this.vaMatterStateSuppress.delete(pk);
+          this.updateVaButtons(deviceId, { [VA_MATTER_BTN_ONOFF]: isOn });
           return;
         }
-        this.updateVaButtons(deviceId, { [bid]: isOn });
-        void this.matterDeviceBoolBridge?.onMatterUserToggledManagedSlot(deviceId, bid, isOn);
-      });
+        this.updateVaButtons(deviceId, { [VA_MATTER_BTN_ONOFF]: isOn });
+        void this.matterUserToggleFromHub?.(deviceId, VA_MATTER_BTN_ONOFF, isOn);
+        const d = this.deviceManager.getDevice(deviceId);
+        if (!d) return;
+        const snap = snapshotDevice(d);
+        if (isOn) {
+          void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, VA_MATTER_BTN_ONOFF));
+        } else {
+          void this.eventManager!.triggerEvent(new EventSwitchButtonOff(deviceId, snap, VA_MATTER_BTN_ONOFF));
+        }
+      }));
+    } else {
+      const epOnoff = endpoints[VA_MATTER_BTN_ONOFF]!;
+      const epPause = endpoints[VA_MATTER_BTN_PAUSE]!;
+      const epContinue = endpoints[VA_MATTER_BTN_CONTINUE]!;
+      bindOnOff(epOnoff, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
+        const pk = this.pulseKey(deviceId, VA_MATTER_BTN_ONOFF);
+        if (this.vaMatterStateSuppress.has(pk)) {
+          this.vaMatterStateSuppress.delete(pk);
+          this.updateVaButtons(deviceId, { [VA_MATTER_BTN_ONOFF]: isOn });
+          return;
+        }
+        this.updateVaButtons(deviceId, { [VA_MATTER_BTN_ONOFF]: isOn });
+        void this.matterUserToggleFromHub?.(deviceId, VA_MATTER_BTN_ONOFF, isOn);
+        const d = this.deviceManager.getDevice(deviceId);
+        if (!d) return;
+        const snap = snapshotDevice(d);
+        if (isOn) {
+          void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, VA_MATTER_BTN_ONOFF));
+        } else {
+          void this.eventManager!.triggerEvent(new EventSwitchButtonOff(deviceId, snap, VA_MATTER_BTN_ONOFF));
+        }
+      }));
+      bindOnOff(epPause, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
+        const pk = this.pulseKey(deviceId, VA_MATTER_BTN_PAUSE);
+        if (!isOn) {
+          if (this.matterPulseSuppress.has(pk)) {
+            this.matterPulseSuppress.delete(pk);
+            this.updateVaButtons(deviceId, { [VA_MATTER_BTN_PAUSE]: false });
+          }
+          return;
+        }
+        this.updateVaButtons(deviceId, { [VA_MATTER_BTN_PAUSE]: true });
+        const d = this.deviceManager.getDevice(deviceId);
+        if (!d) return;
+        const snap = snapshotDevice(d);
+        void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, VA_MATTER_BTN_PAUSE));
+        this.scheduleMomentaryOff(epPause, deviceId, VA_MATTER_BTN_PAUSE);
+      }));
+      bindOnOff(epContinue, (isOn: boolean) => runWithSource(EventSource.VOICE, () => {
+        const pk = this.pulseKey(deviceId, VA_MATTER_BTN_CONTINUE);
+        if (!isOn) {
+          if (this.matterPulseSuppress.has(pk)) {
+            this.matterPulseSuppress.delete(pk);
+            this.updateVaButtons(deviceId, { [VA_MATTER_BTN_CONTINUE]: false });
+          }
+          return;
+        }
+        this.updateVaButtons(deviceId, { [VA_MATTER_BTN_CONTINUE]: true });
+        const d = this.deviceManager.getDevice(deviceId);
+        if (!d) return;
+        const snap = snapshotDevice(d);
+        void this.eventManager!.triggerEvent(new EventSwitchButtonOn(deviceId, snap, VA_MATTER_BTN_CONTINUE));
+        this.scheduleMomentaryOff(epContinue, deviceId, VA_MATTER_BTN_CONTINUE);
+      }));
     }
 
     server.run().catch(err => {

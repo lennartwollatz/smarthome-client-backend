@@ -18,11 +18,13 @@ import { MatterThermostat } from "./devices/matterThermostat.js";
 import { EventManager } from "../../../events/EventManager.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { MatterVirtualDeviceManager } from "./MatterVirtualDeviceManager.js";
-import { MatterDeviceBoolBridge } from "./MatterDeviceBoolBridge.js";
 import { VoiceAssistantTrigger } from "../../entities/actions/action/VoiceAssistantTrigger.js";
-import { VoiceAssistantCommandAction } from "./voiceAssistantCommandMapping.js";
+import { VoiceAssistantCommandAction, VA_MATTER_BTN_ONOFF } from "./voiceAssistantCommandMapping.js";
+import type { MatterSwitchTargetBinding } from "./matterSwitchBindingTypes.js";
 import { ActionManager } from "../../entities/actions/ActionManager.js";
 import { UserManager } from "../../entities/users/userManager.js";
+import { MatterSwitchBindingManager } from "./matterSwitchBindingManager.js";
+import { setMatterSwitchTargetNotify } from "../../ports/matterSwitchBindingPort.js";
 
 function matterPairingLanIpv4(address: string | undefined): string | undefined {
   const s = (address ?? "").trim();
@@ -40,7 +42,7 @@ export type PairingPayload = {
 
 export class MatterModuleManager extends ModuleManager<MatterEventStreamManager, MatterDeviceController, MatterDeviceController, MatterEvent, Device, MatterDeviceDiscover, MatterDeviceDiscovered> {
   private virtualDeviceManager: MatterVirtualDeviceManager;
-  private matterDeviceBoolBridge: MatterDeviceBoolBridge;
+  private matterSwitchBindingManager: MatterSwitchBindingManager;
 
   constructor(
     databaseManager: DatabaseManager,
@@ -57,20 +59,19 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       new MatterDeviceDiscover(databaseManager)
     );
     this.virtualDeviceManager = new MatterVirtualDeviceManager(databaseManager, deviceManager, userManager, eventManager);
-    this.matterDeviceBoolBridge = new MatterDeviceBoolBridge(
+    this.matterSwitchBindingManager = new MatterSwitchBindingManager(
       databaseManager,
       deviceManager,
-      eventManager,
-      this.virtualDeviceManager
+      () => this.virtualDeviceManager
     );
-    this.virtualDeviceManager.setMatterDeviceBoolBridge(this.matterDeviceBoolBridge);
-    this.virtualDeviceManager.startInitialize();
+    setMatterSwitchTargetNotify((deviceId, methodName, values) => {
+      this.matterSwitchBindingManager.onTargetDeviceAction(deviceId, methodName, values);
+    });
+    this.virtualDeviceManager.setMatterUserToggleHandler((matterDeviceId, buttonId, isOn) => {
+      this.matterSwitchBindingManager.onMatterUserToggle(matterDeviceId, buttonId, isOn);
+    });
     actionManager.setMatterModuleManager(this);
     userManager.setMatterModuleManager(this);
-  }
-
-  getMatterDeviceBoolBridge(): MatterDeviceBoolBridge {
-    return this.matterDeviceBoolBridge;
   }
 
   protected createEventStreamManager(): MatterEventStreamManager {
@@ -101,6 +102,55 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
         device.setMatterController(this.deviceController);
       }
     }
+    /** VA-Geräte (Modul `voice-assistant`): Roh-JSON → {@link MatterSwitch}, Executor für On/Off-Endpunkt */
+    const VA_MODULE_ID = "voice-assistant";
+    for (const device of this.deviceManager.getDevices()) {
+      let sw: MatterSwitch | null = null;
+      if (device instanceof MatterSwitch) {
+        sw = device;
+      } else if (device.moduleId === VA_MODULE_ID && device.type === DeviceType.SWITCH) {
+        const raw = device as Device & Record<string, unknown>;
+        const buttonIds = raw.buttons ? Object.keys(raw.buttons as object) : [VA_MATTER_BTN_ONOFF];
+        const nodeId = String((raw as { nodeId?: string }).nodeId ?? "0");
+        const rebuilt = new MatterSwitch(
+          device.name,
+          device.id,
+          nodeId,
+          buttonIds,
+          { moduleId: VA_MODULE_ID, isVoiceAssistantDevice: true, quickAccess: Boolean(raw.quickAccess) }
+        );
+        Object.assign(rebuilt, raw);
+        rebuilt.rehydrateButtons();
+        this.deviceManager.saveDevice(rebuilt);
+        sw = rebuilt;
+      }
+      if (!sw) continue;
+      if (sw.isVirtualMatterHost) continue;
+      if (!sw.isVoiceAssistantDevice()) continue;
+      const id = sw.id;
+      sw.setMatterController(this.deviceController);
+      sw.setVirtualMatterHostExecutor({
+        setState: (buttonId, on) => this.virtualDeviceManager.vaSwitchSetEndpointState(id, buttonId, on),
+      });
+    }
+  }
+
+  getMatterSwitchBinding(matterDeviceId: string): MatterSwitchTargetBinding | null {
+    return this.matterSwitchBindingManager.getBinding(matterDeviceId);
+  }
+
+  getAllMatterSwitchBindings(): MatterSwitchTargetBinding[] {
+    return this.matterSwitchBindingManager.getAllBindings();
+  }
+
+  saveMatterSwitchTargetBinding(
+    body: MatterSwitchTargetBinding
+  ): { success: true; binding: MatterSwitchTargetBinding } | { success: false; error: string } {
+    return this.matterSwitchBindingManager.saveBinding(body);
+  }
+
+  removeMatterSwitchTargetBinding(matterDeviceId: string): boolean {
+    return this.matterSwitchBindingManager.deleteBinding(matterDeviceId);
   }
 
   public getModuleId(): string {

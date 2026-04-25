@@ -20,14 +20,14 @@ import { VoiceAssistantTrigger } from "./VoiceAssistantTrigger.js";
 import { TriggerConfig } from "./TriggerConfig.js";
 import {
   getDeviceMethodExact,
+  invokeDeviceMethodOnDevice,
   stripParensBase,
-  invokeDeviceActionMethodAsync,
-} from "../../../device/deviceMethodReflection.js";
+} from "../../../utils/deviceMethodInvoke.js";
+import { notifyMatterSwitchTargetDeviceAction } from "../../../ports/matterSwitchBindingPort.js";
 
 /**
  * Im Workflow angegebener Funktionsname muss 1:1 dem Prototyp des Geräts entsprechen
- * (z. B. `setPowerOn`, `isPowerOn`). Optionaler Klammerteil `foo()` wird abgeschnitten
- * (siehe {@link stripParensBase}).
+ * (z. B. `setPowerOn`, `isPowerOn`). Optionaler Klammerteil `foo()` wird abgeschnitten.
  */
 
 /**
@@ -423,13 +423,34 @@ export class Action {
 
   private async invokeDeviceMethod(device: Device, methodName: string, values: unknown[]): Promise<unknown> {
     const source = this.isAiSuggested ? EventSource.AUTOMATION : EventSource.SYSTEM;
-    const baseMethodName = methodName.includes("(") ? methodName.slice(0, methodName.indexOf("(")) : methodName;
-    const args = normalizeWorkflowArgList(values);
+    const raw = runWithSource(source, () => this.invokeDeviceMethodInner(device, methodName, values));
+    if (raw instanceof Promise) {
+      return await raw;
+    }
+    return raw;
+  }
+
+  private invokeDeviceMethodInner(device: Device, methodName: string, values: unknown[]): unknown {
     try {
-      return await runWithSource(source, () => invokeDeviceActionMethodAsync(device, methodName, args));
+      const baseMethodName = stripParensBase(methodName);
+      const normalized = normalizeWorkflowArgList(values);
+      if (!getDeviceMethodExact(device, methodName)) {
+        logger.warn(
+          { actionId: this.actionId, methodName: baseMethodName, deviceId: device.id },
+          "Methode nicht gefunden: exakter Funktionsname wie am Geraet erforderlich"
+        );
+        return;
+      }
+      const out = invokeDeviceMethodOnDevice(device, methodName, normalized);
+      try {
+        notifyMatterSwitchTargetDeviceAction(device.id, baseMethodName, normalized);
+      } catch {
+        /* Binding optional */
+      }
+      return out;
     } catch (err) {
       logger.error(
-        { err, methodName: baseMethodName, deviceId: device.id },
+        { err, methodName, deviceId: device.id },
         "Fehler beim Aufrufen der Methode auf Device"
       );
     }
