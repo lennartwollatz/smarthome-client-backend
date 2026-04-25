@@ -91,13 +91,7 @@ export class ActionRunnableTimeBased extends ActionRunnable {
   public async run() {
     if (this.stopped) return;
     try {
-      const response = await this.runnable();
-      if (!response.success) {
-        console.log(response.error);
-      } 
-      if(response.warning) {
-        console.log(response.warning);
-      }
+      await this.runnable();
     } catch (err) {
       return;
     } finally {

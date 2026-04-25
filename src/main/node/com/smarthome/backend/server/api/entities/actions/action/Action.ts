@@ -384,15 +384,6 @@ export class Action {
               : `device:${deviceId}:${stripParensBase(actionName)}`;
           result.environment.environment.set(envKey, methodOut);
         }
-        console.log("[Workflow] Geräte-Aktion ausgeführt", {
-          workflowActionId: this.actionId,
-          workflowActionName: this.name,
-          nodeId: node.nodeId,
-          nodeName: node.name,
-          deviceId,
-          method: actionName,
-          values,
-        });
       }
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     } else if (actionType === "action") {
@@ -407,13 +398,6 @@ export class Action {
         const nested = eventManager.getRunnable(nestedActionId);
         if (nested?.type === "manual") {
           result = await (nested as ActionRunnableManualBased).run(result.environment);
-          console.log("[Workflow] Manuelle Sub-Aktion ausgeführt", {
-            workflowActionId: this.actionId,
-            workflowActionName: this.name,
-            nodeId: node.nodeId,
-            nodeName: node.name,
-            nestedActionId,
-          });
         } else {
           result = {
             success: result.success,

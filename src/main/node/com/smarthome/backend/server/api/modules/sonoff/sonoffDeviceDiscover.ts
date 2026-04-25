@@ -121,34 +121,6 @@ function normalizeDnsName(name: string): string {
   return stripDnsTrailingDot(name).toLowerCase();
 }
 
-/** Debug: Roh-HTTP-Antwort der CoolKit-/eWeLink-Cloud beim Discover (inkl. Token-Felder in JSON). */
-function logEwelinkDiscoverHttpResponse(
-  context: string,
-  info: {
-    method: string;
-    url: string;
-    httpStatus: number;
-    statusText: string;
-    responseJson: unknown;
-  }
-): void {
-  console.log(`[SonoffDeviceDiscover] eWeLink/CoolKit — ${context}`);
-  console.log(
-    JSON.stringify(
-      {
-        context,
-        method: info.method,
-        url: info.url,
-        httpStatus: info.httpStatus,
-        statusText: info.statusText,
-        responseJson: info.responseJson,
-      },
-      null,
-      2
-    )
-  );
-}
-
 /** PTR-Antwort bezieht sich auf den eWeLink-Diensttyp `_ewelink._tcp.local`. */
 function isEwelinkPtrAnswerName(name: unknown): boolean {
   return typeof name === "string" && normalizeDnsName(name) === EWELINK_PTR_SERVICE;
@@ -339,13 +311,6 @@ export class SonoffDeviceDiscover extends ModuleDeviceDiscover<SonoffDeviceDisco
     try {
       let res = await doPost(host);
       let json = (await res.json()) as Record<string, unknown>;
-      logEwelinkDiscoverHttpResponse(`Login erste Antwort (Region-Versuch ${region})`, {
-        method: "POST",
-        url: `${host}/v2/user/login`,
-        httpStatus: res.status,
-        statusText: res.statusText,
-        responseJson: json,
-      });
 
       const errFirst = typeof json.error === "number" ? json.error : Number(json.error);
       if (errFirst === 10004 && json.data && typeof json.data === "object") {
@@ -355,13 +320,6 @@ export class SonoffDeviceDiscover extends ModuleDeviceDiscover<SonoffDeviceDisco
           region = redirect as keyof typeof COOLKIT_V2_API_HOST;
           res = await doPost(COOLKIT_V2_API_HOST[region]);
           json = (await res.json()) as Record<string, unknown>;
-          logEwelinkDiscoverHttpResponse(`Login nach Regions-Redirect (${region})`, {
-            method: "POST",
-            url: `${COOLKIT_V2_API_HOST[region]}/v2/user/login`,
-            httpStatus: res.status,
-            statusText: res.statusText,
-            responseJson: json,
-          });
         }
       }
 
@@ -413,13 +371,6 @@ export class SonoffDeviceDiscover extends ModuleDeviceDiscover<SonoffDeviceDisco
 
       const httpStatus = res.status;
       const json = (await res.json()) as Record<string, unknown>;
-      logEwelinkDiscoverHttpResponse(`GET /v2/device/thing (Region ${region})`, {
-        method: "GET",
-        url,
-        httpStatus: res.status,
-        statusText: res.statusText,
-        responseJson: json,
-      });
       const err = typeof json.error === "number" ? json.error : Number(json.error);
       if (err !== 0) {
         logger.warn({ error: err, msg: json.msg }, "CoolKit v2 device/thing fehlgeschlagen");

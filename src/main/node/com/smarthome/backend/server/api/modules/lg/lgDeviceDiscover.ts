@@ -50,7 +50,6 @@ export class LGDeviceDiscover extends ModuleDeviceDiscover<LGDeviceDiscovered> {
 
     const handleResponse = (response: { answers?: any[]; additionals?: any[] }) => {
       const records = [...(response.answers ?? []), ...(response.additionals ?? [])];
-      console.log("LG-Geraet mDNS-Response: "+JSON.stringify(records));
       for (const record of records) {
         if (record.type === "PTR" && typeof record.data === "string") {
           ensureService(record.data);
@@ -74,7 +73,6 @@ export class LGDeviceDiscover extends ModuleDeviceDiscover<LGDeviceDiscovered> {
         if (!service.txt || !service.ipv4) continue;
         if (!this.matchesLGDevice(service.txt)) continue;
 
-        console.log("LG-Geraet gefunden: "+JSON.stringify(service));
         const host = service.ipv4;
         if (devicesMap.has(host)) continue;
 

@@ -30,7 +30,6 @@ export class XiaomiDeviceDiscover extends ModuleDeviceDiscover<XiaomiDeviceDisco
       }, timeoutSeconds * 1000);
 
       discovery.on("available", (device: Record<string, unknown>) => {
-        console.log(JSON.stringify(device));
         try {
           const mapped = this.createDeviceFromMiio(device);
           devices.push(mapped);

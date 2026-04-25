@@ -190,9 +190,6 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
     // Commissioning-Felder (aus _matterc._udp)
     const vpTxtRaw = getTxtValue(txt, ["VP", "vp"]) ?? "";
     const [vendorId, productId] = parseVendorProduct(vpTxtRaw);
-    if (vendorId != null && productId != null) {
-      console.log("[Matter mDNS] vendorId=%d productId=%d (VP-TXT: %s)", vendorId, productId, vpTxtRaw || "—");
-    }
     const discriminator = parseNumber(getTxtValue(txt, ["D", "d", "discriminator"]));
     const deviceType = parseNumber(getTxtValue(txt, ["DT", "dt", "deviceType"]));
     const pairingHint = getTxtValue(txt, ["PH", "ph", "pairingHint"]);
@@ -282,19 +279,6 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
     // Commissioning-Felder nachtraeglich ergaenzen (falls noch leer)
     const mergeVpRaw = getTxtValue(txt, ["VP", "vp"]) ?? "";
     const [vendorId, productId] = parseVendorProduct(mergeVpRaw);
-    if (
-      vendorId != null &&
-      productId != null &&
-      (existing.vendorId == null || existing.productId == null)
-    ) {
-      console.log(
-        "[Matter mDNS merge] vendorId=%d productId=%d (VP-TXT: %s) ipv4=%s",
-        vendorId,
-        productId,
-        mergeVpRaw || "—",
-        ipv4
-      );
-    }
     if (vendorId != null && existing.vendorId == null) existing.vendorId = vendorId;
     if (productId != null && existing.productId == null) existing.productId = productId;
 

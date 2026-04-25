@@ -8,7 +8,6 @@ export class EventLogger {
     }
 
     public log(event: Event) {
-        console.log(`Event ausgelöst:${event.deviceId} - ${event.eventType}  Conditions:[${event.eventConditions.map(condition => condition.name + "=" + condition.value).join(", ")}] Parameters:[${event.eventParameters.map(parameter => parameter.name + "=" + parameter.value).join(", ")}] Results:[${event.eventResults.map(result => result.name + "=" + result.value).join(", ")}]`);
         this.events.push(event);
     }
 

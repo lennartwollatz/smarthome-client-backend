@@ -74,7 +74,6 @@ export class ActionManager implements EntityManager {
       return this.updateAction(action);
     }
     const instance = new Action(action);
-    console.log(instance);
     if(instance.triggerType === "voice_assistant") {
       this.createVoiceAssistantForAction(instance, instance.getVoiceAssistantTriggerKeyword(), instance.getVoiceAssistantTriggerActionType(), instance.getVoiceAssistantTriggerDeviceId() ?? undefined);
     }

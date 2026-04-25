@@ -66,7 +66,6 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       }
       return Boolean(tv.clientKey);
     } catch (err) {
-      console.log("Fehler beim Starten des PyWebOSTV-Skripts für "+tv.address+": "+JSON.stringify(err));
       return false;
     }
   }

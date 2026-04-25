@@ -13,12 +13,6 @@ export class ActionRunnableManualBased extends ActionRunnable {
 
   public async run(environment:ActionRunnableEnvironment): Promise<ActionRunnableResponse> {
     const response = await this.runnable(environment);
-    if (!response.success) {
-      console.log(response.error);
-    } 
-    if(response.warning) {
-      console.log(response.warning);
-    }
     return response;
   }
 }

@@ -93,43 +93,6 @@ function sonoffCliSpawnOptions(cwd: string): SpawnOptions {
   };
 }
 
-/**
- * Debug: exakter Node-`spawn`-Aufruf auf stdout — inkl. `--api_key` und aller CLI-Argumente.
- * Nicht für Produktionslogs mit externer Aggregation verwenden (Geheimnis im Klartext).
- */
-function logSonoffPythonInvocation(
-  context: string,
-  lanDir: string,
-  pythonRelative: string,
-  args: string[]
-): void {
-  const spawnOpts = sonoffCliSpawnOptions(lanDir);
-  const psQuote = (s: string) => `'${String(s).replace(/'/g, "''")}'`;
-  const argStr = args.map(a => (/[\s]/.test(a) ? psQuote(a) : a)).join(" ");
-  const approxCmdline = `(cd ${psQuote(lanDir)} && ${pythonRelative} ${argStr})`;
-  console.log(`[SonoffDeviceController] Python spawn — ${context}`);
-  console.log(
-    JSON.stringify(
-      {
-        context,
-        spawn: { file: pythonRelative, args, cwd: lanDir },
-        argvFull: [pythonRelative, ...args],
-        nodeProcessCwd: process.cwd(),
-        platform: process.platform,
-        spawnOptions: {
-          cwd: lanDir,
-          windowsHide: spawnOpts.windowsHide,
-          stdio: spawnOpts.stdio,
-          envInheritedFromProcess: true,
-        },
-        approxCmdlineForCopyPaste: approxCmdline,
-      },
-      null,
-      2
-    )
-  );
-}
-
 export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEvent, Device> {
   /** Ein Live-Prozess pro eWeLink-Gerätid (Python ``getState`` = mDNS-Listener + statistics). */
   private readonly liveStreamByEwelinkId = new Map<string, ChildProcess>();
@@ -219,12 +182,6 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
     const lanDir = sonoffLanScriptsDir();
     const python = sonoffCliPythonRelative(lanDir);
     const spawnOpts = sonoffCliSpawnOptions(lanDir);
-    logSonoffPythonInvocation(
-      `sendAndResolve ${device.getEwelinkDeviceId()} @ ${device.getLanAddress()}`,
-      lanDir,
-      python,
-      args
-    );
 
     return new Promise(resolve => {
       const child = spawn(python, args, spawnOpts);
@@ -386,7 +343,6 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
       const ewelinkId = (d as any).ewelinkDeviceId ?? "";
       const backendId = d.id;
       const args = this.liveStreamArgsForDevice(d);
-      logSonoffPythonInvocation(`LAN-Livestream ${ewelinkId} (backend ${backendId})`, lanDir, python, args);
       const child = spawn(python, args, spawnOpts);
       this.liveStreamByEwelinkId.set(ewelinkId, child);
 
