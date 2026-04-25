@@ -13,7 +13,6 @@ import type { LiveUpdateService } from "../../services/live.service.js";
 import type { ModuleManager } from "../../modules/moduleManager.js";
 import { EntityManager } from "../EntityManager.js";
 import { EnergyHistoryArchiveStore } from "../../../db/energyHistoryArchiveStore.js";
-import { setDeviceEnergyPort } from "../../ports/deviceEnergyPort.js";
 
 export class DeviceManager implements EntityManager {
   private deviceRepository: JsonRepository<Device>;
@@ -25,22 +24,19 @@ export class DeviceManager implements EntityManager {
   constructor(databaseManager: DatabaseManager, private eventManager: EventManager) {
     this.deviceRepository = new JsonRepository<Device>(databaseManager, "Device");
     this.energyHistoryArchive = new EnergyHistoryArchiveStore(databaseManager);
-    setDeviceEnergyPort({
-      appendPrunedToArchive: (deviceId, buttonId, dropped) => {
-        this.energyHistoryArchive.appendPruned(deviceId, buttonId, dropped);
-      },
-      requestPersistAfterEnergyUpdate: deviceId => {
-        const d = this.devices.get(deviceId);
-        if (d) {
-          this.saveDevice(d);
-        }
-      },
-    });
     this.initialize();
   }
 
   initialize() {
     this.loadDevicesFromDatabase();
+  }
+
+  /**
+   * DB-Ladung liefert oft flache Objekte ohne Device-Prototyp — `device.setEventManager` fehlt dann.
+   * Prototyp-Aufruf setzt `eventManager` trotzdem korrekt auf dem Objekt.
+   */
+  private wireEventManager(device: Device): void {
+    Device.prototype.setEventManager.call(device, this.eventManager);
   }
 
   setLiveUpdateService(service: LiveUpdateService): void {
@@ -51,6 +47,7 @@ export class DeviceManager implements EntityManager {
     const devices = this.deviceRepository.findAll();
     devices.forEach(device => {
       if (device?.id) {
+        this.wireEventManager(device);
         this.devices.set(device.id, device);
       }
     });
@@ -62,6 +59,7 @@ export class DeviceManager implements EntityManager {
     const convertPromises = this.getDevicesForModule(moduleId).map(async device => {
       const convertedDevice = await moduleManager.convertDeviceFromDatabase(device);
       if (!convertedDevice) return;
+      this.wireEventManager(convertedDevice);
       this.devices.set(device.id, convertedDevice);
     });
     Promise.all(convertPromises)
@@ -131,6 +129,7 @@ export class DeviceManager implements EntityManager {
 
   saveDevice(device: Device): boolean {
     if (!device?.id) return false;
+    this.wireEventManager(device);
     this.devices.set(device.id, device);
     this.deviceRepository.save(device.id, device);
     if (device.moduleId !== "voice-assistant") {
@@ -245,7 +244,11 @@ export class DeviceManager implements EntityManager {
   }
 
   getDevice(deviceId: string): Device | null {
-    return this.devices.get(deviceId) ?? null;
+    const d = this.devices.get(deviceId) ?? null;
+    if (d) {
+      this.wireEventManager(d);
+    }
+    return d;
   }
 
   getDevices(): Device[] {
@@ -351,6 +354,7 @@ export class DeviceManager implements EntityManager {
         );
       }
       if (converted.id) {
+        this.wireEventManager(converted);
         this.devices.set(converted.id, converted);
       }
       speakers.push(converted);

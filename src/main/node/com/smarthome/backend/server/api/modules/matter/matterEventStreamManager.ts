@@ -9,7 +9,9 @@ import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { DeviceSwitch } from "../../../../model/devices/DeviceSwitch.js";
 import { DeviceSwitchEnergy } from "../../../../model/devices/DeviceSwitchEnergy.js";
 import { DeviceSwitchDimmer } from "../../../../model/devices/DeviceSwitchDimmer.js";
-import { DeviceThermostat } from "com/smarthome/backend/model/devices/DeviceThermostat.js";
+import { DeviceThermostat } from "../../../../model/devices/DeviceThermostat.js";
+import { DeviceVirtual } from "../../../../model/devices/DeviceVirtual.js";
+import { DeviceSpeechAssistant } from "../../../../model/devices/DeviceSpeechAssistant.js";
 
 export class MatterEventStreamManager extends ModuleEventStreamManager<MatterDeviceController, MatterEvent> {
 
@@ -68,6 +70,18 @@ export class MatterEventStreamManager extends ModuleEventStreamManager<MatterDev
         if( !trigger) return;
         if (on) await switchDevice.on(event.buttonId!.toString(), false, true);
         else await switchDevice.off(event.buttonId!.toString(), false, true);
+      } else if (device.type === DeviceType.VIRTUAL) {
+        const switchDevice = device as DeviceVirtual;
+        const trigger = switchDevice.active !== on;
+        if( !trigger) return;
+        if (on) await switchDevice.setActive(false, true);
+        else await switchDevice.setInactive(false, true);
+      } else if (device.type === DeviceType.SPEECH_ASSISTANT) {
+        const switchDevice = device as DeviceSpeechAssistant;
+        const trigger = switchDevice.active !== on;
+        if( !trigger) return;
+        if (on) await switchDevice.setActive(false, true);
+        else await switchDevice.setInactive(false, true);
       }
     } else if (event.event === LevelControl.Complete.id && attrName === "currentLevel") {
       if (device.type === DeviceType.SWITCH_DIMMER) {

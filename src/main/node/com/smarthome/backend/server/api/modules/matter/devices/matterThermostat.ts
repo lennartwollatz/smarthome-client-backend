@@ -2,6 +2,7 @@ import { NodeId } from "@matter/types";
 import { DeviceThermostat, TemperatureSchedule } from "../../../../../model/devices/DeviceThermostat.js";
 import { MatterDeviceController } from "../matterDeviceController.js";
 import { MatterDevice } from "./matterDevice.js";
+import { MATTERMODULE } from "../matterModule.js";
 
 export class MatterThermostat extends DeviceThermostat implements MatterDevice {
   private nodeId: string;
@@ -12,7 +13,7 @@ export class MatterThermostat extends DeviceThermostat implements MatterDevice {
     id?: string,
     nodeId?: string
   ) {
-    super({ name, id, moduleId: "matter", isConnected: true });
+    super({ name, id, moduleId: MATTERMODULE.id, isConnected: true });
     this.nodeId = nodeId ?? "0";
   }
 

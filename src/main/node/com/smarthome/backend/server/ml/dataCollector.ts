@@ -8,6 +8,7 @@ import { SceneManager } from "../api/entities/scenes/sceneManager.js";
 import { Event } from "../events/events/Event.js";
 import { EventType } from "../events/event-types/EventType.js";
 import { EventSource } from "../events/EventSource.js";
+import { Device } from "../../model/devices/Device.js";
 import { DeviceType } from "../../model/devices/helper/DeviceType.js";
 import { logger } from "../../logger.js";
 
@@ -33,6 +34,33 @@ export class DataCollector {
 
   private lastState = new Map<number, string>();
   private periodicTimer?: ReturnType<typeof setInterval>;
+  /**
+   * Pro Event würde sonst {@link buildEnvironment} (alle Geräte als JSON) + Kontexte neu gebaut —
+   * bei vielen Events/Sek. massiver Speicher- und CPU-Druck (Heap-OOM). Kurzlebig cachen.
+   */
+  private mlContextCache: { atMs: number; env: string; prs: string; cal: string; scn: string } | null = null;
+  private static readonly ML_CONTEXT_CACHE_TTL_MS = 3_000;
+
+  /**
+   * Klassen-Geräte: {@link Device.toDatabaseJson}; aus der DB geladene Plain-Objects haben diese Methode nicht.
+   */
+  private snapshotDeviceForMl(device: Device): Record<string, unknown> {
+    const d = device as unknown as {
+      toDatabaseJson?: () => Record<string, unknown>;
+      toJSON?: () => Record<string, unknown>;
+    };
+    if (typeof d.toDatabaseJson === "function") {
+      return d.toDatabaseJson();
+    }
+    if (typeof d.toJSON === "function") {
+      return d.toJSON();
+    }
+    try {
+      return JSON.parse(JSON.stringify(device)) as Record<string, unknown>;
+    } catch {
+      return { id: (device as { id?: string }).id };
+    }
+  }
 
   private static readonly PERIODIC_TYPES = new Set([
     "temperature",
@@ -269,13 +297,10 @@ export class DataCollector {
 
       const device = this.deviceManager.getDevice(event.deviceId);
       const stateJson = device
-        ? JSON.stringify(device.toDatabaseJson())
+        ? JSON.stringify(this.snapshotDeviceForMl(device as Device))
         : "{}";
 
-      const env = this.buildEnvironment();
-      const prs = this.buildPresenceContext();
-      const cal = this.buildCalendarContext(now);
-      const scn = this.buildScenesContext();
+      const { env, prs, cal, scn } = this.getOrBuildSharedMlContext(now);
 
       const src = event.source ?? EventSource.SYSTEM;
       this.insertEvent(ts, did, etid, src, stateJson, env, ctx, prs, cal, scn);
@@ -290,6 +315,27 @@ export class DataCollector {
     }
   }
 
+  private getOrBuildSharedMlContext(now: Date): { env: string; prs: string; cal: string; scn: string } {
+    const t = Date.now();
+    if (
+      this.mlContextCache &&
+      t - this.mlContextCache.atMs < DataCollector.ML_CONTEXT_CACHE_TTL_MS
+    ) {
+      return {
+        env: this.mlContextCache.env,
+        prs: this.mlContextCache.prs,
+        cal: this.mlContextCache.cal,
+        scn: this.mlContextCache.scn,
+      };
+    }
+    const env = this.buildEnvironment();
+    const prs = this.buildPresenceContext();
+    const cal = this.buildCalendarContext(now);
+    const scn = this.buildScenesContext();
+    this.mlContextCache = { atMs: t, env, prs, cal, scn };
+    return { env, prs, cal, scn };
+  }
+
   /* ─── Environment Snapshot ────────────────────────── */
 
   private buildEnvironment(): string {
@@ -297,7 +343,7 @@ export class DataCollector {
     for (const device of this.deviceManager.getDevices()) {
       const did = this.deviceIdMap.get(device.id);
       if (did == null) continue;
-      env[did] = device.toDatabaseJson();
+      env[did] = this.snapshotDeviceForMl(device as Device);
     }
     return JSON.stringify(env);
   }
@@ -428,7 +474,7 @@ export class DataCollector {
           if (!DataCollector.PERIODIC_TYPES.has(device.type ?? "")) continue;
           const did = this.deviceIdMap.get(device.id);
           if (did == null) continue;
-          const stateJson = JSON.stringify(device.toDatabaseJson());
+          const stateJson = JSON.stringify(this.snapshotDeviceForMl(device as Device));
           this.insertSnapshot(ts, did, stateJson, ctx);
           this.lastState.set(did, stateJson);
         }

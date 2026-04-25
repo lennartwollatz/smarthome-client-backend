@@ -10,8 +10,7 @@ import { SettingManager } from "../settings/settingManager.js";
 import { UserManager } from "../users/userManager.js";
 import { EntityManager } from "../EntityManager.js";
 import { MatterModuleManager } from "../../modules/matter/matterModuleManager.js";
-import { VoiceAssistantTrigger } from "./action/VoiceAssistantTrigger.js";
-import { VoiceAssistantCommandAction } from "../../modules/matter/voiceAssistantCommandMapping.js";
+import { VoiceAssistantTrigger, type VoiceAssistantCommandAction } from "./action/VoiceAssistantTrigger.js";
 import type { ActionRunnableResponse } from "./runnable/ActionRunnableResponse.js";
 
 
@@ -206,7 +205,12 @@ export class ActionManager implements EntityManager {
     return this.activateAction(actionId);
   }
 
-  async createVoiceAssistantForActionId(actionId: string, trimmed: string, actionType: VoiceAssistantCommandAction | undefined, deviceId: string | undefined) : Promise<VoiceAssistantTrigger | null> {
+  async createVoiceAssistantForActionId(
+    actionId: string,
+    trimmed: string,
+    actionType: VoiceAssistantCommandAction | undefined,
+    deviceId: string | undefined
+  ): Promise<VoiceAssistantTrigger | null> {
     const action = this.getAction(actionId);
     if (!action) return null;
     const voiceAssistantTrigger = await this.createVoiceAssistantForAction(action, trimmed, actionType, deviceId);
@@ -220,8 +224,13 @@ export class ActionManager implements EntityManager {
     return voiceAssistantTrigger;
   }
 
-  async createVoiceAssistantForAction(action: Action, trimmed: string, actionType: VoiceAssistantCommandAction | undefined, deviceId: string | undefined) : Promise<VoiceAssistantTrigger | null> {
-    const result = await this.matterModuleManager?.createVoiceAssistantDevice(trimmed, actionType, deviceId);
+  async createVoiceAssistantForAction(
+    action: Action,
+    trimmed: string,
+    actionType: VoiceAssistantCommandAction | undefined,
+    deviceId: string | undefined
+  ): Promise<VoiceAssistantTrigger | null> {
+    const result = await this.matterModuleManager?.createVoiceAssistantDevice(trimmed);
     if (!result) return null;
     const voiceAssistantTrigger = new VoiceAssistantTrigger({
       deviceId: result.deviceId,

@@ -1,9 +1,8 @@
-import { LevelControlClient } from "@matter/main/behaviors/level-control";
-import { logger } from "../../../../../logger.js";
 import { DeviceSwitchDimmer } from "../../../../../model/devices/DeviceSwitchDimmer.js";
 import { MatterDeviceController } from "../matterDeviceController.js";
 import { MatterDeviceButtoned } from "./matterDevice.js";
 import { NodeId } from "@matter/types";
+import { MATTERMODULE } from "../matterModule.js";
 
 export class MatterSwitchDimmer extends DeviceSwitchDimmer implements MatterDeviceButtoned {
   private nodeId: string;
@@ -15,7 +14,7 @@ export class MatterSwitchDimmer extends DeviceSwitchDimmer implements MatterDevi
     nodeId?: string,
     buttonIds?: string[]
   ) {
-    super({ name, id, moduleId: "matter", isConnected: true });
+    super({ name, id, moduleId: MATTERMODULE.id, isConnected: true });
     this.nodeId = nodeId ?? "0";
     (buttonIds ?? []).forEach(buttonId => this.addButton(buttonId));
   }

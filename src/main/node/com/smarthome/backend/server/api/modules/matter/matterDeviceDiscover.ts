@@ -184,16 +184,13 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
       this.tryMergeDevice(ipv4, serviceName, txt);
       return;
     }
-    const instanceName = getTxtValue(txt, ["DN", "dn", "name"]) ?? serviceName ?? ipv4;
-    const displayName = sanitizeDiscoveredName(instanceName);
+    const discoveredName = getTxtValue(txt, ["DN", "dn", "name"]) ?? serviceName ?? ipv4;
+    const displayName = sanitizeDiscoveredName(discoveredName);
 
     // Commissioning-Felder (aus _matterc._udp)
     const vpTxtRaw = getTxtValue(txt, ["VP", "vp"]) ?? "";
     const [vendorId, productId] = parseVendorProduct(vpTxtRaw);
     const discriminator = parseNumber(getTxtValue(txt, ["D", "d", "discriminator"]));
-    const deviceType = parseNumber(getTxtValue(txt, ["DT", "dt", "deviceType"]));
-    const pairingHint = getTxtValue(txt, ["PH", "ph", "pairingHint"]);
-    const pairingInstruction = getTxtValue(txt, ["PI", "pi", "pairingInstruction"]);
     const rotatingId = getTxtValue(txt, ["RI", "ri", "rotatingId"]);
     const commissionMode = parseNumber(getTxtValue(txt, ["CM", "cm", "commissioningMode"]));
     const isCommissionable = typeof commissionMode === "number" ? commissionMode > 0 : false;
@@ -206,13 +203,6 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
       ? `${vendorProduct.vendorName} ${vendorProduct.productName}`.trim()
       : null;
     const preferredName = nameFromVendor ?? (displayName || "Matter Device");
-
-    // Operational TXT-Felder (aus _matter._tcp – MRP Parameter)
-    const sessionIdleInterval = parseNumber(getTxtValue(txt, ["SII", "sii"]));
-    const sessionActiveInterval = parseNumber(getTxtValue(txt, ["SAI", "sai"]));
-    const sessionActiveThreshold = parseNumber(getTxtValue(txt, ["SAT", "sat"]));
-    const tcpRaw = getTxtValue(txt, ["T", "t"]);
-    const tcpSupported = tcpRaw != null ? tcpRaw !== "0" : undefined;
 
     // Servicename-Format fuer operational: "{compressedFabricId}-{nodeId}._matter._tcp.local"
     const { compressedFabricId, operationalNodeId } = parseOperationalServiceName(serviceName);
@@ -238,20 +228,9 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
       vendorId: vendorId ?? undefined,
       productId: productId ?? undefined,
       discriminator: discriminator ?? undefined,
-      deviceType: deviceType ?? undefined,
-      instanceName: instanceName ?? undefined,
-      pairingHint: pairingHint ?? undefined,
-      pairingInstruction: pairingInstruction ?? undefined,
       rotatingId: rotatingId ?? undefined,
       isCommissionable,
       isOperational,
-      sessionIdleInterval: sessionIdleInterval ?? undefined,
-      sessionActiveInterval: sessionActiveInterval ?? undefined,
-      sessionActiveThreshold: sessionActiveThreshold ?? undefined,
-      tcpSupported,
-      compressedFabricId: compressedFabricId ?? undefined,
-      operationalNodeId: operationalNodeId ?? undefined,
-      txtRecord: Object.keys(txt).length > 0 ? { ...txt } : undefined,
       isPaired: false
     });
 
@@ -261,7 +240,6 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
       {
         deviceId: id,
         address,
-        deviceType: deviceType ?? undefined,
         vendorId: vendorId ?? undefined,
         productId: productId ?? undefined,
         isCommissionable,
@@ -285,48 +263,17 @@ export class MatterDeviceDiscover extends ModuleDeviceDiscover<MatterDeviceDisco
     const discriminator = parseNumber(getTxtValue(txt, ["D", "d", "discriminator"]));
     if (discriminator != null && existing.discriminator == null) existing.discriminator = discriminator;
 
-    const deviceType = parseNumber(getTxtValue(txt, ["DT", "dt", "deviceType"]));
-    if (deviceType != null && existing.deviceType == null) existing.deviceType = deviceType;
-
-    const pairingHint = getTxtValue(txt, ["PH", "ph", "pairingHint"]);
-    if (pairingHint && !existing.pairingHint) existing.pairingHint = pairingHint;
-
-    const pairingInstruction = getTxtValue(txt, ["PI", "pi", "pairingInstruction"]);
-    if (pairingInstruction && !existing.pairingInstruction) existing.pairingInstruction = pairingInstruction;
-
-    const rotatingId = getTxtValue(txt, ["RI", "ri", "rotatingId"]);
-    if (rotatingId && !existing.rotatingId) existing.rotatingId = rotatingId;
-
     const dn = getTxtValue(txt, ["DN", "dn", "name"]);
-    if (dn && (!existing.instanceName || existing.instanceName === existing.address)) {
-      existing.instanceName = dn;
+    if (dn) {
       existing.name = dn;
     }
 
-    // Operational-Felder nachtraeglich ergaenzen
-    const sii = parseNumber(getTxtValue(txt, ["SII", "sii"]));
-    if (sii != null && existing.sessionIdleInterval == null) existing.sessionIdleInterval = sii;
-    const sai = parseNumber(getTxtValue(txt, ["SAI", "sai"]));
-    if (sai != null && existing.sessionActiveInterval == null) existing.sessionActiveInterval = sai;
-    const sat = parseNumber(getTxtValue(txt, ["SAT", "sat"]));
-    if (sat != null && existing.sessionActiveThreshold == null) existing.sessionActiveThreshold = sat;
-
-    const tcpRaw = getTxtValue(txt, ["T", "t"]);
-    if (tcpRaw != null && existing.tcpSupported == null) existing.tcpSupported = tcpRaw !== "0";
-
     const { compressedFabricId, operationalNodeId } = parseOperationalServiceName(serviceName);
-    if (compressedFabricId && !existing.compressedFabricId) existing.compressedFabricId = compressedFabricId;
-    if (operationalNodeId && !existing.operationalNodeId) existing.operationalNodeId = operationalNodeId;
-
     if (compressedFabricId && operationalNodeId) existing.isOperational = true;
 
     const commissionMode = parseNumber(getTxtValue(txt, ["CM", "cm", "commissioningMode"]));
     if (typeof commissionMode === "number" && commissionMode > 0) existing.isCommissionable = true;
 
-    // TXT-Record mergen
-    if (Object.keys(txt).length > 0) {
-      existing.txtRecord = { ...(existing.txtRecord ?? {}), ...txt };
-    }
   }
 
 }

@@ -1,6 +1,20 @@
 import { logger } from "../../../logger.js";
 import { Device } from "../../../model/devices/Device.js";
-import { notifyMatterSwitchTargetDeviceAction } from "../ports/matterSwitchBindingPort.js";
+
+type MatterSwitchTargetNotify = (deviceId: string, methodName: string, values: unknown[]) => void;
+let matterSwitchTargetNotify: MatterSwitchTargetNotify | undefined;
+
+export function setMatterSwitchTargetNotify(notify: MatterSwitchTargetNotify | undefined): void {
+  matterSwitchTargetNotify = notify;
+}
+
+function notifyMatterSwitchTargetDeviceAction(deviceId: string, methodName: string, values: unknown[]): void {
+  try {
+    matterSwitchTargetNotify?.(deviceId, methodName, values);
+  } catch {
+    /* kein harter Fehler, wenn Binding nicht initialisiert */
+  }
+}
 
 /**
  * Optionaler Klammerteil `foo()` abschneiden.

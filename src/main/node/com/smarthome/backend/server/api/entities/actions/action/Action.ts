@@ -14,9 +14,9 @@ import { ActionRunnableResponse } from "../runnable/ActionRunnableResponse.js";
 import { ActionRunnableManualBased } from "../runnable/ActionRunnableManualBased.js";
 import { EventManager } from "../../../../events/EventManager.js";
 import { EventParameter } from "../../../../events/event-types/EventParameter.js";
+import { EventType } from "../../../../events/event-types/EventType.js";
 import { runWithSource, EventSource } from "../../../../events/EventSource.js";
-import { voiceAssistantActionToButtonId, voiceAssistantActionToEventId, VoiceAssistantCommandAction } from "../../../modules/matter/voiceAssistantCommandMapping.js";
-import { VoiceAssistantTrigger } from "./VoiceAssistantTrigger.js";
+import { VoiceAssistantTrigger, type VoiceAssistantCommandAction } from "./VoiceAssistantTrigger.js";
 import { TriggerConfig } from "./TriggerConfig.js";
 import {
   getDeviceMethodExact,
@@ -62,6 +62,20 @@ function workflowTriggerValuesToEventParameters(raw?: unknown[]): EventParameter
     }
     return entry as EventParameter;
   });
+}
+
+function voiceAssistantActionToButtonId(actionType: VoiceAssistantCommandAction | undefined): string {
+  if (actionType === "pause") return "pause";
+  if (actionType === "fortsetzen") return "continue";
+  return "onoff";
+}
+
+/** Befehl (An) → Flow bei aktiv; Befehl (Aus/Stop) → Flow bei inaktiv. */
+function resolveVoiceAssistantFlowFromActionType(
+  actionType: VoiceAssistantCommandAction | undefined
+): "on" | "off" {
+  if (actionType === "aus" || actionType === "stop") return "off";
+  return "on";
 }
 
 type DeviceMap = Map<string, Device>;
@@ -181,17 +195,12 @@ export class Action {
     if (!va?.deviceId) {
       return null;
     }
-    const triggerEvent = voiceAssistantActionToEventId(va.actionType);
-    const defaultButtonId = voiceAssistantActionToButtonId(va.actionType);
-    const buttonId = String(va.buttonId ?? defaultButtonId).trim();
-    const triggerValues: EventParameter[] = [
-      { id: 0, name: "buttonId", type: "str", value: buttonId },
-    ];
+    const flow = resolveVoiceAssistantFlowFromActionType(va.actionType);
+    const triggerEvent: EventType = flow === "off" ? EventType.ACTIVE_INACTIVE : EventType.ACTIVE;
     return new DeviceTrigger({
       triggerDeviceId: va.deviceId,
       triggerModuleId: "voice-assistant",
       triggerEvent,
-      triggerValues,
     });
   }
 

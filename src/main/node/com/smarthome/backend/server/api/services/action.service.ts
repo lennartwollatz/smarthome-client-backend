@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import type { Action } from "../entities/actions/action/Action.js";
+import type { VoiceAssistantCommandAction } from "../entities/actions/action/VoiceAssistantTrigger.js";
 import type { ServerDeps } from "../server.js";
-import { VoiceAssistantCommandAction } from "../modules/matter/voiceAssistantCommandMapping.js";
 
 export function createActionRouter(deps: ServerDeps) {
   const router = Router();
@@ -20,7 +20,12 @@ export function createActionRouter(deps: ServerDeps) {
       return;
     }
     try {
-      const result = await deps.actionManager.createVoiceAssistantForActionId(actionId, trimmed, actionType, undefined);
+      const result = await deps.actionManager.createVoiceAssistantForActionId(
+        actionId,
+        trimmed,
+        actionType,
+        undefined
+      );
       if(!result) {
         res.status(400).json({ error: "Fehler beim Erstellen des Voice-Assistant-Device" });
       } else {

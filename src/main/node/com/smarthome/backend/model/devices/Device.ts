@@ -37,7 +37,13 @@ export class Device {
   }
 
   public setEventManager(eventManager: EventManager) {
-    this.eventManager = eventManager;
+    /** Nicht-enumerierbar: sonst landet EventManager in JSON.stringify (API, DB) → zirkuläre Struktur. */
+    Object.defineProperty(this, "eventManager", {
+      value: eventManager,
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    });
   }
 
   public async updateValues(): Promise<void> {}
@@ -48,6 +54,8 @@ export class Device {
     const excludeKeys = new Set(['eventManager', 'modules']);
     for (const key in this) {
       if (excludeKeys.has(key)) continue;
+      /** Modul-Controller (matter, sonoff, …) → Zirkelbezug / nicht serialisierbar in DB/API */
+      if (key.endsWith('Controller')) continue;
       const value = (this as Record<string, unknown>)[key];
       if (typeof value === 'function') continue;
       result[key] = value;

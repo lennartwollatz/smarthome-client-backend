@@ -19,12 +19,91 @@ import { EventManager } from "../../../events/EventManager.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { MatterVirtualDeviceManager } from "./MatterVirtualDeviceManager.js";
 import { VoiceAssistantTrigger } from "../../entities/actions/action/VoiceAssistantTrigger.js";
-import { VoiceAssistantCommandAction, VA_MATTER_BTN_ONOFF } from "./voiceAssistantCommandMapping.js";
-import type { MatterSwitchTargetBinding } from "./matterSwitchBindingTypes.js";
 import { ActionManager } from "../../entities/actions/ActionManager.js";
 import { UserManager } from "../../entities/users/userManager.js";
-import { MatterSwitchBindingManager } from "./matterSwitchBindingManager.js";
-import { setMatterSwitchTargetNotify } from "../../ports/matterSwitchBindingPort.js";
+import { MatterVirtual } from "./devices/matterVirtual.js";
+import { MatterSpeechAssistant } from "./devices/matterSpeechAssistant.js";
+import { DeviceVirtualBinding } from "../../../../model/devices/DeviceVirtual.js";
+import { invokeDeviceMethodOnDevice } from "../../utils/deviceMethodInvoke.js";
+import { EventType } from "../../../events/event-types/EventType.js";
+import { DeviceTrigger } from "../../entities/actions/action/DeviceTrigger.js";
+import { ActionRunnableResponse } from "../../entities/actions/runnable/ActionRunnableResponse.js";
+import { ActionRunnable } from "../../entities/actions/runnable/ActionRunnable.js";
+import { ActionRunnableEnvironment } from "../../entities/actions/runnable/ActionRunnableEnvironment.js";
+import { EventListener } from "../../../events/EventListener.js";
+import { Event } from "../../../events/events/Event.js";
+
+class BindingEventRunnable extends ActionRunnable {
+  event: DeviceTrigger;
+  private readonly runner: () => Promise<void> | void;
+
+  constructor(id: string, event: DeviceTrigger, runner: () => Promise<void> | void) {
+    super(id, id, "event");
+    this.event = event;
+    this.runner = runner;
+  }
+
+  async run(_environment: ActionRunnableEnvironment): Promise<ActionRunnableResponse> {
+    await this.runner();
+    return { success: true, environment: { environment: new Map<string, unknown>() } };
+  }
+}
+
+/**
+ * Liest den Schaltzustand aus EventLightStatusChanged (resultCondition name "light" → { active }).
+ * Einfache/Dimmer/…-Lampen feuern oft nur lightStatusChanged, nicht lightOn/lightOff.
+ */
+function getLightOnFromStatusChangedEvent(event: Event): boolean | undefined {
+  if (event.eventType !== EventType.LIGHT_STATUS_CHANGED) {
+    return undefined;
+  }
+  const r = event.eventResults.find((x) => x.name === "light");
+  if (!r || typeof r.value !== "object" || r.value === null) {
+    return undefined;
+  }
+  const v = r.value as { active?: boolean; on?: boolean };
+  if (typeof v.active === "boolean") {
+    return v.active;
+  }
+  if (typeof v.on === "boolean") {
+    return v.on;
+  }
+  return undefined;
+}
+
+/**
+ * Ruft die Matter-Synchronisierung mit dem tatsächlichen Event auf (für lightStatusChanged).
+ * Normales EventListener.run() bekommt das Event nicht – daher override von checkedRun.
+ */
+class MatterLightStatusEventListener extends EventListener {
+  constructor(
+    listenerId: string,
+    targetDeviceId: string,
+    private readonly onStatusEvent: (event: Event) => void | Promise<void>
+  ) {
+    super(
+      listenerId,
+      targetDeviceId,
+      new BindingEventRunnable(
+        listenerId,
+        new DeviceTrigger({
+          triggerDeviceId: targetDeviceId,
+          triggerEvent: EventType.LIGHT_STATUS_CHANGED,
+          triggerValues: [] as never[],
+        }),
+        () => Promise.resolve()
+      )
+    );
+  }
+
+  public override checkedRun(event: Event): boolean {
+    if (!event.matchesListener(this)) {
+      return false;
+    }
+    void this.onStatusEvent(event);
+    return true;
+  }
+}
 
 function matterPairingLanIpv4(address: string | undefined): string | undefined {
   const s = (address ?? "").trim();
@@ -40,9 +119,12 @@ export type PairingPayload = {
   pairingCode: string;
 };
 
+
+
 export class MatterModuleManager extends ModuleManager<MatterEventStreamManager, MatterDeviceController, MatterDeviceController, MatterEvent, Device, MatterDeviceDiscover, MatterDeviceDiscovered> {
   private virtualDeviceManager: MatterVirtualDeviceManager;
-  private matterSwitchBindingManager: MatterSwitchBindingManager;
+  private suppressNextVirtualAction = new Set<string>();
+  private bindingListeners = new Map<string, EventListener[]>();
 
   constructor(
     databaseManager: DatabaseManager,
@@ -59,20 +141,272 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       new MatterDeviceDiscover(databaseManager)
     );
     this.virtualDeviceManager = new MatterVirtualDeviceManager(databaseManager, deviceManager, userManager, eventManager);
-    this.matterSwitchBindingManager = new MatterSwitchBindingManager(
-      databaseManager,
-      deviceManager,
-      () => this.virtualDeviceManager,
-      eventManager
-    );
-    setMatterSwitchTargetNotify((deviceId, methodName, values) => {
-      this.matterSwitchBindingManager.onTargetDeviceAction(deviceId, methodName, values);
+    this.virtualDeviceManager.setOnAllVirtualDevicesRestored(() => {
+      this.rebuildBindingListenersFromDevices();
     });
-    this.virtualDeviceManager.setMatterUserToggleHandler((matterDeviceId, buttonId, isOn) => {
-      this.matterSwitchBindingManager.onMatterUserToggle(matterDeviceId, buttonId, isOn);
-    });
+    this.virtualDeviceManager.startAsyncRestore();
+    this.deviceController.setVirtualOnOffHandler((deviceId, isOn) => this.virtualDeviceManager.setServerOnOff(deviceId, isOn));
     actionManager.setMatterModuleManager(this);
     userManager.setMatterModuleManager(this);
+  }
+
+  private rebuildBindingListenersFromDevices(): void {
+    for (const listeners of this.bindingListeners.values()) {
+      for (const listener of listeners) {
+        this.removeEventListenerFromManager(listener);
+      }
+    }
+    this.bindingListeners.clear();
+    const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
+    for (const device of devices) {
+      const d = device as { id: string; type?: DeviceType; attachment?: DeviceVirtualBinding };
+      if (d.type !== DeviceType.VIRTUAL || !d.attachment?.deviceId) {
+        continue;
+      }
+      this.registerBindingListeners(d.id, d.attachment);
+    }
+  }
+
+  private toEventType(value: string | undefined): EventType | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const eventTypeValues = Object.values(EventType) as string[];
+    if (!eventTypeValues.includes(value)) {
+      return undefined;
+    }
+    return value as EventType;
+  }
+
+  private eventManagerListenersMap(): Map<string, Map<EventType, EventListener[]>> {
+    const em = this.eventManager as unknown as { listeners: Map<string, Map<EventType, EventListener[]>> };
+    return em.listeners;
+  }
+
+  private addEventListenerToManager(deviceId: string, eventType: EventType, listener: EventListener): void {
+    const listeners = this.eventManagerListenersMap();
+    if (!listeners.has(deviceId)) {
+      listeners.set(deviceId, new Map<EventType, EventListener[]>());
+    }
+    const eventMap = listeners.get(deviceId)!;
+    if (!eventMap.has(eventType)) {
+      eventMap.set(eventType, []);
+    }
+    eventMap.get(eventType)!.push(listener);
+  }
+
+  private removeEventListenerFromManager(listener: EventListener): void {
+    const listeners = this.eventManagerListenersMap();
+    const eventMap = listeners.get(listener.deviceId);
+    if (!eventMap) {
+      return;
+    }
+    for (const [eventType, arr] of eventMap.entries()) {
+      const next = arr.filter((l) => l.listenerId !== listener.listenerId);
+      if (next.length === 0) {
+        eventMap.delete(eventType);
+      } else {
+        eventMap.set(eventType, next);
+      }
+    }
+    if (eventMap.size === 0) {
+      listeners.delete(listener.deviceId);
+    }
+  }
+
+  private invokeTargetAction(matterDeviceId: string, isActive: boolean): (() => Promise<void>) {
+    return async () => {
+      if (this.suppressNextVirtualAction.has(matterDeviceId)) {
+        this.suppressNextVirtualAction.delete(matterDeviceId);
+        return;
+      }
+      const virtualDevice = this.deviceManager.getDevice(matterDeviceId);
+      const d = virtualDevice as Device & { type?: DeviceType; attachment?: DeviceVirtualBinding };
+      if (d.type !== DeviceType.VIRTUAL || !d.attachment?.deviceId) {
+        return;
+      }
+      const binding = d.attachment;
+      const targetDevice = this.deviceManager.getDevice(binding.deviceId);
+      if (!targetDevice) {
+        logger.warn({ matterDeviceId, targetDeviceId: binding.deviceId }, "Matter-Binding: Zielgeraet nicht gefunden");
+        return;
+      }
+      const methodName = isActive ? binding.actionActive : binding.actionInactive;
+      if (methodName) {
+        invokeDeviceMethodOnDevice(targetDevice, methodName, []);
+        this.deviceManager.saveDevice(targetDevice);
+      }
+    };
+  }
+
+  private async applyVirtualMatterOnOff(
+    matterDeviceId: string,
+    isActive: boolean
+  ): Promise<void> {
+    const device = this.deviceManager.getDevice(matterDeviceId);
+    if (!device) {
+      return;
+    }
+    const d = device as Device & { attachment?: DeviceVirtualBinding; active?: boolean };
+    if (d.type !== DeviceType.VIRTUAL || !d.attachment) {
+      return;
+    }
+    this.suppressNextVirtualAction.add(matterDeviceId);
+    if (device instanceof MatterVirtual) {
+      if (isActive) {
+        await device.setActive(true, true);
+      } else {
+        await device.setInactive(true, true);
+      }
+    } else {
+      d.active = isActive;
+      await this.virtualDeviceManager.setServerOnOff(matterDeviceId, isActive);
+      this.deviceManager.saveDevice(device);
+      this.suppressNextVirtualAction.delete(matterDeviceId);
+      return;
+    }
+    this.suppressNextVirtualAction.delete(matterDeviceId);
+    this.deviceManager.saveDevice(device);
+  }
+
+  private setVirtualStateFromTrigger(
+    matterDeviceId: string,
+    isActive: boolean
+  ): (() => Promise<void>) {
+    return async () => {
+      const device = this.deviceManager.getDevice(matterDeviceId);
+      if (!device) {
+        return;
+      }
+      const d = device as Device & { attachment?: DeviceVirtualBinding; active?: boolean };
+      if (d.type !== DeviceType.VIRTUAL) {
+        return;
+      }
+      const binding = d.attachment;
+      if (!binding) {
+        return;
+      }
+      const expectedTrigger = isActive ? binding.triggerActive : binding.triggerInactive;
+      if (!expectedTrigger) {
+        return;
+      }
+      await this.applyVirtualMatterOnOff(matterDeviceId, isActive);
+    };
+  }
+
+  private async setVirtualStateFromLightStatusEvent(
+    matterDeviceId: string,
+    event: Event
+  ): Promise<void> {
+    const isActive = getLightOnFromStatusChangedEvent(event);
+    if (isActive === undefined) {
+      return;
+    }
+    const device = this.deviceManager.getDevice(matterDeviceId);
+    if (!device) {
+      return;
+    }
+    const d = device as Device & { attachment?: DeviceVirtualBinding; active?: boolean };
+    if (d.type !== DeviceType.VIRTUAL) {
+      return;
+    }
+    if (!d.attachment?.deviceId) {
+      return;
+    }
+    await this.applyVirtualMatterOnOff(matterDeviceId, isActive);
+  }
+
+  private registerBindingListeners(matterDeviceId: string, binding: DeviceVirtualBinding): void {
+    this.unregisterBindingListeners(matterDeviceId);
+    const listeners: EventListener[] = [];
+
+    const virtualActiveListener = new EventListener(
+      `matter-binding:${matterDeviceId}:virtual-active`,
+      matterDeviceId,
+      new BindingEventRunnable(
+        `matter-binding:${matterDeviceId}:virtual-active`,
+        new DeviceTrigger({ triggerDeviceId: matterDeviceId, triggerEvent: EventType.ACTIVE }),
+        this.invokeTargetAction(matterDeviceId, true)
+      )
+    );
+    const virtualInactiveListener = new EventListener(
+      `matter-binding:${matterDeviceId}:virtual-inactive`,
+      matterDeviceId,
+      new BindingEventRunnable(
+        `matter-binding:${matterDeviceId}:virtual-inactive`,
+        new DeviceTrigger({ triggerDeviceId: matterDeviceId, triggerEvent: EventType.ACTIVE_INACTIVE }),
+        this.invokeTargetAction(matterDeviceId, false)
+      )
+    );
+    this.addEventListenerToManager(matterDeviceId, EventType.ACTIVE, virtualActiveListener);
+    this.addEventListenerToManager(matterDeviceId, EventType.ACTIVE_INACTIVE, virtualInactiveListener);
+    listeners.push(virtualActiveListener, virtualInactiveListener);
+
+    const activeTriggerType = this.toEventType(binding.triggerActive);
+    const inactiveTriggerType = this.toEventType(binding.triggerInactive);
+    const useLightStatusSync =
+      Boolean(binding.deviceId) &&
+      activeTriggerType === EventType.LIGHT_ON &&
+      inactiveTriggerType === EventType.LIGHT_OFF;
+
+    if (useLightStatusSync) {
+      const lightStatusListener = new MatterLightStatusEventListener(
+        `matter-binding:${matterDeviceId}:light-status-sync`,
+        binding.deviceId,
+        (e) => this.setVirtualStateFromLightStatusEvent(matterDeviceId, e)
+      );
+      this.addEventListenerToManager(binding.deviceId, EventType.LIGHT_STATUS_CHANGED, lightStatusListener);
+      listeners.push(lightStatusListener);
+    } else {
+      if (activeTriggerType && binding.deviceId) {
+        const targetActiveListener = new EventListener(
+          `matter-binding:${matterDeviceId}:target-active`,
+          binding.deviceId,
+          new BindingEventRunnable(
+            `matter-binding:${matterDeviceId}:target-active`,
+            new DeviceTrigger({
+              triggerDeviceId: binding.deviceId,
+              triggerEvent: activeTriggerType,
+              triggerValues: (binding.triggerValuesActive ?? []) as never[],
+            }),
+            this.setVirtualStateFromTrigger(matterDeviceId, true)
+          )
+        );
+        this.addEventListenerToManager(binding.deviceId, activeTriggerType, targetActiveListener);
+        listeners.push(targetActiveListener);
+      }
+
+      if (inactiveTriggerType && binding.deviceId) {
+        const targetInactiveListener = new EventListener(
+          `matter-binding:${matterDeviceId}:target-inactive`,
+          binding.deviceId,
+          new BindingEventRunnable(
+            `matter-binding:${matterDeviceId}:target-inactive`,
+            new DeviceTrigger({
+              triggerDeviceId: binding.deviceId,
+              triggerEvent: inactiveTriggerType,
+              triggerValues: (binding.triggerValuesInactive ?? []) as never[],
+            }),
+            this.setVirtualStateFromTrigger(matterDeviceId, false)
+          )
+        );
+        this.addEventListenerToManager(binding.deviceId, inactiveTriggerType, targetInactiveListener);
+        listeners.push(targetInactiveListener);
+      }
+    }
+
+    this.bindingListeners.set(matterDeviceId, listeners);
+  }
+
+  private unregisterBindingListeners(matterDeviceId: string): void {
+    const listeners = this.bindingListeners.get(matterDeviceId);
+    if (listeners) {
+      for (const listener of listeners) {
+        this.removeEventListenerFromManager(listener);
+      }
+    }
+    this.bindingListeners.delete(matterDeviceId);
+    this.suppressNextVirtualAction.delete(matterDeviceId);
   }
 
   protected createEventStreamManager(): MatterEventStreamManager {
@@ -87,14 +421,6 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       }
       if (device instanceof MatterSwitch) {
         device.setMatterController(this.deviceController);
-        if (device.isVirtualMatterHost) {
-          const id = device.id;
-          device.setVirtualMatterHostExecutor({
-            setState: (buttonId, on) => this.virtualDeviceManager.hostSwitchSetEndpointState(id, buttonId, on),
-          });
-        } else {
-          device.setVirtualMatterHostExecutor(undefined);
-        }
       }
       if (device instanceof MatterSwitchDimmer) {
         device.setMatterController(this.deviceController);
@@ -102,56 +428,45 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       if (device instanceof MatterThermostat) {
         device.setMatterController(this.deviceController);
       }
-    }
-    /** VA-Geräte (Modul `voice-assistant`): Roh-JSON → {@link MatterSwitch}, Executor für On/Off-Endpunkt */
-    const VA_MODULE_ID = "voice-assistant";
-    for (const device of this.deviceManager.getDevices()) {
-      let sw: MatterSwitch | null = null;
-      if (device instanceof MatterSwitch) {
-        sw = device;
-      } else if (device.moduleId === VA_MODULE_ID && device.type === DeviceType.SWITCH) {
-        const raw = device as Device & Record<string, unknown>;
-        const buttonIds = raw.buttons ? Object.keys(raw.buttons as object) : [VA_MATTER_BTN_ONOFF];
-        const nodeId = String((raw as { nodeId?: string }).nodeId ?? "0");
-        const rebuilt = new MatterSwitch(
-          device.name,
-          device.id,
-          nodeId,
-          buttonIds,
-          { moduleId: VA_MODULE_ID, isVoiceAssistantDevice: true, quickAccess: Boolean(raw.quickAccess) }
-        );
-        Object.assign(rebuilt, raw);
-        rebuilt.rehydrateButtons();
-        this.deviceManager.saveDevice(rebuilt);
-        sw = rebuilt;
+      if (device instanceof MatterSpeechAssistant) {
+        device.setMatterController(this.deviceController);
       }
-      if (!sw) continue;
-      if (sw.isVirtualMatterHost) continue;
-      if (!sw.isVoiceAssistantDevice()) continue;
-      const id = sw.id;
-      sw.setMatterController(this.deviceController);
-      sw.setVirtualMatterHostExecutor({
-        setState: (buttonId, on) => this.virtualDeviceManager.vaSwitchSetEndpointState(id, buttonId, on),
-      });
+      if (device instanceof MatterVirtual) {
+        device.setMatterController(this.deviceController);
+      }
     }
-  }
-
-  getMatterSwitchBinding(matterDeviceId: string): MatterSwitchTargetBinding | null {
-    return this.matterSwitchBindingManager.getBinding(matterDeviceId);
-  }
-
-  getAllMatterSwitchBindings(): MatterSwitchTargetBinding[] {
-    return this.matterSwitchBindingManager.getAllBindings();
+    /** Nach DB-→-Klassen-Konvertierung: Ziel-Trigger-Listener erneut (Bindings im Device). */
+    this.rebuildBindingListenersFromDevices();
   }
 
   saveMatterSwitchTargetBinding(
-    body: MatterSwitchTargetBinding
-  ): { success: true; binding: MatterSwitchTargetBinding } | { success: false; error: string } {
-    return this.matterSwitchBindingManager.saveBinding(body);
+    matterDeviceId: string,
+    body: DeviceVirtualBinding
+  ): { success: true; binding: DeviceVirtualBinding } | { success: false; error: string } {
+    const device = this.deviceManager.getDevice(matterDeviceId);
+    if (!device) {
+      return { success: false, error: "Device not found" };
+    }
+    if (device.type !== DeviceType.VIRTUAL) {
+      return { success: false, error: "Device is not a virtual device" };
+    }
+    (device as MatterVirtual).attachment = body;
+    this.registerBindingListeners(matterDeviceId, body);
+    this.deviceManager.saveDevice(device);
+    return { success: true, binding: body };
   }
 
   removeMatterSwitchTargetBinding(matterDeviceId: string): boolean {
-    return this.matterSwitchBindingManager.deleteBinding(matterDeviceId);
+    const device = this.deviceManager.getDevice(matterDeviceId);
+    if (!device) {
+      return false;
+    }
+    if (device.type !== DeviceType.VIRTUAL) {
+      return false;
+    }
+    this.unregisterBindingListeners(matterDeviceId);
+    (device as MatterVirtual).attachment = undefined;
+    return this.deviceManager.saveDevice(device);
   }
 
   public getModuleId(): string {
@@ -163,7 +478,15 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   }
 
   async createPresenceDeviceForUser(userId: string): Promise<{ nodeId: string; port: number; pairingCode: string; passcode: number; discriminator: number; presenceDeviceId: string }> {
-    return await this.virtualDeviceManager.createPresenceDevice(userId);
+    const data = await this.virtualDeviceManager.createPresenceDevice(userId);
+    return {
+      nodeId: data.nodeId,
+      port: data.port,
+      pairingCode: data.pairingCode,
+      passcode: data.passcode,
+      discriminator: data.discriminator,
+      presenceDeviceId: data.deviceId,
+    };
   }
 
   async removePresenceDeviceForUser(userId: string): Promise<boolean> {
@@ -178,29 +501,28 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     return await this.virtualDeviceManager.setUserAbsent(userId);
   }
 
-  async createVoiceAssistantDevice(trimmed: string, actionType: VoiceAssistantCommandAction | undefined, deviceId: string | undefined): Promise<VoiceAssistantTrigger | null> {
-    return await this.virtualDeviceManager.createVoiceAssistantDevice(trimmed, actionType, deviceId);
+  async createVoiceAssistantDevice(name: string): Promise<VoiceAssistantTrigger | null> {
+    return await this.virtualDeviceManager.createVoiceAssistantDevice(name);
   }
 
   async removeVoiceAssistantDevice(deviceId: string): Promise<boolean> {
-    return await this.virtualDeviceManager.removeVoiceAssistantDevice(deviceId);
+    return await this.virtualDeviceManager.removeDevice(deviceId);
   }
 
-  async createMatterHostSwitch(name: string): Promise<{
+  async createVirtualDevice(name: string): Promise<{
     deviceId: string;
     pairingCode: string;
     qrPairingCode: string;
     port: number;
   } | null> {
-    return await this.virtualDeviceManager.createMatterHostSwitch(name);
+    return await this.virtualDeviceManager.createVirtualDevice(name);
   }
 
-  override async prepareRemoveDevice(deviceId: string): Promise<void> {
-    const d = this.deviceManager.getDevice(deviceId);
-    if (d instanceof MatterSwitch && d.isVirtualMatterHost) {
-      await this.virtualDeviceManager.removeMatterHostSwitch(deviceId);
-    }
+  async removeVirtualDevice(deviceId: string): Promise<boolean> {
+    return await this.virtualDeviceManager.removeDevice(deviceId);
   }
+
+  
 
 
   async discoverDevices(): Promise<MatterDeviceDiscovered[]> {
@@ -279,6 +601,16 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     return { success: saved, nodeId: pairedDevice.nodeId ?? undefined, deviceId: matterDevice.id };
   }
 
+  private toDeviceType(deviceTypeKey: string | null): DeviceType | null {
+    if (!deviceTypeKey) return null;
+    // `matterVendors.ts` nutzt aktuell i18n Keys wie "device.switch"
+    if (deviceTypeKey === "device.switch") return DeviceType.SWITCH;
+    if (deviceTypeKey === "device.switch-dimmer") return DeviceType.SWITCH_DIMMER;
+    if (deviceTypeKey === "device.switch-energy") return DeviceType.SWITCH_ENERGY;
+    if (deviceTypeKey === "device.thermostat") return DeviceType.THERMOSTAT;
+    return null;
+  }
+
   private async toMatterDevice(device: MatterDeviceDiscovered) {
     const id = device.id;
     const nodeId = device.nodeId ?? "0";
@@ -294,7 +626,7 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
         ? `${vendorInfo.vendorName} ${vendorInfo.productName}`.trim()
         : (device.name ?? "Matter Device");
 
-    const typeFromVendor = toDeviceType(vendorInfo?.deviceType ?? null);
+    const typeFromVendor = this.toDeviceType(vendorInfo?.deviceType ?? null);
 
     // Passendes Device instanziieren
     if (typeFromVendor === DeviceType.SWITCH_DIMMER) {
@@ -384,16 +716,80 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
         await matterThermostat.updateValues();
         convertedDevice = matterThermostat;
         break;
+      case DeviceType.VIRTUAL:
+        const virtualDevice = new MatterVirtual();
+        Object.assign(virtualDevice, device);
+        virtualDevice.setMatterController(this.deviceController);
+        await virtualDevice.updateValues();
+        convertedDevice = virtualDevice;
+        break;
+      case DeviceType.SPEECH_ASSISTANT:
+        const speechAssistantDevice = new MatterSpeechAssistant();
+        Object.assign(speechAssistantDevice, device);
+        speechAssistantDevice.setMatterController(this.deviceController);
+        await speechAssistantDevice.updateValues();
+        convertedDevice = speechAssistantDevice;
+        break;
     }
 
     return convertedDevice;
   }
 
+  async setActive(deviceId: string): Promise<boolean> {
+    const device = this.deviceManager.getDevice(deviceId);
+    if (!device) return false;
+    if( device.type === DeviceType.VIRTUAL) {
+      await (device as MatterVirtual).setActive(true, true);
+      this.deviceManager.saveDevice(device);
+      return true;
+    }
+    if( device.type === DeviceType.SPEECH_ASSISTANT) {
+      await (device as MatterSpeechAssistant).setActive(true, true);
+      this.deviceManager.saveDevice(device);
+      return true;
+    }
+    return false;
+  }
 
+  async setInactive(deviceId: string): Promise<boolean> {
+    const device = this.deviceManager.getDevice(deviceId);
+    if (!device) return false;
+    if( device.type === DeviceType.VIRTUAL) {
+      await (device as MatterVirtual).setInactive(true, true);
+      this.deviceManager.saveDevice(device);
+      return true;
+    }
+    if( device.type === DeviceType.SPEECH_ASSISTANT) {
+      await (device as MatterSpeechAssistant).setInactive(true, true);
+      this.deviceManager.saveDevice(device);
+      return true; 
+    }
+    return false;
+  }
 
   async toggle(deviceId: string, buttonId:string): Promise<boolean> {
     const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
+    if (device.type === DeviceType.VIRTUAL) {
+      const d = device as MatterVirtual;
+      if (d.isActive()) {
+        await d.setInactive(true, true);
+      } else {
+        await d.setActive(true, true);
+      }
+      this.deviceManager.saveDevice(device);
+      return true;
+    }
+    if (device.type === DeviceType.SPEECH_ASSISTANT) {
+      const d = device as MatterSpeechAssistant;
+      if (d.isActive()) {
+        await d.setInactive(true, true);
+      } else {
+        await d.setActive(true, true);
+      }
+      this.deviceManager.saveDevice(device);
+      return true;
+    }
     await ( device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer).toggle(buttonId, true, true);
     this.deviceManager.saveDevice(device);
     return true;
@@ -402,6 +798,16 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   async setOn(deviceId: string, buttonId:string): Promise<boolean> {
     const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
+    if (device.type === DeviceType.VIRTUAL) {
+      await (device as MatterVirtual).setActive(true, true);
+      this.deviceManager.saveDevice(device);
+      return true;
+    }
+    if (device.type === DeviceType.SPEECH_ASSISTANT) {
+      await (device as MatterSpeechAssistant).setActive(true, true);
+      this.deviceManager.saveDevice(device);
+      return true;
+    }
     await ( device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer).on(buttonId, true, true);
     this.deviceManager.saveDevice(device);
     return true;
@@ -410,6 +816,16 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
   async setOff(deviceId: string, buttonId:string): Promise<boolean> {
     const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
+    if (device.type === DeviceType.VIRTUAL) {
+      await (device as MatterVirtual).setInactive(true, true);
+      this.deviceManager.saveDevice(device);
+      return true;
+    }
+    if (device.type === DeviceType.SPEECH_ASSISTANT) {
+      await (device as MatterSpeechAssistant).setInactive(true, true);
+      this.deviceManager.saveDevice(device);
+      return true;
+    }
     await ( device as MatterSwitchEnergy | MatterSwitch | MatterSwitchDimmer).off(buttonId, true, true);
     this.deviceManager.saveDevice(device);
     return true;
@@ -441,15 +857,5 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     return true;
   }
 
-}
-
-function toDeviceType(deviceTypeKey: string | null): DeviceType | null {
-  if (!deviceTypeKey) return null;
-  // `matterVendors.ts` nutzt aktuell i18n Keys wie "device.switch"
-  if (deviceTypeKey === "device.switch") return DeviceType.SWITCH;
-  if (deviceTypeKey === "device.switch-dimmer") return DeviceType.SWITCH_DIMMER;
-  if (deviceTypeKey === "device.switch-energy") return DeviceType.SWITCH_ENERGY;
-  if (deviceTypeKey === "device.thermostat") return DeviceType.THERMOSTAT;
-  return null;
 }
 

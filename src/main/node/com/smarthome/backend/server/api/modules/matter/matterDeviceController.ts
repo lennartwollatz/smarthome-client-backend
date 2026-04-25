@@ -1,5 +1,6 @@
 import { MatterEvent } from "./matterEvent.js";
 import { Device } from "../../../../model/devices/Device.js";
+import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
 import { MatterDevice, MatterDeviceButtoned, MatterDeviceTemperture } from "./devices/matterDevice.js";
 
@@ -12,6 +13,7 @@ import { PairedNode } from "@project-chip/matter.js/device";
 import { DatabaseManager } from "../../../db/database.js";
 import { MatterDeviceDiscovered } from "./matterDeviceDiscovered.js";
 import { PairingPayload } from "./matterModuleManager.js";
+import { MatterSwitch } from "./devices/matterSwitch.js";
 
 import "@matter/nodejs-ble";
 import { LevelControlClient } from "@matter/main/behaviors/level-control";
@@ -44,6 +46,19 @@ function sanitizeMatterIdText(value: string | undefined): string {
 }
 
 export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEvent, Device> {
+  /**
+   * Virtuelle OnOff-Matter-Server (Host/Sprach-Stub): OnOff-Attribut im Stack setzen, sonst bleibt z. B. Apple Home ungueltig.
+   */
+  private virtualOnOffHandler: ((deviceId: string, isOn: boolean) => Promise<void>) | null = null;
+
+  setVirtualOnOffHandler(handler: (deviceId: string, isOn: boolean) => Promise<void>): void {
+    this.virtualOnOffHandler = handler;
+  }
+
+  private isVirtualMatterServerDevice(d: Device): boolean {
+    return d.type === DeviceType.VIRTUAL || d.type === DeviceType.SPEECH_ASSISTANT;
+  }
+
   private commissioningController: CommissioningController | null = null;
   private commissioningControllerStarted = false;
   /** Mutex: Verhindert Race Conditions bei parallelen Aufrufen von getCommissioningController */
@@ -320,6 +335,28 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     } 
   }
 
+  async setActive(device: MatterDevice) {
+    const d = device as unknown as Device;
+    if (this.virtualOnOffHandler && d?.id && this.isVirtualMatterServerDevice(d)) {
+      try {
+        await this.virtualOnOffHandler(d.id, true);
+      } catch (err) {
+        logger.error({ err, deviceId: d.id }, "setActive: virtual OnOff-Update fehlgeschlagen");
+      }
+    }
+  }
+
+  async setInactive(device: MatterDevice) {
+    const d = device as unknown as Device;
+    if (this.virtualOnOffHandler && d?.id && this.isVirtualMatterServerDevice(d)) {
+      try {
+        await this.virtualOnOffHandler(d.id, false);
+      } catch (err) {
+        logger.error({ err, deviceId: d.id }, "setInactive: virtual OnOff-Update fehlgeschlagen");
+      }
+    }
+  }
+
   async setIntensity(device: MatterDevice, buttonId: string, intensity: number) {
     const node = await this.getNode(NodeId(device.getNodeId()));
     if( !node) return;
@@ -560,18 +597,6 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     }
   }
 
-  /** Matter-Geräte antworten mit InvalidAction, wenn z. B. ein optionales Attribut nicht existiert oder eine Subscription ungültig ist. */
-  private async matterSafeSubscribe(context: string, op: () => unknown): Promise<void> {
-    try {
-      await Promise.resolve(op());
-    } catch (err) {
-      logger.warn(
-        { err, context },
-        "Matter Subscribe abgelehnt (Attribut evtl. nicht unterstuetzt oder Geraet lehnt Anfrage ab)"
-      );
-    }
-  }
-
   private matterStreamPayload(
     endpointId: number,
     clusterId: number,
@@ -610,78 +635,113 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
       const onoffClient = d.getClusterClient(OnOff.Complete);
       if (onoffClient) {
         const ep = onoffClient.endpointId;
-        await this.matterSafeSubscribe(`OnOff/onOff device=${device.id} ep=${ep}`, () =>
-          onoffClient.subscribeOnOffAttribute((value: unknown) => {
-            callback({
-              nodeId: matterDevice.getNodeId(),
-              deviceId: device.id,
-              event: OnOff.Complete.id,
-              buttonId: ep,
-              payload: this.matterStreamPayload(ep, OnOff.Complete.id, "onOff", value),
-            });
-          }, 0, 2)
-        );
+        try {
+          await Promise.resolve(
+            onoffClient.subscribeOnOffAttribute((value: unknown) => {
+              callback({
+                nodeId: matterDevice.getNodeId(),
+                deviceId: device.id,
+                event: OnOff.Complete.id,
+                buttonId: ep,
+                payload: this.matterStreamPayload(ep, OnOff.Complete.id, "onOff", value),
+              });
+            }, 0, 2)
+          );
+        } catch (err) {
+          logger.warn(
+            { err, context: `OnOff/onOff device=${device.id} ep=${ep}` },
+            "Matter Subscribe abgelehnt (Attribut evtl. nicht unterstuetzt oder Geraet lehnt Anfrage ab)"
+          );
+        }
       }
 
       const levelControlClient = d.getClusterClient(LevelControl.Complete);
       if (levelControlClient) {
         const ep = levelControlClient.endpointId;
-        await this.matterSafeSubscribe(`LevelControl/currentLevel device=${device.id} ep=${ep}`, () =>
-          levelControlClient.subscribeCurrentLevelAttribute((value: unknown) => {
-            callback({
-              nodeId: matterDevice.getNodeId(),
-              deviceId: device.id,
-              event: LevelControl.Complete.id,
-              buttonId: ep,
-              payload: this.matterStreamPayload(ep, LevelControl.Complete.id, "currentLevel", value),
-            });
-          }, 0, 2)
-        );
+        try {
+          await Promise.resolve(
+            levelControlClient.subscribeCurrentLevelAttribute((value: unknown) => {
+              callback({
+                nodeId: matterDevice.getNodeId(),
+                deviceId: device.id,
+                event: LevelControl.Complete.id,
+                buttonId: ep,
+                payload: this.matterStreamPayload(ep, LevelControl.Complete.id, "currentLevel", value),
+              });
+            }, 0, 2)
+          );
+        } catch (err) {
+          logger.warn(
+            { err, context: `LevelControl/currentLevel device=${device.id} ep=${ep}` },
+            "Matter Subscribe abgelehnt (Attribut evtl. nicht unterstuetzt oder Geraet lehnt Anfrage ab)"
+          );
+        }
       }
 
       const thermostatClient = d.getClusterClient(Thermostat.Complete);
       if (thermostatClient) {
         const ep = thermostatClient.endpointId;
         const cid = Thermostat.Complete.id;
-        await this.matterSafeSubscribe(`Thermostat/localTemperature device=${device.id}`, () =>
-          thermostatClient.subscribeLocalTemperatureAttribute((value: unknown) => {
-            callback({
-              nodeId: matterDevice.getNodeId(),
-              deviceId: device.id,
-              event: cid,
-              buttonId: 0,
-              payload: this.matterStreamPayload(ep, cid, "localTemperature", value),
-            });
-          }, 0, 2)
-        );
-        await this.matterSafeSubscribe(`Thermostat/occupiedHeatingSetpoint device=${device.id}`, () =>
-          thermostatClient.subscribeOccupiedHeatingSetpointAttribute((value: unknown) => {
-            callback({
-              nodeId: matterDevice.getNodeId(),
-              deviceId: device.id,
-              event: cid,
-              buttonId: 6,
-              payload: this.matterStreamPayload(ep, cid, "occupiedHeatingSetpoint", value),
-            });
-          }, 0, 2)
-        );
+        try {
+          await Promise.resolve(
+            thermostatClient.subscribeLocalTemperatureAttribute((value: unknown) => {
+              callback({
+                nodeId: matterDevice.getNodeId(),
+                deviceId: device.id,
+                event: cid,
+                buttonId: 0,
+                payload: this.matterStreamPayload(ep, cid, "localTemperature", value),
+              });
+            }, 0, 2)
+          );
+        } catch (err) {
+          logger.warn(
+            { err, context: `Thermostat/localTemperature device=${device.id}` },
+            "Matter Subscribe abgelehnt (Attribut evtl. nicht unterstuetzt oder Geraet lehnt Anfrage ab)"
+          );
+        }
+        try {
+          await Promise.resolve(
+            thermostatClient.subscribeOccupiedHeatingSetpointAttribute((value: unknown) => {
+              callback({
+                nodeId: matterDevice.getNodeId(),
+                deviceId: device.id,
+                event: cid,
+                buttonId: 6,
+                payload: this.matterStreamPayload(ep, cid, "occupiedHeatingSetpoint", value),
+              });
+            }, 0, 2)
+          );
+        } catch (err) {
+          logger.warn(
+            { err, context: `Thermostat/occupiedHeatingSetpoint device=${device.id}` },
+            "Matter Subscribe abgelehnt (Attribut evtl. nicht unterstuetzt oder Geraet lehnt Anfrage ab)"
+          );
+        }
       }
 
       const temperatureMeasurement = d.getClusterClient(TemperatureMeasurement.Complete);
       if (temperatureMeasurement) {
         const ep = temperatureMeasurement.endpointId;
         const cid = TemperatureMeasurement.Complete.id;
-        await this.matterSafeSubscribe(`TemperatureMeasurement/measuredValue device=${device.id}`, () =>
-          temperatureMeasurement.subscribeMeasuredValueAttribute((value: unknown) => {
-            callback({
-              nodeId: matterDevice.getNodeId(),
-              deviceId: device.id,
-              event: cid,
-              buttonId: 0,
-              payload: this.matterStreamPayload(ep, cid, "measuredValue", value),
-            });
-          }, 0, 2)
-        );
+        try {
+          await Promise.resolve(
+            temperatureMeasurement.subscribeMeasuredValueAttribute((value: unknown) => {
+              callback({
+                nodeId: matterDevice.getNodeId(),
+                deviceId: device.id,
+                event: cid,
+                buttonId: 0,
+                payload: this.matterStreamPayload(ep, cid, "measuredValue", value),
+              });
+            }, 0, 2)
+          );
+        } catch (err) {
+          logger.warn(
+            { err, context: `TemperatureMeasurement/measuredValue device=${device.id}` },
+            "Matter Subscribe abgelehnt (Attribut evtl. nicht unterstuetzt oder Geraet lehnt Anfrage ab)"
+          );
+        }
       }
     }
   }

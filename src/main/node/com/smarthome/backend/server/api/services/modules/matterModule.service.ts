@@ -18,22 +18,6 @@ export function createMatterModuleRouter(deps: ServerDeps) {
     }
   });
 
-  /** Virtueller Matter-On/Off-Schalter dieses Servers (QR/Code wie Nutzer-Anwesenheitsgerät). */
-  router.post("/devices/virtual-host-switch", async (req, res) => {
-    try {
-      const name = typeof req.body?.name === "string" ? req.body.name : "";
-      const result = await matterModule.createMatterHostSwitch(name);
-      if (!result) {
-        res.status(500).json({ success: false, error: "Virtuelles Matter-Geraet konnte nicht erstellt werden" });
-        return;
-      }
-      res.status(200).json({ success: true, ...result });
-    } catch (error) {
-      logger.error({ error }, "Matter virtueller Host-Schalter");
-      res.status(400).json({ error: "Invalid request" });
-    }
-  });
-
   router.post("/devices/:deviceId/pair", async (req, res) => {
     try {
       const result = await matterModule.pairDevice(req.params.deviceId, req.body ?? {});
@@ -130,20 +114,9 @@ export function createMatterModuleRouter(deps: ServerDeps) {
     }
   });
 
-  /** Virtueller Matter-Switch (VA/Host): Zuordnung zu Zielgerät true/false-Action */
-  router.get("/switch-target-binding/:matterDeviceId", (req, res) => {
+  router.put("/switch-target-binding/:deviceId", (req, res) => {
     try {
-      const b = matterModule.getMatterSwitchBinding(req.params.matterDeviceId);
-      res.status(200).json(b ?? null);
-    } catch (error) {
-      logger.error({ error }, "switch-target-binding GET");
-      res.status(500).json({ error: "Fehler beim Lesen der Zuordnung" });
-    }
-  });
-
-  router.put("/switch-target-binding", (req, res) => {
-    try {
-      const result = matterModule.saveMatterSwitchTargetBinding(req.body ?? {});
+      const result = matterModule.saveMatterSwitchTargetBinding(req.params.deviceId, req.body ?? {});
       if (!result.success) {
         res.status(400).json(result);
         return;
@@ -162,6 +135,22 @@ export function createMatterModuleRouter(deps: ServerDeps) {
     } catch (error) {
       logger.error({ error }, "switch-target-binding DELETE");
       res.status(500).json({ error: "Fehler beim Löschen der Zuordnung" });
+    }
+  });
+
+  /** Virtueller Matter-On/Off-Schalter dieses Servers (QR/Code wie Nutzer-Anwesenheitsgerät). */
+  router.post("/devices/virtual-host-switch", async (req, res) => {
+    try {
+      const name = typeof req.body?.name === "string" ? req.body.name : "";
+      const result = await matterModule.createVirtualDevice(name);
+      if (!result) {
+        res.status(500).json({ success: false, error: "Virtuelles Matter-Geraet konnte nicht erstellt werden" });
+        return;
+      }
+      res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      logger.error({ error }, "Matter virtueller Host-Schalter");
+      res.status(400).json({ error: "Invalid request" });
     }
   });
 

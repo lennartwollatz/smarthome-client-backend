@@ -3,6 +3,11 @@
  * Kompatibel mit Frontend-Datenmodell.
  */
 export enum DeviceType {
+  //virtuelle Geräte
+  ACTIVE = "active",
+  SPEECH_ASSISTANT = "speech-assistant",
+  VIRTUAL = "virtual",
+
   // Licht-Geräte
   LIGHT = "light",
   LIGHT_DIMMER = "light-dimmer",

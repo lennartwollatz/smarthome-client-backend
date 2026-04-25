@@ -15,9 +15,11 @@ export type DeviceEnergyArchiveData = {
 };
 
 export class EnergyHistoryArchiveStore {
+  private db: DatabaseManager;
   private repo: JsonRepository<DeviceEnergyArchiveData>;
 
   constructor(db: DatabaseManager) {
+    this.db = db;
     this.repo = new JsonRepository<DeviceEnergyArchiveData>(db, "DeviceEnergyArchive");
   }
 
@@ -59,13 +61,34 @@ export class EnergyHistoryArchiveStore {
   }
 
   getForButtonInRange(deviceId: string, buttonId: string, fromMs: number, toMs: number): EnergyUsage[] {
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const effectiveFrom = Math.max(fromMs, Date.now() - sevenDaysMs);
+    if (effectiveFrom > toMs) return [];
+
+    const sql = `
+      SELECT je.value AS value
+      FROM objects o
+      JOIN json_each(json_extract(o.data, '$.buttons')) AS btn
+      JOIN json_each(btn.value) AS je
+      WHERE o.id = ?
+        AND o.type = 'DeviceEnergyArchive'
+        AND btn.key = ?
+        AND CAST(json_extract(je.value, '$.time') AS INTEGER) >= ?
+        AND CAST(json_extract(je.value, '$.time') AS INTEGER) <= ?
+      ORDER BY CAST(json_extract(je.value, '$.time') AS INTEGER) ASC
+    `;
+
+    const conn = this.db.createNewConnection();
     try {
-      const row = this.repo.findById(deviceId);
-      if (!row) return [];
-      return (row.buttons[buttonId] ?? []).filter(u => u.time >= fromMs && u.time <= toMs);
+      const rows = conn.prepare(sql).all(deviceId, buttonId, effectiveFrom, toMs) as { value: string }[];
+      return rows
+        .map(row => JSON.parse(row.value) as EnergyUsage)
+        .filter(u => typeof u.time === "number" && Number.isFinite(u.value));
     } catch (e) {
       logger.debug({ e, deviceId }, "EnergyHistoryArchive: getForButtonInRange");
       return [];
+    } finally {
+      conn.close();
     }
   }
 

@@ -1,6 +1,6 @@
-import { logger } from "../../../../../logger.js";
 import { DeviceSwitchEnergy } from "../../../../../model/devices/DeviceSwitchEnergy.js";
 import { MatterDeviceController } from "../matterDeviceController.js";
+import { MATTERMODULE } from "../matterModule.js";
 import { MatterDeviceButtoned } from "./matterDevice.js";
 import { NodeId } from "@matter/types";
 
@@ -14,7 +14,7 @@ export class MatterSwitchEnergy extends DeviceSwitchEnergy implements MatterDevi
     nodeId?: string,
     buttonIds?: string[]
   ) {
-    super({ name, id, moduleId: "matter", isConnected: true });
+    super({ name, id, moduleId: MATTERMODULE.id, isConnected: true });
     this.nodeId = nodeId ?? "0";
     (buttonIds ?? []).forEach(buttonId => this.addButton(buttonId));
   }
