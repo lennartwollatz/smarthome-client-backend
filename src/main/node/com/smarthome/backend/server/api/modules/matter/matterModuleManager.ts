@@ -62,7 +62,8 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     this.matterSwitchBindingManager = new MatterSwitchBindingManager(
       databaseManager,
       deviceManager,
-      () => this.virtualDeviceManager
+      () => this.virtualDeviceManager,
+      eventManager
     );
     setMatterSwitchTargetNotify((deviceId, methodName, values) => {
       this.matterSwitchBindingManager.onTargetDeviceAction(deviceId, methodName, values);

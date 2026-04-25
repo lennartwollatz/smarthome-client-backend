@@ -5,9 +5,12 @@ import type { DatabaseManager } from "../../../db/database.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { invokeDeviceMethodOnDevice, normalizeWorkflowArgList, stripParensBase } from "../../utils/deviceMethodInvoke.js";
 import { runWithSource, EventSource } from "../../../events/EventSource.js";
+import type { EventManager } from "../../../events/EventManager.js";
+import type { Event } from "../../../events/events/Event.js";
 import type { MatterSwitchTargetBinding } from "./matterSwitchBindingTypes.js";
 import type { MatterVirtualDeviceManager } from "./MatterVirtualDeviceManager.js";
 import { VA_MATTER_BTN_ONOFF } from "./voiceAssistantCommandMapping.js";
+import { matterSavedTriggerMatchesEvent } from "./matterTriggerEventMatch.js";
 
 type Stored = MatterSwitchTargetBinding;
 
@@ -33,10 +36,14 @@ export class MatterSwitchBindingManager {
   constructor(
     databaseManager: DatabaseManager,
     private deviceManager: DeviceManager,
-    getVirtualDeviceManager: () => MatterVirtualDeviceManager
+    getVirtualDeviceManager: () => MatterVirtualDeviceManager,
+    eventManager: EventManager
   ) {
     this.repo = new JsonRepository<Stored>(databaseManager, "MatterSwitchTargetBinding");
     this.getVirtual = getVirtualDeviceManager;
+    eventManager.addOnEventCallback(event => {
+      this.onTargetDeviceEventForMatterFromTrigger(event);
+    });
   }
 
   getBinding(matterDeviceId: string): MatterSwitchTargetBinding | null {
@@ -71,6 +78,8 @@ export class MatterSwitchBindingManager {
     if (!target) {
       return { success: false, error: "Zielgerät nicht gefunden" };
     }
+    const tTrig = (body.trueTriggerEvent ?? "").trim();
+    const fTrig = (body.falseTriggerEvent ?? "").trim();
     const binding: MatterSwitchTargetBinding = {
       matterDeviceId: body.matterDeviceId.trim(),
       targetDeviceId: body.targetDeviceId.trim(),
@@ -82,6 +91,8 @@ export class MatterSwitchBindingManager {
         functionName: body.falseAction.functionName.trim(),
         values: Array.isArray(body.falseAction.values) ? body.falseAction.values : [],
       },
+      ...(tTrig ? { trueTriggerEvent: tTrig } : {}),
+      ...(fTrig ? { falseTriggerEvent: fTrig } : {}),
     };
     this.repo.save(binding.matterDeviceId, binding);
     return { success: true, binding };
@@ -91,6 +102,35 @@ export class MatterSwitchBindingManager {
     if (!matterDeviceId?.trim()) return false;
     this.repo.deleteById(matterDeviceId.trim());
     return true;
+  }
+
+  /**
+   * Zielgerät hat ein konfiguriertes Trigger-Ereignis ausgelöst → Matter nur
+   * programmgesteuert (Suppress), keine Ziel-Aktion.
+   */
+  private onTargetDeviceEventForMatterFromTrigger(event: Event): void {
+    const { deviceId: targetId } = event;
+    if (!targetId) return;
+    const ev = event.eventType as string;
+    for (const b of this.repo.findAll()) {
+      if (b.targetDeviceId !== targetId) continue;
+      if (!b.trueTriggerEvent?.trim() && !b.falseTriggerEvent?.trim()) {
+        continue;
+      }
+      const vdm = this.getVirtual();
+      if (b.trueTriggerEvent && matterSavedTriggerMatchesEvent(ev, b.trueTriggerEvent)) {
+        void vdm
+          .setMatterEndpointProgrammatically(b.matterDeviceId, VA_MATTER_BTN_ONOFF, true)
+          .catch(err => logger.warn({ err, matterDeviceId: b.matterDeviceId }, "Matter-Trigger: true-Endpoint setzen"));
+        return;
+      }
+      if (b.falseTriggerEvent && matterSavedTriggerMatchesEvent(ev, b.falseTriggerEvent)) {
+        void vdm
+          .setMatterEndpointProgrammatically(b.matterDeviceId, VA_MATTER_BTN_ONOFF, false)
+          .catch(err => logger.warn({ err, matterDeviceId: b.matterDeviceId }, "Matter-Trigger: false-Endpoint setzen"));
+        return;
+      }
+    }
   }
 
   /**

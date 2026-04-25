@@ -13,4 +13,11 @@ export type MatterSwitchTargetBinding = {
   targetDeviceId: string;
   trueAction: MatterActionSpec;
   falseAction: MatterActionSpec;
+  /**
+   * Optional: `functionsTrigger`-Namen des Zielgeräts (Frontend). Bei Auslösung wird
+   * der Matter-Endpoint per {@link setMatterEndpointProgrammatically} gesetzt — ohne
+   * erneute Ziel-Aktion.
+   */
+  trueTriggerEvent?: string;
+  falseTriggerEvent?: string;
 };
