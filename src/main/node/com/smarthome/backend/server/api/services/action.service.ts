@@ -44,6 +44,11 @@ export function createActionRouter(deps: ServerDeps) {
     res.status(200).json(deps.actionManager.getActions());
   });
 
+  /** Liste aller bereits vergebenen, eindeutigen Kategorien (sortiert, ohne Leerwert). */
+  router.get("/categories", (_req, res) => {
+    res.status(200).json(deps.actionManager.getCategories());
+  });
+
   router.post("/", (req, res) => {
     const action = req.body as Action;
     if (!action.actionId) {
@@ -118,6 +123,20 @@ export function createActionRouter(deps: ServerDeps) {
       res.status(200).json(true);
     } else {
       res.status(400).json({ error: "Action not found or not an AI suggestion" });
+    }
+  });
+
+  /**
+   * Leichtgewichtiges Setzen der Kategorie einer Aktion (für die Übersichtsliste).
+   * Body: { category: string | null }. Leerer Wert entfernt die Kategorie.
+   */
+  router.put("/:actionId/category", (req, res) => {
+    const { category } = (req.body ?? {}) as { category?: string | null };
+    const updated = deps.actionManager.setActionCategory(req.params.actionId, category);
+    if (updated) {
+      res.status(200).json(updated);
+    } else {
+      res.status(404).json({ error: "Action not found" });
     }
   });
 

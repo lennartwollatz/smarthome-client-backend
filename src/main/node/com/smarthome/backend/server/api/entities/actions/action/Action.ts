@@ -88,6 +88,11 @@ export class Action {
   workflow!: Workflow;
   isActive: boolean = true;
   isAiSuggested: boolean = false;
+  /**
+   * Optionale, frei vom Nutzer gewählte Kategorie zum Gruppieren in der Übersicht.
+   * Leerer String / undefined bedeutet "ohne Kategorie".
+   */
+  category?: string;
   aiDescription?: string;
   aiConfidence?: number;
   aiPatternType?: string;
@@ -100,6 +105,17 @@ export class Action {
     if( init?.workflow ){
       this.workflow = new Workflow(init.workflow);
     }
+    this.category = Action.normalizeCategory(this.category);
+  }
+
+  /**
+   * Trim + leerer String → undefined, damit "ohne Kategorie" einheitlich bleibt
+   * und Selektoren/Filter im Frontend nicht zwischen "" und undefined unterscheiden müssen.
+   */
+  static normalizeCategory(category: string | null | undefined): string | undefined {
+    if (typeof category !== "string") return undefined;
+    const trimmed = category.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   }
 
   /** Nur persistierbare Felder — vermeidet Zirkelverweise bei JSON (API, DB). */
@@ -111,6 +127,7 @@ export class Action {
       workflow: this.workflow,
       isActive: this.isActive,
       isAiSuggested: this.isAiSuggested,
+      category: this.category,
       aiDescription: this.aiDescription,
       aiConfidence: this.aiConfidence,
       aiPatternType: this.aiPatternType,

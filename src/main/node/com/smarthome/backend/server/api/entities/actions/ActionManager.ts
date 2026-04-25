@@ -159,6 +159,31 @@ export class ActionManager implements EntityManager {
   }
 
   /**
+   * Setzt nur die Kategorie einer Aktion. Erlaubt leichtgewichtige Updates
+   * aus der Aktions-Übersicht, ohne die komplette Action-Payload zu senden.
+   * Leerer / fehlender Wert → Kategorie wird entfernt ("ohne Kategorie").
+   */
+  setActionCategory(actionId: string, category: string | null | undefined): Action | null {
+    const action = this.actions.get(actionId);
+    if (!action) return null;
+    action.category = Action.normalizeCategory(category);
+    action.updatedAt = new Date().toISOString();
+    this.actionRepository.save(actionId, action);
+    this.liveUpdateService?.emit("action:updated", action);
+    return action;
+  }
+
+  /** Liste aller eindeutigen, nicht-leeren Kategorien aus den vorhandenen Aktionen. */
+  getCategories(): string[] {
+    const set = new Set<string>();
+    this.actions.forEach(a => {
+      const c = Action.normalizeCategory(a.category);
+      if (c) set.add(c);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }
+
+  /**
    * Führt eine Aktion sofort aus (Workflow ab Startknoten), unabhängig vom Trigger-Typ.
    */
   runActionIgnoringTrigger(actionId: string): Promise<ActionRunnableResponse> {

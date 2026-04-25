@@ -158,6 +158,16 @@ export class MatterVirtualDeviceManager {
   private matterHostRepository: JsonRepository<MatterHostSwitchDeviceStored> | null = null;
   private eventManager: EventManager | null = null;
   private matterPulseSuppress = new Set<string>();
+  /**
+   * In-Memory Reservierung von Matter-Ports zwischen `allocatePort()` und dem späteren
+   * Eintrag in eine der Server-Maps (`presenceServers` / `vaServers` / `matterHostServers`).
+   *
+   * Hintergrund: Die `start*Server`-Methoden tragen den Server erst NACH `await ServerNode.create()`
+   * in die zugehörige Map ein. Ohne Reservierung würden zwei parallele `create*Device`-Aufrufe
+   * (z. B. zwei gleichzeitige `POST /users`) denselben Port erhalten → der zweite `ServerNode.create`
+   * kollidiert auf dem TCP/UDP-Port und der Server lauscht nicht.
+   */
+  private reservedPorts = new Set<number>();
 
   constructor(databaseManager: DatabaseManager, private deviceManager: DeviceManager, private userManager: UserManager, eventManager: EventManager) {
     this.persistRepository = new JsonRepository<VoiceAssistantDeviceStored>(
@@ -349,7 +359,9 @@ export class MatterVirtualDeviceManager {
     const nodeId = `presence-${userId}`;
     const passcode = this.generatePasscode();
     const discriminator = Math.floor(Math.random() * 4096);
-    const port = this.getNextPresencePort();
+    // Port atomar (synchron) reservieren, BEVOR wir auf Server-Start warten.
+    // Andernfalls könnten zwei parallele POST /users denselben Port erhalten.
+    const port = this.allocatePort(PRESENCE_BASE_PORT);
     const pairingCode = ManualPairingCodeCodec.encode({
       discriminator,
       passcode,
@@ -358,7 +370,14 @@ export class MatterVirtualDeviceManager {
     const user = this.userManager.findById(userId);
     const displayName = user?.name?.trim() || "Unbekannt";
 
-    await this.startPresenceServer(userId, displayName, { port, passcode, discriminator });
+    try {
+      await this.startPresenceServer(userId, displayName, { port, passcode, discriminator });
+    } catch (err) {
+      this.releasePort(port);
+      throw err;
+    }
+    // Server ist nun in `presenceServers` Map → Reservierung kann freigegeben werden.
+    this.releasePort(port);
 
     const presenceDevice = new DevicePresence({
       id: nodeId,
@@ -424,7 +443,9 @@ export class MatterVirtualDeviceManager {
     const deviceId = `mhs-${randomUUID()}`;
     const passcode = this.generatePasscode();
     const discriminator = Math.floor(Math.random() * 4096);
-    const port = this.getNextMatterHostPort();
+    // Port atomar (synchron) reservieren, BEVOR irgendein `await` läuft.
+    // Verhindert Doppelvergabe bei parallelen `createMatterHostSwitch`-Aufrufen.
+    const port = this.allocatePort(MATTER_HOST_BASE_PORT);
     const pairingCode = ManualPairingCodeCodec.encode({ discriminator, passcode });
     const qrPairingCode = this.encodeHostQrPairingCode(discriminator, passcode);
     const { virtualNodeId } = this.matterHostCommissioningIds(deviceId);
@@ -467,7 +488,13 @@ export class MatterVirtualDeviceManager {
       discriminator,
     });
 
-    await this.startMatterHostServer(data);
+    try {
+      await this.startMatterHostServer(data);
+    } finally {
+      // Server (oder Fehler) → Reservierung freigeben. Bei Erfolg ist der Port
+      // bereits in `matterHostServers` registriert; bei Fehler war er nie aktiv.
+      this.releasePort(port);
+    }
     return { deviceId, pairingCode, qrPairingCode, port };
   }
 
@@ -544,7 +571,9 @@ export class MatterVirtualDeviceManager {
 
     const passcode = this.generatePasscode();
     const discriminator = Math.floor(Math.random() * 4096);
-    const port = this.getNextVaPort();
+    // Port atomar (synchron) reservieren, BEVOR irgendein `await` läuft.
+    // Verhindert, dass parallele VA-Anlegungen denselben Port bekommen.
+    const port = this.allocatePort(VA_BASE_PORT);
     const pairingCode = ManualPairingCodeCodec.encode({ discriminator, passcode });
     const qrPairingCode = this.encodeQrPairingCode(discriminator, passcode);
     const { virtualNodeId } = this.matterCommissioningIds(resolvedDeviceId);
@@ -589,11 +618,21 @@ export class MatterVirtualDeviceManager {
 
     const awaitServer = Boolean(deviceId?.trim());
     if (awaitServer) {
-      await this.startVaServer(data);
+      try {
+        await this.startVaServer(data);
+      } finally {
+        // Server (oder Fehler) → Reservierung freigeben. Bei Erfolg ist der Port
+        // bereits in `vaServers` registriert; bei Fehler war er nie aktiv.
+        this.releasePort(port);
+      }
     } else {
-      this.startVaServer(data).catch(err => {
-        logger.error({ err, deviceId: resolvedDeviceId }, "Fehler beim Starten des Voice-Assistant-Server");
-      });
+      this.startVaServer(data)
+        .catch(err => {
+          logger.error({ err, deviceId: resolvedDeviceId }, "Fehler beim Starten des Voice-Assistant-Server");
+        })
+        .finally(() => {
+          this.releasePort(port);
+        });
     }
 
     return new VoiceAssistantTrigger({
@@ -721,43 +760,53 @@ export class MatterVirtualDeviceManager {
     return passcode;
   }
 
-  private getNextPresencePort(): number {
-    const usedPorts = new Set<number>();
-    for (const info of this.presenceServers.values()) {
-      usedPorts.add(info.port);
-    }
+  /**
+   * Liefert ALLE aktuell vergebenen Matter-Ports über alle Geräte-Typen hinweg
+   * (Presence, Voice-Assistant, Matter-Host) sowie die in-memory Reservierungen.
+   *
+   * Dadurch kann jeder Geräte-Typ in seinem Standardbereich starten und beim
+   * "Überlauf" automatisch Ports der anderen Bereiche überspringen, sodass
+   * niemals zwei Server denselben Port bekommen.
+   */
+  private collectAllUsedPorts(): Set<number> {
+    const used = new Set<number>(this.reservedPorts);
+    for (const info of this.presenceServers.values()) used.add(info.port);
     for (const user of this.userManager.findAll()) {
-      if (user?.presenceDevicePort) {
-        usedPorts.add(user.presenceDevicePort);
+      if (user?.presenceDevicePort) used.add(user.presenceDevicePort);
+    }
+    for (const info of this.vaServers.values()) used.add(info.port);
+    for (const d of this.deviceDataMap.values()) used.add(d.port);
+    if (this.persistRepository) {
+      for (const row of this.persistRepository.findAll()) {
+        if (row?.port != null) used.add(row.port);
       }
     }
-    let port = PRESENCE_BASE_PORT;
-    while (usedPorts.has(port)) {
-      port++;
+    for (const info of this.matterHostServers.values()) used.add(info.port);
+    if (this.matterHostRepository) {
+      for (const row of this.matterHostRepository.findAll()) {
+        if (row?.port != null) used.add(row.port);
+      }
     }
+    return used;
+  }
+
+  /**
+   * Reserviert atomar (synchron, ohne `await`) den nächsten freien Port ab `basePort`.
+   *
+   * Die Reservierung MUSS nach erfolgreichem Server-Start ODER im Fehlerfall mittels
+   * {@link releasePort} freigegeben werden — sonst leakt der Eintrag.
+   * Pattern: `try { await start...Server() } finally { releasePort(port) }`
+   */
+  private allocatePort(basePort: number): number {
+    const used = this.collectAllUsedPorts();
+    let port = basePort;
+    while (used.has(port)) port++;
+    this.reservedPorts.add(port);
     return port;
   }
 
-  private getNextVaPort(): number {
-    const usedPorts = new Set<number>();
-    for (const info of this.vaServers.values()) {
-      usedPorts.add(info.port);
-    }
-    for (const d of this.deviceDataMap.values()) {
-      usedPorts.add(d.port);
-    }
-    if (this.persistRepository) {
-      for (const row of this.persistRepository.findAll()) {
-        if (row?.port != null) {
-          usedPorts.add(row.port);
-        }
-      }
-    }
-    let port = VA_BASE_PORT;
-    while (usedPorts.has(port)) {
-      port++;
-    }
-    return port;
+  private releasePort(port: number): void {
+    this.reservedPorts.delete(port);
   }
 
   private encodeQrPairingCode(discriminator: number, passcode: number): string {
@@ -995,24 +1044,10 @@ export class MatterVirtualDeviceManager {
     this.deviceManager.saveDevice(device);
   }
 
-  private getNextMatterHostPort(): number {
-    const usedPorts = new Set<number>();
-    for (const info of this.matterHostServers.values()) {
-      usedPorts.add(info.port);
-    }
-    if (this.matterHostRepository) {
-      for (const row of this.matterHostRepository.findAll()) {
-        if (row?.port != null) {
-          usedPorts.add(row.port);
-        }
-      }
-    }
-    let port = MATTER_HOST_BASE_PORT;
-    while (usedPorts.has(port)) {
-      port++;
-    }
-    return port;
-  }
+  // Hinweis: Port-Vergabe für alle Matter-Server-Typen erfolgt zentral über
+  // `allocatePort(basePort)` (siehe oben). `MATTER_HOST_BASE_PORT` ist der Startwert
+  // für Matter-Host-Schalter; bei Belegung wird automatisch der nächste freie Port
+  // (auch über die Bereiche von Presence/VA hinweg) gewählt.
 
   private async eraseMatterHostPersistence(deviceId: string): Promise<void> {
     const { storageId } = this.matterHostCommissioningIds(deviceId);
