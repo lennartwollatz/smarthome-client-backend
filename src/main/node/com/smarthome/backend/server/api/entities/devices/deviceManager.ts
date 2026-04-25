@@ -1,5 +1,7 @@
 import { logger } from "../../../../logger.js";
 import { Device } from "../../../../model/devices/Device.js";
+import { DeviceSwitch } from "../../../../model/devices/DeviceSwitch.js";
+import type { EnergyUsage } from "../../../../model/devices/energyTypes.js";
 import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { DeviceThermostat } from "../../../../model/devices/DeviceThermostat.js";
@@ -10,15 +12,30 @@ import { EventManager } from "../../../events/EventManager.js";
 import type { LiveUpdateService } from "../../services/live.service.js";
 import type { ModuleManager } from "../../modules/moduleManager.js";
 import { EntityManager } from "../EntityManager.js";
+import { EnergyHistoryArchiveStore } from "../../../db/energyHistoryArchiveStore.js";
+import { setDeviceEnergyPort } from "../../ports/deviceEnergyPort.js";
 
 export class DeviceManager implements EntityManager {
   private deviceRepository: JsonRepository<Device>;
+  private energyHistoryArchive: EnergyHistoryArchiveStore;
   private moduleManagers = new Map<string, ModuleManager<any, any, any, any, any, any, any>>();
   private liveUpdateService?: LiveUpdateService;
   private devices = new Map<string, Device>();
 
   constructor(databaseManager: DatabaseManager, private eventManager: EventManager) {
     this.deviceRepository = new JsonRepository<Device>(databaseManager, "Device");
+    this.energyHistoryArchive = new EnergyHistoryArchiveStore(databaseManager);
+    setDeviceEnergyPort({
+      appendPrunedToArchive: (deviceId, buttonId, dropped) => {
+        this.energyHistoryArchive.appendPruned(deviceId, buttonId, dropped);
+      },
+      requestPersistAfterEnergyUpdate: deviceId => {
+        const d = this.devices.get(deviceId);
+        if (d) {
+          this.saveDevice(d);
+        }
+      },
+    });
     this.initialize();
   }
 
@@ -99,6 +116,7 @@ export class DeviceManager implements EntityManager {
     this.eventManager.removeListenerForDevice(deviceId);
     this.devices.delete(deviceId);
     this.deviceRepository.deleteById(deviceId);
+    this.energyHistoryArchive.deleteByDeviceId(deviceId);
     device?.delete();
     // Event-basierte Trigger dieses Geräts sind entfernt; gespeicherte Workflows/Scenes können verwaiste deviceIds enthalten.
     if (!isVoiceAssistant) {
@@ -345,5 +363,42 @@ export class DeviceManager implements EntityManager {
     for (const device of devices) {
       this.saveDevice(device);
     }
+  }
+
+  /**
+   * Verlauf kWh pro Slot (5-Min-Takt) für switch-energy o. ä.: Live-Daten (letzte 7 Tage im Gerät)
+   * plus optionales Archiv (älter als 7 Tage, begrenzt auf ca. 400 Tage pro Slot).
+   */
+  getSwitchEnergyHistory(
+    deviceId: string,
+    opts: { fromMs: number; toMs: number; buttonId?: string; includeArchive: boolean }
+  ): { buttons: Record<string, EnergyUsage[]> } | null {
+    const device = this.devices.get(deviceId);
+    if (!device || !(device instanceof DeviceSwitch)) {
+      return null;
+    }
+    const buttonIds = opts.buttonId
+      ? [opts.buttonId].filter(bid => device.buttons?.[bid])
+      : Object.keys(device.buttons ?? {});
+    const out: Record<string, EnergyUsage[]> = {};
+    for (const bid of buttonIds) {
+      const btn = device.buttons[bid];
+      const liveArr = (btn?.energyUsages ?? []) as EnergyUsage[];
+      const live = liveArr.filter(u => u.time >= opts.fromMs && u.time <= opts.toMs);
+      if (!opts.includeArchive) {
+        out[bid] = [...live].sort((a, b) => a.time - b.time);
+        continue;
+      }
+      const arch = this.energyHistoryArchive.getForButtonInRange(deviceId, bid, opts.fromMs, opts.toMs);
+      const byTime = new Map<number, EnergyUsage>();
+      for (const u of arch) {
+        byTime.set(u.time, u);
+      }
+      for (const u of live) {
+        byTime.set(u.time, u);
+      }
+      out[bid] = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+    }
+    return { buttons: out };
   }
 }

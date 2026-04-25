@@ -18,6 +18,7 @@ import { MatterThermostat } from "./devices/matterThermostat.js";
 import { EventManager } from "../../../events/EventManager.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { MatterVirtualDeviceManager } from "./MatterVirtualDeviceManager.js";
+import { MatterDeviceBoolBridge } from "./MatterDeviceBoolBridge.js";
 import { VoiceAssistantTrigger } from "../../entities/actions/action/VoiceAssistantTrigger.js";
 import { VoiceAssistantCommandAction } from "./voiceAssistantCommandMapping.js";
 import { ActionManager } from "../../entities/actions/ActionManager.js";
@@ -39,6 +40,7 @@ export type PairingPayload = {
 
 export class MatterModuleManager extends ModuleManager<MatterEventStreamManager, MatterDeviceController, MatterDeviceController, MatterEvent, Device, MatterDeviceDiscover, MatterDeviceDiscovered> {
   private virtualDeviceManager: MatterVirtualDeviceManager;
+  private matterDeviceBoolBridge: MatterDeviceBoolBridge;
 
   constructor(
     databaseManager: DatabaseManager,
@@ -55,8 +57,20 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
       new MatterDeviceDiscover(databaseManager)
     );
     this.virtualDeviceManager = new MatterVirtualDeviceManager(databaseManager, deviceManager, userManager, eventManager);
+    this.matterDeviceBoolBridge = new MatterDeviceBoolBridge(
+      databaseManager,
+      deviceManager,
+      eventManager,
+      this.virtualDeviceManager
+    );
+    this.virtualDeviceManager.setMatterDeviceBoolBridge(this.matterDeviceBoolBridge);
+    this.virtualDeviceManager.startInitialize();
     actionManager.setMatterModuleManager(this);
     userManager.setMatterModuleManager(this);
+  }
+
+  getMatterDeviceBoolBridge(): MatterDeviceBoolBridge {
+    return this.matterDeviceBoolBridge;
   }
 
   protected createEventStreamManager(): MatterEventStreamManager {

@@ -18,15 +18,17 @@ import { runWithSource, EventSource } from "../../../../events/EventSource.js";
 import { voiceAssistantActionToButtonId, voiceAssistantActionToEventId, VoiceAssistantCommandAction } from "../../../modules/matter/voiceAssistantCommandMapping.js";
 import { VoiceAssistantTrigger } from "./VoiceAssistantTrigger.js";
 import { TriggerConfig } from "./TriggerConfig.js";
+import {
+  getDeviceMethodExact,
+  stripParensBase,
+  invokeDeviceActionMethodAsync,
+} from "../../../device/deviceMethodReflection.js";
 
 /**
  * Im Workflow angegebener Funktionsname muss 1:1 dem Prototyp des Geräts entsprechen
- * (z. B. `setPowerOn`, `isPowerOn`). Optionaler Klammerteil `foo()` wird abgeschnitten.
+ * (z. B. `setPowerOn`, `isPowerOn`). Optionaler Klammerteil `foo()` wird abgeschnitten
+ * (siehe {@link stripParensBase}).
  */
-function stripParensBase(name: string): string {
-  const i = name.indexOf("(");
-  return i >= 0 ? name.slice(0, i) : name;
-}
 
 /**
  * Frontend liefert Parameter als `{ value, manual }`; ältere Daten können
@@ -61,17 +63,6 @@ function workflowTriggerValuesToEventParameters(raw?: unknown[]): EventParameter
     }
     return entry as EventParameter;
   });
-}
-
-function getDeviceMethodExact(
-  device: object,
-  methodNameWithOptionalParens: string
-): { methodName: string; fn: (...args: unknown[]) => unknown } | null {
-  const methodName = stripParensBase(methodNameWithOptionalParens);
-  if (!methodName) return null;
-  const fn = (device as Record<string, unknown>)[methodName];
-  if (typeof fn !== "function") return null;
-  return { methodName, fn: fn as (...args: unknown[]) => unknown };
 }
 
 type DeviceMap = Map<string, Device>;
@@ -432,67 +423,13 @@ export class Action {
 
   private async invokeDeviceMethod(device: Device, methodName: string, values: unknown[]): Promise<unknown> {
     const source = this.isAiSuggested ? EventSource.AUTOMATION : EventSource.SYSTEM;
-    const raw = runWithSource(source, () => this.invokeDeviceMethodInner(device, methodName, values));
-    if (raw instanceof Promise) {
-      return await raw;
-    }
-    return raw;
-  }
-
-  private invokeDeviceMethodInner(device: Device, methodName: string, values: unknown[]): unknown {
+    const baseMethodName = methodName.includes("(") ? methodName.slice(0, methodName.indexOf("(")) : methodName;
+    const args = normalizeWorkflowArgList(values);
     try {
-      values = normalizeWorkflowArgList(values);
-      const baseMethodName = methodName.includes("(")
-        ? methodName.slice(0, methodName.indexOf("("))
-        : methodName;
-      const resolved = getDeviceMethodExact(device, methodName);
-      if (!resolved) {
-        logger.warn(
-          { actionId: this.actionId, methodName: baseMethodName, deviceId: device.id },
-          "Methode nicht gefunden: exakter Funktionsname wie am Geraet erforderlich"
-        );
-        return;
-      }
-      const fn = resolved.fn;
-
-      if (!values || values.length === 0) {
-        if (fn.length >= 1) {
-          return fn.call(device, true);
-        } else {
-          return fn.call(device);
-        }
-      }
-
-      if (values.length === 1) {
-        const param = this.convertValue(values[0]);
-        if (fn.length >= 2) {
-          return fn.call(device, param, true);
-        } else {
-          return fn.call(device, param);
-        }
-      }
-
-      if (values.length === 2) {
-        const param1 = this.convertValue(values[0]);
-        const param2 = this.convertValue(values[1]);
-        if (fn.length >= 3) {
-          return fn.call(device, param1, param2, true);
-        } else {
-          return fn.call(device, param1, param2);
-        }
-      }
-
-      if (values.length > 2) {
-        if (fn.length >= 4) {
-          return fn.call(device, ...values, true);
-        } else {
-          return fn.call(device, ...values);
-        }
-      }
-
+      return await runWithSource(source, () => invokeDeviceActionMethodAsync(device, methodName, args));
     } catch (err) {
       logger.error(
-        { err, methodName, deviceId: device.id },
+        { err, methodName: baseMethodName, deviceId: device.id },
         "Fehler beim Aufrufen der Methode auf Device"
       );
     }

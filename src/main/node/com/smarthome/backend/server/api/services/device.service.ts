@@ -10,6 +10,26 @@ export function createDeviceRouter(deps: ServerDeps) {
     res.status(200).json(devices);
   });
 
+  /** Energieverlauf (kWh pro Mess-Slot), Live 7d + optional Archiv. Query: from, to (ms), buttonId, includeArchive=1 */
+  router.get("/:deviceId/energy-history", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const now = Date.now();
+    const fromMs = req.query["from"] != null ? Number(req.query["from"]) : now - 7 * 24 * 60 * 60 * 1000;
+    const toMs = req.query["to"] != null ? Number(req.query["to"]) : now;
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs > toMs) {
+      res.status(400).json({ success: false, error: "Ungültige from/to (Millisekunden)" });
+      return;
+    }
+    const buttonId = typeof req.query["buttonId"] === "string" ? req.query["buttonId"] : undefined;
+    const includeArchive = req.query["includeArchive"] === "1" || req.query["includeArchive"] === "true";
+    const data = deps.deviceManager.getSwitchEnergyHistory(deviceId, { fromMs, toMs, buttonId, includeArchive });
+    if (data == null) {
+      res.status(404).json({ success: false, error: "Gerät nicht gefunden oder kein Schalter mit Energiemessung" });
+      return;
+    }
+    res.status(200).json({ success: true, fromMs, toMs, includeArchive, ...data });
+  });
+
   router.delete("/:deviceId", async (req, res) => {
     const deviceId = req.params.deviceId;
     const existing = deps.deviceManager.getDevice(deviceId);

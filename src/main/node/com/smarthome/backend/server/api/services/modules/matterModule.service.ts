@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../../../../logger.js";
 import type { ServerDeps } from "../../server.js";
 import { MatterModuleManager } from "../../modules/matter/matterModuleManager.js";
+import type { MatterDeviceBoolConfig } from "../../modules/matter/matterDeviceBoolTypes.js";
 
 export function createMatterModuleRouter(deps: ServerDeps) {
   const router = Router();
@@ -15,6 +16,49 @@ export function createMatterModuleRouter(deps: ServerDeps) {
     } catch (error) {
       logger.error({ error }, "Fehler beim Discover von Matter-Geraeten");
       res.status(500).json({ error: "Fehler beim Discover von Matter-Geraeten" });
+    }
+  });
+
+  /** GET/PUT Bool-Zuordnungen (Matter-Endpoint → Quellgerät read/write). */
+  router.get("/devices/:deviceId/bool-mappings", (req, res) => {
+    try {
+      const id = req.params.deviceId;
+      const bridge = matterModule.getMatterDeviceBoolBridge();
+      const c = bridge.findByMatterId(id);
+      res.status(200).json(
+        c ?? { matterDeviceId: id, slots: [] } satisfies MatterDeviceBoolConfig
+      );
+    } catch (error) {
+      logger.error({ error }, "Matter bool-mappings GET");
+      res.status(500).json({ error: "Serverfehler" });
+    }
+  });
+
+  router.put("/devices/:deviceId/bool-mappings", async (req, res) => {
+    try {
+      const id = req.params.deviceId;
+      const body = req.body as { slots?: MatterDeviceBoolConfig["slots"] };
+      const cfg: MatterDeviceBoolConfig = { matterDeviceId: id, slots: body?.slots ?? [] };
+      if (String(cfg.matterDeviceId) !== id) {
+        res.status(400).json({ success: false, error: "matterDeviceId muss der URL entprechen" });
+        return;
+      }
+      await matterModule.getMatterDeviceBoolBridge().putConfigAndRestart(cfg);
+      res.status(200).json({ success: true, config: matterModule.getMatterDeviceBoolBridge().findByMatterId(id) });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Ungueltige Konfiguration";
+      logger.error({ error }, "Matter bool-mappings PUT");
+      res.status(400).json({ success: false, error: msg });
+    }
+  });
+
+  router.delete("/devices/:deviceId/bool-mappings", async (req, res) => {
+    try {
+      await matterModule.getMatterDeviceBoolBridge().removeConfig(req.params.deviceId);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error({ error }, "Matter bool-mappings DELETE");
+      res.status(500).json({ success: false, error: "Serverfehler" });
     }
   });
 

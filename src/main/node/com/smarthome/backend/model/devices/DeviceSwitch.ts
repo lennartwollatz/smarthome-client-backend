@@ -1,4 +1,5 @@
 import { Device } from "./Device.js";
+import type { Energy, EnergyUsage } from "./energyTypes.js";
 import { DeviceType } from "./helper/DeviceType.js";
 import { EventSwitchStatusChanged } from "../../server/events/events/EventSwitchStatusChanged.js";
 import { EventSwitchPressed } from "../../server/events/events/EventSwitchPressed.js";
@@ -8,29 +9,18 @@ import { EventSwitchButtonOn } from "../../server/events/events/EventSwitchButto
 import { EventSwitchButtonOff } from "../../server/events/events/EventSwitchButtonOff.js";
 import { EventSwitchEnergyUsageChanged } from "../../server/events/events/EventSwitchEnergyUsageChanged.js";
 import { EventSwitchEnergyUsageHigher } from "../../server/events/events/EventSwitchEnergyUsageHigher.js";
+import {
+  appendPrunedEnergyToArchive,
+  requestPersistAfterEnergyUpdate,
+} from "../../server/api/ports/deviceEnergyPort.js";
 
-/**
- * Interface für EnergyUsage (historische Energieverbrauchsdaten)
- */
-export interface EnergyUsage {
-  time: number; // Ende des 5-Minuten-Fensters (aktuellster Messzeitpunkt im Slot)
-  value: number; // kWh in diesem 5-Minuten-Slot (Summe der Zusammenfassungen)
-}
-
-/**
- * Interface für Energy (aktuelle und historische Energieverbrauchsdaten)
- */
-export interface Energy {
-  now: number; // aktueller Energieverbrauch
-  tt: number; // Energieverbrauch start des Tages bis jetzt
-  wt: number; // Energieverbrauch start der Woche bis jetzt
-  mt: number; // Energieverbrauch Monat bis jetzt
-  yt: number; // Energieverbrauch Jahr bis jetzt
-}
+export type { Energy, EnergyUsage } from "./energyTypes.js";
 
 export abstract class DeviceSwitch extends Device {
     private energyBucketAnchorMs: Record<string, number> = {};
     private static readonly ENERGY_BUCKET_MS = 5 * 60 * 1000;
+    /** Rollierendes Fenster für Live-`energyUsages` (länger liegende Slots wandern ins Archiv). */
+    public static readonly ENERGY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
   public static Button = class Button {
     on: boolean;
@@ -164,8 +154,11 @@ export abstract class DeviceSwitch extends Device {
         rehydratedButtons[buttonId] = rawButton;
         continue;
       }
-      const button = rawButton as Partial<Button> | undefined;
-      rehydratedButtons[buttonId] = new DeviceSwitch.Button(
+      const button = rawButton as Partial<Button> & {
+        energyUsage?: Energy;
+        energyUsages?: EnergyUsage[];
+      };
+      const inst = new DeviceSwitch.Button(
         button?.on ?? false,
         button?.pressCount ?? 0,
         button?.initialPressTime ?? 0,
@@ -175,6 +168,32 @@ export abstract class DeviceSwitch extends Device {
         button?.connectedToLight ?? false,
         button?.brightness ?? button?.on ? 100 : 0
       );
+      if (button?.energyUsage && typeof button.energyUsage === "object") {
+        const eu = button.energyUsage;
+        inst.energyUsage = {
+          now: typeof eu.now === "number" && Number.isFinite(eu.now) ? eu.now : 0,
+          tt: typeof eu.tt === "number" && Number.isFinite(eu.tt) ? eu.tt : 0,
+          wt: typeof eu.wt === "number" && Number.isFinite(eu.wt) ? eu.wt : 0,
+          mt: typeof eu.mt === "number" && Number.isFinite(eu.mt) ? eu.mt : 0,
+          yt: typeof eu.yt === "number" && Number.isFinite(eu.yt) ? eu.yt : 0,
+        };
+      }
+      if (Array.isArray(button?.energyUsages)) {
+        inst.energyUsages = button.energyUsages
+          .filter(
+            (u): u is EnergyUsage =>
+              !!u &&
+              typeof u.time === "number" &&
+              Number.isFinite(u.time) &&
+              typeof u.value === "number" &&
+              Number.isFinite(u.value)
+          )
+          .sort((a, b) => a.time - b.time);
+      }
+      if (inst.energyUsages.length > 0) {
+        this.energyBucketAnchorMs[buttonId] = inst.energyUsages[inst.energyUsages.length - 1]!.time;
+      }
+      rehydratedButtons[buttonId] = inst;
     }
     this.buttons = rehydratedButtons;
   }
@@ -338,6 +357,8 @@ export abstract class DeviceSwitch extends Device {
         this.eventManager?.triggerEvent(new EventSwitchEnergyUsageChanged(this.id, deviceBefore, buttonButton.energyUsage!));
         this.eventManager?.triggerEvent(new EventSwitchEnergyUsageHigher(this.id, deviceBefore, buttonButton.energyUsage!));
       }
+      this.pruneEnergyHistoryForButton(button);
+      requestPersistAfterEnergyUpdate(this.id);
       return;
     }
 
@@ -368,6 +389,35 @@ export abstract class DeviceSwitch extends Device {
       this.eventManager?.triggerEvent(new EventSwitchEnergyUsageChanged(this.id, deviceBefore, buttonButton.energyUsage!));
       this.eventManager?.triggerEvent(new EventSwitchEnergyUsageHigher(this.id, deviceBefore, buttonButton.energyUsage!));
     }
+
+    this.pruneEnergyHistoryForButton(button);
+    requestPersistAfterEnergyUpdate(this.id);
+  }
+
+  /**
+   * Live-Array auf die letzten 7 Tage begrenzen; ältere Punkte ins Archiv verschieben.
+   */
+  private pruneEnergyHistoryForButton(button: string): void {
+    const buttonButton = this.buttons[button];
+    if (!buttonButton?.energyUsages?.length) {
+      return;
+    }
+    const threshold = Date.now() - DeviceSwitch.ENERGY_RETENTION_MS;
+    const usages = buttonButton.energyUsages;
+    const dropped: EnergyUsage[] = [];
+    const kept: EnergyUsage[] = [];
+    for (const u of usages) {
+      if (u.time < threshold) {
+        dropped.push(u);
+      } else {
+        kept.push(u);
+      }
+    }
+    if (dropped.length === 0) {
+      return;
+    }
+    buttonButton.energyUsages = kept;
+    appendPrunedEnergyToArchive(this.id, button, dropped);
   }
 
   /** Wirkung eines Messintervalls auf die Aggregat-Felder (inkl. Periodenwechsel), ohne energyUsages zu lesen. */
