@@ -23,8 +23,9 @@ export interface MatterDeviceBoolSlot {
   readFunction: string;
   readArgs?: unknown[];
   /**
-   * Schreib-Methoden, wenn der Nutzer den Matter-Schalter in Home/Assistant umschaltet.
-   * Wenn beide fehlen, ist die Zuordnung read-only (nur Spiegeln Real → Matter).
+   * Schreib-Methoden, wenn der Nutzer den Matter-Schalter in Home umschaltet (Matter → Gerät).
+   * Wenn beide fehlen, versucht der Server anhand von readFunction Heuristiken
+   * (z. B. isPowerOn → setPower, isScreenOn → setScreen; bei readArgs meist manuelle Angabe nötig).
    */
   writeOn?: MatterDeviceBoolWriteSpec;
   writeOff?: MatterDeviceBoolWriteSpec;

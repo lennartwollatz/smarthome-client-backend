@@ -6,7 +6,11 @@ import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { EventManager } from "../../../events/EventManager.js";
 import { Event } from "../../../events/events/Event.js";
 import { getCurrentSource, runWithSource, EventSource } from "../../../events/EventSource.js";
-import { evaluateDeviceBoolFunction, invokeDeviceActionMethodAsync } from "../../device/deviceMethodReflection.js";
+import {
+  evaluateDeviceBoolFunction,
+  invokeDeviceActionMethodAsync,
+  tryInferBoolWritePairForRead,
+} from "../../device/deviceMethodReflection.js";
 import type { IMatterDeviceEndpointOps } from "./matterDeviceEndpointOps.js";
 import {
   type MatterDeviceBoolConfig,
@@ -61,15 +65,24 @@ export class MatterDeviceBoolBridge {
 
   public async putConfigAndRestart(cfg: MatterDeviceBoolConfig): Promise<void> {
     this.validateConfig(cfg);
+    const prev = this.findByMatterId(cfg.matterDeviceId);
+    const needMatterServerRestart = slotIdSignature(prev?.slots) !== slotIdSignature(cfg.slots);
+
     this.boolConfigRepository.save(cfg.matterDeviceId, cfg);
     this.ensureMatterSwitchButtonsForConfig(cfg);
-    await this.endpointOps.restartVirtualMatterByDeviceId(cfg.matterDeviceId);
+    if (needMatterServerRestart) {
+      await this.endpointOps.restartVirtualMatterByDeviceId(cfg.matterDeviceId);
+    }
     await this.resyncMatterFromSourceForDeviceId(cfg.matterDeviceId);
   }
 
   public async removeConfig(matterDeviceId: string): Promise<void> {
+    const prev = this.findByMatterId(matterDeviceId);
+    const hadSlots = (prev?.slots?.length ?? 0) > 0;
     this.boolConfigRepository.deleteById(matterDeviceId);
-    await this.endpointOps.restartVirtualMatterByDeviceId(matterDeviceId);
+    if (hadSlots) {
+      await this.endpointOps.restartVirtualMatterByDeviceId(matterDeviceId);
+    }
   }
 
   /** Nur DB-Eintrag — z. B. wenn das Matter-Gerät selbst gelöscht wird. */
@@ -109,8 +122,12 @@ export class MatterDeviceBoolBridge {
           if (other.groupId !== slot.groupId) continue;
           await this.endpointOps.setVirtualMatterEndpointState(matterDeviceId, other.slotId, false);
           const srcOther = this.deviceManager.getDevice(other.sourceDeviceId);
-          if (srcOther && other.writeOff?.method) {
-            await invokeDeviceActionMethodAsync(srcOther, other.writeOff.method, other.writeOff.values ?? []);
+          if (srcOther) {
+            const infOff = tryInferBoolWritePairForRead(srcOther, other.readFunction, other.readArgs);
+            const off = other.writeOff?.method ? other.writeOff : infOff?.writeOff;
+            if (off?.method) {
+              await invokeDeviceActionMethodAsync(srcOther, off.method, off.values ?? []);
+            }
           }
         }
       }
@@ -123,12 +140,27 @@ export class MatterDeviceBoolBridge {
         );
         return;
       }
+      const inferred = tryInferBoolWritePairForRead(src, slot.readFunction, slot.readArgs);
+      const wOn = slot.writeOn?.method ? slot.writeOn : inferred?.writeOn;
+      const wOff = slot.writeOff?.method ? slot.writeOff : inferred?.writeOff;
       if (isOn) {
-        if (slot.writeOn?.method) {
-          await invokeDeviceActionMethodAsync(src, slot.writeOn.method, slot.writeOn.values ?? []);
+        if (wOn?.method) {
+          await invokeDeviceActionMethodAsync(src, wOn.method, wOn.values ?? []);
+        } else {
+          logger.warn(
+            { matterDeviceId, slot: slot.slotId, readFunction: slot.readFunction },
+            "MatterDeviceBoolBridge: kein writeOn (weder config noch Heuristik)"
+          );
         }
-      } else if (slot.writeOff?.method) {
-        await invokeDeviceActionMethodAsync(src, slot.writeOff.method, slot.writeOff.values ?? []);
+      } else {
+        if (wOff?.method) {
+          await invokeDeviceActionMethodAsync(src, wOff.method, wOff.values ?? []);
+        } else {
+          logger.warn(
+            { matterDeviceId, slot: slot.slotId, readFunction: slot.readFunction },
+            "MatterDeviceBoolBridge: kein writeOff (weder config noch Heuristik)"
+          );
+        }
       }
     });
   }
@@ -217,4 +249,11 @@ export class MatterDeviceBoolBridge {
       if (!s.readFunction?.trim()) throw new Error(`readFunction fehlt fuer ${s.slotId}`);
     }
   }
+}
+
+function slotIdSignature(slots: MatterDeviceBoolSlot[] | undefined): string {
+  if (!slots?.length) {
+    return "";
+  }
+  return [...new Set(slots.map(s => s.slotId).filter(Boolean))].sort().join("\0");
 }

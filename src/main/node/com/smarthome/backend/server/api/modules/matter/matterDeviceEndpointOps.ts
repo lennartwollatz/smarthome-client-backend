@@ -4,6 +4,9 @@
  */
 export interface IMatterDeviceEndpointOps {
   setVirtualMatterEndpointState(matterDeviceId: string, buttonId: string, on: boolean): Promise<boolean>;
-  /** VA- oder Host-Server neu starten, wenn Endpunkt-Liste (Bool-Zuordnungen) geändert wurde. */
+  /**
+   * VA- oder Host-Server neu starten, nötig wenn sich die Menge der Matter-Endpunkt-IDs
+   * (slotId-Liste) geändert hat — nicht bei bloßer Anpassung von read/Quellgerät.
+   */
   restartVirtualMatterByDeviceId(matterDeviceId: string): Promise<void>;
 }
