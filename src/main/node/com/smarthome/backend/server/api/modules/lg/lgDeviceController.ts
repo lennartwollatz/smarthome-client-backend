@@ -1,5 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import fs from "node:fs";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { logger } from "../../../../logger.js";
 import { App, Channel } from "../../../../model/devices/DeviceTV.js";
@@ -9,6 +9,60 @@ import { DeviceTV } from "../../../../model/devices/DeviceTV.js";
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
 
 type JsonValue = Record<string, unknown> | null;
+
+function pywebostvVenvUsable(dir: string): boolean {
+  if (process.platform === "win32") {
+    return existsSync(path.join(dir, ".venv", "Scripts", "python.exe"));
+  }
+  return (
+    existsSync(path.join(dir, ".venv", "bin", "python")) ||
+    existsSync(path.join(dir, ".venv", "bin", "python3"))
+  );
+}
+
+/** Absolutes Verzeichnis ``smarthome-client-backend/scripts/pywebostv`` (venv mit pywebostv). */
+function pywebostvScriptsDir(): string {
+  const cwd = process.cwd();
+  const fromMainNode = path.resolve(cwd, "../../../scripts/pywebostv");
+  const fromRepoRoot = path.resolve(cwd, "scripts/pywebostv");
+  if (pywebostvVenvUsable(fromMainNode)) return fromMainNode;
+  if (pywebostvVenvUsable(fromRepoRoot)) return fromRepoRoot;
+  throw new Error(
+    `pywebostv venv fehlt unter ${fromMainNode} oder ${fromRepoRoot} (erwartet .venv mit pywebostv)`
+  );
+}
+
+/**
+ * Relativ zu {@link pywebostvScriptsDir} — unter Linux: ``./.venv/bin/python`` (oder ``python3`` falls nur dieser existiert).
+ */
+function pywebostvPythonRelative(scriptsDir: string): string {
+  if (process.platform === "win32") {
+    return path.join(".venv", "Scripts", "python.exe");
+  }
+  if (existsSync(path.join(scriptsDir, ".venv", "bin", "python"))) {
+    return "./.venv/bin/python";
+  }
+  if (existsSync(path.join(scriptsDir, ".venv", "bin", "python3"))) {
+    return "./.venv/bin/python3";
+  }
+  return "./.venv/bin/python";
+}
+
+/** Spawn mit ``cwd = scripts/pywebostv`` (Skripte ``register.py`` / ``controller.py`` / ``subscribe.py`` liegen dort). */
+function pywebostvSpawnOptions(cwd: string): SpawnOptions {
+  return {
+    cwd,
+    windowsHide: true,
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: "1",
+      // Cryptography & Co. warnen unter alten Python-Versionen auf stderr und vermischen sich sonst optisch mit Fehlern.
+      PYTHONWARNINGS: [process.env.PYTHONWARNINGS, "ignore::DeprecationWarning"]
+        .filter(Boolean)
+        .join(","),
+    },
+  };
+}
 
 /**
  * PyWebOSTV / OS: Verbindungs-Timeout oder Gegenstelle reagiert nicht → TV typischerweise aus oder offline.
@@ -46,10 +100,9 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     if (!tv.address) return false;
 
     logger.info({ address: tv.address }, "register() fuer LGTV");
-    const scriptPath = this.resolveScriptPath("scripts", "pywebostv", "register.py");
     const args = ["CONNECT", "--ip", tv.address];
     try{
-      const { stdout, stderr, code } = await this.runPython(scriptPath, args);
+      const { stdout, stderr, code } = await this.runPython("register.py", args);
 
       const keyMatch = stdout.match(/'client_key'\s*:\s*'([^']+)'/);
       if (keyMatch?.[1]) {
@@ -233,11 +286,22 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     }
 
     this.deviceCallbacks.set(deviceId, callback);
-    const scriptPath = this.resolveScriptPath("scripts", "pywebostv", "subscribe.py");
+    let scriptsDir: string;
+    let python: string;
+    let spawnOpts: SpawnOptions;
+    try {
+      scriptsDir = pywebostvScriptsDir();
+      python = pywebostvPythonRelative(scriptsDir);
+      spawnOpts = pywebostvSpawnOptions(scriptsDir);
+    } catch (err) {
+      logger.error({ err, deviceId }, "LG EventStream: scripts/pywebostv/.venv fehlt, Abbruch");
+      this.deviceCallbacks.delete(deviceId);
+      return;
+    }
     // Nur App- und Kanalwechsel — „volume“/„audio_output“ feuern sehr häufig und würden
     // bei --events all den Node-Event-Loop mit Logging/Callbacks fluten (HTTP blockiert).
     const args = [
-      scriptPath,
+      "subscribe.py",
       "--ip",
       tv.address,
       "--client-key",
@@ -245,14 +309,17 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       "--events",
       "app.current,channel.current"
     ];
-    const child = spawn("python", args, { windowsHide: true });
+    const child = spawn(python, args, spawnOpts);
     this.processes.set(deviceId, child);
     this.outputBuffers.set(deviceId, "");
     
-    child.stdout.on("data", chunk => this.handleStdout(deviceId, chunk.toString("utf8")));
-    child.stderr.on("data", chunk =>
+    child.stdout?.on("data", chunk => this.handleStdout(deviceId, chunk.toString("utf8")));
+    child.stderr?.on("data", chunk =>
       logger.debug({ deviceId }, "LG EventStream stderr: {}", chunk.toString("utf8"))
     );
+    child.on("error", err => {
+      logger.error({ err, deviceId, python }, "LG EventStream Prozess");
+    });
     child.on("close", code => {
       this.processes.delete(deviceId);
       this.outputBuffers.delete(deviceId);
@@ -353,7 +420,6 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     if (!address) return null;
     if (event !== "wol" && !clientKey) return null;
 
-    const scriptPath = this.resolveScriptPath("scripts", "pywebostv", "controller.py");
     const args = ["--ip", address];
     if (clientKey) {
       args.push("--client-key", clientKey);
@@ -362,7 +428,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     if (params != null) {
       args.push("--params", params);
     }
-    const { stdout, stderr, code } = await this.runPython(scriptPath, args);
+    const { stdout, stderr, code } = await this.runPython("controller.py", args);
     const combinedForDiagnostics = stdout + stderr;
     const unreachable = isLgTvUnreachableOutput(combinedForDiagnostics);
 
@@ -511,39 +577,37 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     return apps;
   }
 
-  private async runPython(scriptPath: string, args: string[]) {
+  private async runPython(scriptName: string, args: string[]) {
     return new Promise<{ stdout: string; stderr: string; code: number | null }>(resolve => {
-      const env = {
-        ...process.env,
-        PYTHONUNBUFFERED: "1",
-        // Cryptography & Co. warnen unter alten Python-Versionen auf stderr und vermischen sich sonst optisch mit Fehlern.
-        PYTHONWARNINGS: [process.env.PYTHONWARNINGS, "ignore::DeprecationWarning"].filter(Boolean).join(",")
-      };
-      const child = spawn("python", [scriptPath, ...args], { windowsHide: true, env });
+      let scriptsDir: string;
+      let python: string;
+      let spawnOpts: SpawnOptions;
+      try {
+        scriptsDir = pywebostvScriptsDir();
+        python = pywebostvPythonRelative(scriptsDir);
+        spawnOpts = pywebostvSpawnOptions(scriptsDir);
+      } catch (err) {
+        logger.error({ err }, "PyWebOSTV: scripts/pywebostv/.venv fehlt, Abbruch");
+        resolve({ stdout: "", stderr: String(err), code: 1 });
+        return;
+      }
+      const child = spawn(python, [scriptName, ...args], spawnOpts);
       let stdout = "";
       let stderr = "";
-      child.stdout.on("data", chunk => {
+      child.stdout?.on("data", chunk => {
         stdout += chunk.toString("utf8");
       });
-      child.stderr.on("data", chunk => {
+      child.stderr?.on("data", chunk => {
         stderr += chunk.toString("utf8");
+      });
+      child.on("error", err => {
+        logger.error({ err, python, scriptsDir }, "PyWebOSTV-Prozess nicht startbar");
+        resolve({ stdout, stderr: stderr + String(err), code: 1 });
       });
       child.on("close", code => {
         resolve({ stdout, stderr, code });
       });
     });
-  }
-
-  private resolveScriptPath(...parts: string[]) {
-    let current = process.cwd();
-    for (let i = 0; i < 8; i += 1) {
-      const candidate = path.resolve(current, ...parts);
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-      current = path.resolve(current, "..");
-    }
-    return path.resolve(process.cwd(), ...parts);
   }
 
 }
