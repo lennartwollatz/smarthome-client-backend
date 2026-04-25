@@ -45,6 +45,26 @@ export function createActionRouter(deps: ServerDeps) {
     }
   });
 
+  /** Sprachassistent-Trigger: An/Aus (Befehl) nachträglich anpassen. */
+  router.put("/:actionId/voice-assistant/command", (req, res) => {
+    const actionId = req.params.actionId;
+    const { actionType } = req.body as { actionType?: VoiceAssistantCommandAction };
+    if (!actionId) {
+      res.status(400).json({ error: "Action ID is required" });
+      return;
+    }
+    if (actionType !== "an" && actionType !== "aus") {
+      res.status(400).json({ error: "actionType muss an oder aus sein" });
+      return;
+    }
+    const updated = deps.actionManager.setVoiceAssistantCommandAction(actionId, actionType);
+    if (!updated) {
+      res.status(400).json({ error: "Aktion hat keinen Sprachassistent-Trigger oder existiert nicht" });
+      return;
+    }
+    res.status(200).json(updated);
+  });
+
   router.get("/", (_req, res) => {
     res.status(200).json(deps.actionManager.getActions());
   });

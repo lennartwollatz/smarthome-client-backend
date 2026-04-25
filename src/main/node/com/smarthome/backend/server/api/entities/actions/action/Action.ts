@@ -232,6 +232,24 @@ export class Action {
     });
   }
 
+  /**
+   * Nachträgliche Änderung von An/Aus (Sprachbefehl + Flow-Trigger: aktiv vs. inaktiv).
+   * Erwartet `triggerType === "voice_assistant"` und passenden Startknoten.
+   */
+  public patchVoiceAssistantCommandAction(commandAction: VoiceAssistantCommandAction): boolean {
+    if (this.triggerType !== "voice_assistant") {
+      return false;
+    }
+    const startNode = this.resolveStartNode(this.workflow);
+    const tc = startNode?.triggerConfig;
+    if (tc?.type !== "voice_assistant" || !tc.voiceAssistant) {
+      return false;
+    }
+    tc.voiceAssistant.actionType = commandAction;
+    this.updatedAt = new Date().toISOString();
+    return true;
+  }
+
   private getTriggerEvent(): DeviceTrigger | null {
     const startNode = this.resolveStartNode(this.workflow);
     if (startNode.triggerConfig?.type === "device") {

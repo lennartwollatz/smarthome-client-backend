@@ -67,6 +67,27 @@ export class ActionManager implements EntityManager {
     return this.actions.get(actionId) ?? null;
   }
 
+  /**
+   * Sprachassistent-Trigger: An/Aus (Befehl) ändern, persistieren, Runnable neu anbinden.
+   */
+  setVoiceAssistantCommandAction(actionId: string, commandAction: VoiceAssistantCommandAction): Action | null {
+    const action = this.actions.get(actionId);
+    if (!action) {
+      return null;
+    }
+    if (!action.patchVoiceAssistantCommandAction(commandAction)) {
+      return null;
+    }
+    this.eventManager.removeListenerForAction(actionId);
+    this.actionRepository.save(actionId, action);
+    this.actions.set(actionId, action);
+    const devices = this.deviceManager.getDevicesMap();
+    const scenes = this.sceneManager.getScenesMap();
+    action.initActionRunnable(devices, scenes, this.eventManager);
+    this.liveUpdateService?.emit("action:updated", action);
+    return action;
+  }
+
   addAction(action: Action): Action | null {
     if (!action?.actionId) return null;
     if (this.actions.has(action.actionId)) {
