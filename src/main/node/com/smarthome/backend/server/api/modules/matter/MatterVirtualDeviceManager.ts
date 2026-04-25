@@ -307,6 +307,8 @@ export class MatterVirtualDeviceManager {
         passcode: data.passcode,
         discriminator: data.discriminator,
         actionType: data.actionType,
+        pairingCode: data.pairingCode,
+        qrPairingCode: data.qrPairingCode,
       });
       this.applyVaMatterButtonLabels(device, data.keyword, data.actionType);
       this.deviceManager.saveDevice(device);
@@ -316,6 +318,8 @@ export class MatterVirtualDeviceManager {
         passcode: data.passcode,
         discriminator: data.discriminator,
         actionType: data.actionType,
+        pairingCode: data.pairingCode,
+        qrPairingCode: data.qrPairingCode,
       });
       this.applyVaMatterButtonLabels(existing, data.keyword, data.actionType);
       this.deviceManager.saveDevice(existing);
@@ -559,7 +563,14 @@ export class MatterVirtualDeviceManager {
     device.isConnected = true;
     device.isPairingMode = true;
     (device as unknown as Record<string, unknown>).typeLabel = "deviceType.switch";
-    this.attachVaMetadata(device, trimmedKeyword, { port, passcode, discriminator, actionType });
+    this.attachVaMetadata(device, trimmedKeyword, {
+      port,
+      passcode,
+      discriminator,
+      actionType,
+      pairingCode,
+      qrPairingCode,
+    });
     this.applyVaMatterButtonLabels(device, trimmedKeyword, actionType);
     this.deviceManager.saveDevice(device);
 
@@ -750,9 +761,11 @@ export class MatterVirtualDeviceManager {
   }
 
   private encodeQrPairingCode(discriminator: number, passcode: number): string {
+    // Matter Core §5.1.3: Setup-Payload-Version MUSS 0 sein (alle anderen Werte sind reserviert).
+    // Apple Home / Google Home weisen QR-Codes mit version != 0 als ungültig zurück.
     return QrPairingCodeCodec.encode([
       {
-        version: 1,
+        version: 0,
         vendorId: VendorId(VA_VENDOR_ID_SAFE),
         productId: VA_PRODUCT_ID_SAFE,
         flowType: CommissioningFlowType.Standard,
@@ -764,9 +777,10 @@ export class MatterVirtualDeviceManager {
   }
 
   private encodeHostQrPairingCode(discriminator: number, passcode: number): string {
+    // Matter Core §5.1.3: Setup-Payload-Version MUSS 0 sein (siehe encodeQrPairingCode).
     return QrPairingCodeCodec.encode([
       {
-        version: 1,
+        version: 0,
         vendorId: VendorId(VA_VENDOR_ID_SAFE),
         productId: MATTER_HOST_PRODUCT_ID_SAFE,
         flowType: CommissioningFlowType.Standard,
@@ -1031,7 +1045,10 @@ export class MatterVirtualDeviceManager {
   private attachVaMetadata(
     sw: MatterSwitch,
     keyword: string,
-    data: Pick<VoiceAssistantDeviceData, "port" | "passcode" | "discriminator" | "actionType">
+    data: Pick<
+      VoiceAssistantDeviceData,
+      "port" | "passcode" | "discriminator" | "actionType" | "pairingCode" | "qrPairingCode"
+    >
   ): void {
     const r = sw as unknown as Record<string, unknown>;
     r.vaKeyword = keyword;
@@ -1039,6 +1056,12 @@ export class MatterVirtualDeviceManager {
     r.vaPasscode = data.passcode;
     r.vaDiscriminator = data.discriminator;
     r.vaActionType = data.actionType;
+    // WICHTIG: pairingCode/qrPairingCode müssen am Device persistiert werden, damit das
+    // Frontend (z. B. der Voice-Assistant-Dialog im Trigger-Editor) sie über GET /devices
+    // aus dem Device-Store lesen kann. Ohne diese Felder schlägt die Validierung
+    // („Vorhandenes Gerät") immer fehl, weil pairingCode/qrPairingCode leer sind.
+    r.pairingCode = data.pairingCode;
+    r.qrPairingCode = data.qrPairingCode;
   }
 
   private applyVaMatterButtonLabels(
