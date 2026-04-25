@@ -5,7 +5,7 @@ import { LGDeviceDiscovered } from "./lgDeviceDiscovered.js";
 import { LGDeviceController } from "./lgDeviceController.js";
 import { LGTV } from "./devices/lgtv.js";
 import { Device } from "../../../../model/devices/Device.js";
-import { Channel, DeviceTV } from "../../../../model/devices/DeviceTV.js";
+import { App, Channel, DeviceTV } from "../../../../model/devices/DeviceTV.js";
 import { LGEvent } from "./lgEvent.js";
 import { LGEventStreamManager } from "./lgEventStreamManager.js";
 import { ModuleManager } from "../moduleManager.js";
@@ -340,7 +340,13 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return [];
     }
     const tv = await this.toLGTV(device);
+    const previousChannels = tv.channels ? [...tv.channels] : [];
     await tv.updateChannels();
+    if (tv.channels?.length) {
+      this.applyPreviousHomeChannelNumbers(tv.channels, previousChannels);
+    } else if (tv.channels === null || tv.channels === undefined) {
+      tv.channels = previousChannels;
+    }
     this.deviceManager.saveDevice(tv);
     return tv.channels ?? [];
   }
@@ -353,9 +359,66 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
       return [];
     }
     const tv = await this.toLGTV(device);
+    const previousApps = tv.apps ? [...tv.apps] : [];
     await tv.updateApps();
+    if (tv.apps?.length) {
+      this.applyPreviousHomeAppNumbers(tv.apps, previousApps);
+    } else if (tv.apps === null || tv.apps === undefined) {
+      tv.apps = previousApps;
+    }
     this.deviceManager.saveDevice(tv);
     return tv.apps ?? [];
+  }
+
+  /**
+   * Übernimmt die ``homeChannelNumber`` der zuletzt bekannten Kanalliste in die neue Liste,
+   * sofern der Kanal über seine ID weiterhin existiert. Damit bleibt eine vom Nutzer
+   * eingestellte Reihenfolge nach einem Reload erhalten.
+   */
+  private applyPreviousHomeChannelNumbers(newChannels: Channel[], previousChannels: Channel[]): void {
+    if (!newChannels.length || !previousChannels.length) return;
+    const previousMap = new Map<string, number>();
+    for (const previous of previousChannels) {
+      const id = previous.getId();
+      const home = previous.getHomeChannelNumber();
+      if (id && typeof home === "number") {
+        previousMap.set(id, home);
+      }
+    }
+    if (previousMap.size === 0) return;
+    for (const channel of newChannels) {
+      const id = channel.getId();
+      if (!id) continue;
+      const previousNumber = previousMap.get(id);
+      if (typeof previousNumber === "number") {
+        channel.setHomeChannelNumber(previousNumber);
+      }
+    }
+  }
+
+  /**
+   * Übernimmt die ``homeAppNumber`` der zuletzt bekannten App-Liste in die neue Liste,
+   * sofern die App über ihre ID weiterhin existiert.
+   */
+  private applyPreviousHomeAppNumbers(newApps: App[], previousApps: App[]): void {
+    if (!newApps.length || !previousApps.length) return;
+    const previousMap = new Map<string, number>();
+    for (const previous of previousApps) {
+      const id = previous.getId();
+      const home = previous.getHomeAppNumber();
+      if (id && typeof home === "number") {
+        previousMap.set(id, home);
+      }
+    }
+    if (previousMap.size === 0) return;
+    for (const app of newApps) {
+      const id = app.getId();
+      if (!id) continue;
+      const previousNumber = previousMap.get(id);
+      if (typeof previousNumber === "number") {
+        app.setHomeAppNumber(previousNumber);
+      }
+    }
   }
 
   async getSelectedApp(deviceId: string) {
