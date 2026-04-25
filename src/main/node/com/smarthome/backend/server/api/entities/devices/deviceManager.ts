@@ -149,19 +149,15 @@ export class DeviceManager implements EntityManager {
    */
   async updateDeviceSettings(deviceId: string, patch: Record<string, unknown>): Promise<Device | null> {
     logger.error({ deviceId, patch }, "updateDeviceSettings");
-    console.log(this.devices);
     const existing = this.getDevice(deviceId);
     if (!existing) {
-      console.log("Device " + deviceId + " not found");
       return null;
     }
 
     const patchForApply: Record<string, unknown> = { ...patch };
 
     if ("temperatureGoal" in patchForApply) {
-      console.log(patchForApply);
       delete patchForApply["temperatureGoal"];
-      console.log(patchForApply);
     }
 
     if ("cleanSequence" in patchForApply && existing instanceof DeviceVacuumCleaner) {
@@ -231,7 +227,6 @@ export class DeviceManager implements EntityManager {
   }
 
   getDevice(deviceId: string): Device | null {
-    console.log(this.devices);
     return this.devices.get(deviceId) ?? null;
   }
 
