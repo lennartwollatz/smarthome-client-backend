@@ -1,5 +1,7 @@
 import { Event } from "./events/Event.js";
 
+const EVENT_LOG_MAX = 20_000;
+
 export class EventLogger {
     private events: Event[] = [];
 
@@ -9,6 +11,9 @@ export class EventLogger {
 
     public log(event: Event) {
         this.events.push(event);
+        if (this.events.length > EVENT_LOG_MAX) {
+            this.events = this.events.slice(-Math.floor(EVENT_LOG_MAX / 2));
+        }
     }
 
     public getEventsLast10Minutes(): Event[] {

@@ -32,6 +32,13 @@ function argsLooselyEqual(
 export class MatterSwitchBindingManager {
   private readonly repo: JsonRepository<Stored>;
   private getVirtual: () => MatterVirtualDeviceManager;
+  /**
+   * Index: pro Zielgerät die Bindings (ohne bei jedem System-Event `findAll` + DB).
+   * Zusätzlich: nur `targetDeviceId` mit mindestens einem Trigger, sonst leerer Callback-Body.
+   */
+  private bindingsByTargetId = new Map<string, Stored[]>();
+  private targetIdsWithAnyBinding = new Set<string>();
+  private targetIdsWithTrigger = new Set<string>();
 
   constructor(
     databaseManager: DatabaseManager,
@@ -41,9 +48,27 @@ export class MatterSwitchBindingManager {
   ) {
     this.repo = new JsonRepository<Stored>(databaseManager, "MatterSwitchTargetBinding");
     this.getVirtual = getVirtualDeviceManager;
+    this.rebuildBindingIndex();
     eventManager.addOnEventCallback(event => {
       this.onTargetDeviceEventForMatterFromTrigger(event);
     });
+  }
+
+  private rebuildBindingIndex(): void {
+    this.bindingsByTargetId.clear();
+    this.targetIdsWithAnyBinding.clear();
+    this.targetIdsWithTrigger.clear();
+    for (const b of this.repo.findAll()) {
+      const t = b.targetDeviceId;
+      this.targetIdsWithAnyBinding.add(t);
+      if (!this.bindingsByTargetId.has(t)) {
+        this.bindingsByTargetId.set(t, []);
+      }
+      this.bindingsByTargetId.get(t)!.push(b);
+      if (b.trueTriggerEvent?.trim() || b.falseTriggerEvent?.trim()) {
+        this.targetIdsWithTrigger.add(t);
+      }
+    }
   }
 
   getBinding(matterDeviceId: string): MatterSwitchTargetBinding | null {
@@ -95,12 +120,14 @@ export class MatterSwitchBindingManager {
       ...(fTrig ? { falseTriggerEvent: fTrig } : {}),
     };
     this.repo.save(binding.matterDeviceId, binding);
+    this.rebuildBindingIndex();
     return { success: true, binding };
   }
 
   deleteBinding(matterDeviceId: string): boolean {
     if (!matterDeviceId?.trim()) return false;
     this.repo.deleteById(matterDeviceId.trim());
+    this.rebuildBindingIndex();
     return true;
   }
 
@@ -110,47 +137,52 @@ export class MatterSwitchBindingManager {
    */
   private onTargetDeviceEventForMatterFromTrigger(event: Event): void {
     const { deviceId: targetId } = event;
-    if (!targetId) return;
+    if (!targetId || !this.targetIdsWithTrigger.has(targetId)) return;
     const ev = event.eventType as string;
-    for (const b of this.repo.findAll()) {
-      if (b.targetDeviceId !== targetId) continue;
+    const list = this.bindingsByTargetId.get(targetId);
+    if (!list?.length) return;
+    for (const b of list) {
       if (!b.trueTriggerEvent?.trim() && !b.falseTriggerEvent?.trim()) {
         continue;
       }
-      const vdm = this.getVirtual();
       if (b.trueTriggerEvent && matterSavedTriggerMatchesEvent(ev, b.trueTriggerEvent)) {
-        void vdm
-          .setMatterEndpointProgrammatically(b.matterDeviceId, VA_MATTER_BTN_ONOFF, true)
-          .catch(err => logger.warn({ err, matterDeviceId: b.matterDeviceId }, "Matter-Trigger: true-Endpoint setzen"));
+        this.deferMatterSet(b.matterDeviceId, true, "Matter-Trigger: true-Endpoint setzen");
         return;
       }
       if (b.falseTriggerEvent && matterSavedTriggerMatchesEvent(ev, b.falseTriggerEvent)) {
-        void vdm
-          .setMatterEndpointProgrammatically(b.matterDeviceId, VA_MATTER_BTN_ONOFF, false)
-          .catch(err => logger.warn({ err, matterDeviceId: b.matterDeviceId }, "Matter-Trigger: false-Endpoint setzen"));
+        this.deferMatterSet(b.matterDeviceId, false, "Matter-Trigger: false-Endpoint setzen");
         return;
       }
     }
   }
 
   /**
+   * Matter-Set nach dem `triggerEvent`-Stack (vermeidet synchrone Rückkopplung / hohe Kosten im Callback).
+   */
+  private deferMatterSet(matterDeviceId: string, isOn: boolean, warnLabel: string): void {
+    setImmediate(() => {
+      const vdm = this.getVirtual();
+      void vdm
+        .setMatterEndpointProgrammatically(matterDeviceId, VA_MATTER_BTN_ONOFF, isOn)
+        .catch(err => logger.warn({ err, matterDeviceId, warnLabel }, "Matter-Endpoint (deferred) setzen fehlgeschlagen"));
+    });
+  }
+
+  /**
    * Nach Workflows-Device-Methode: passende Matter-Endpoints setzen.
    */
   onTargetDeviceAction(deviceId: string, methodName: string, values: unknown[]): void {
+    if (!this.targetIdsWithAnyBinding.has(deviceId)) return;
     const base = stripParensBase(methodName);
-    for (const b of this.repo.findAll()) {
-      if (b.targetDeviceId !== deviceId) continue;
-      const vdm = this.getVirtual();
+    const list = this.bindingsByTargetId.get(deviceId);
+    if (!list?.length) return;
+    for (const b of list) {
       if (argsLooselyEqual(b.trueAction, base, values)) {
-        void vdm
-          .setMatterEndpointProgrammatically(b.matterDeviceId, VA_MATTER_BTN_ONOFF, true)
-          .catch(err => logger.warn({ err, matterDeviceId: b.matterDeviceId }, "Matter-Endpoint true setzen"));
+        this.deferMatterSet(b.matterDeviceId, true, "Matter-Endpoint true");
         return;
       }
       if (argsLooselyEqual(b.falseAction, base, values)) {
-        void vdm
-          .setMatterEndpointProgrammatically(b.matterDeviceId, VA_MATTER_BTN_ONOFF, false)
-          .catch(err => logger.warn({ err, matterDeviceId: b.matterDeviceId }, "Matter-Endpoint false setzen"));
+        this.deferMatterSet(b.matterDeviceId, false, "Matter-Endpoint false");
         return;
       }
     }
