@@ -23,7 +23,6 @@ import {
   invokeDeviceMethodOnDevice,
   stripParensBase,
 } from "../../../utils/deviceMethodInvoke.js";
-import { notifyMatterSwitchTargetDeviceAction } from "../../../ports/matterSwitchBindingPort.js";
 
 /**
  * Im Workflow angegebener Funktionsname muss 1:1 dem Prototyp des Geräts entsprechen
@@ -441,13 +440,7 @@ export class Action {
         );
         return;
       }
-      const out = invokeDeviceMethodOnDevice(device, methodName, normalized);
-      try {
-        notifyMatterSwitchTargetDeviceAction(device.id, baseMethodName, normalized);
-      } catch {
-        /* Binding optional */
-      }
-      return out;
+      return invokeDeviceMethodOnDevice(device, methodName, normalized);
     } catch (err) {
       logger.error(
         { err, methodName, deviceId: device.id },

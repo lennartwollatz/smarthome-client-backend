@@ -1,5 +1,6 @@
 import { logger } from "../../../logger.js";
 import { Device } from "../../../model/devices/Device.js";
+import { notifyMatterSwitchTargetDeviceAction } from "../ports/matterSwitchBindingPort.js";
 
 /**
  * Optionaler Klammerteil `foo()` abschneiden.
@@ -58,37 +59,41 @@ export function invokeDeviceMethodOnDevice(device: Device, methodName: string, v
       return;
     }
     const fn = resolved.fn;
+    let result: unknown;
     if (!values || values.length === 0) {
       if (fn.length >= 1) {
-        return fn.call(device, true);
+        result = fn.call(device, true);
       } else {
-        return fn.call(device);
+        result = fn.call(device);
       }
-    }
-    if (values.length === 1) {
+    } else if (values.length === 1) {
       const param = convertValue(values[0]);
       if (fn.length >= 2) {
-        return fn.call(device, param, true);
+        result = fn.call(device, param, true);
       } else {
-        return fn.call(device, param);
+        result = fn.call(device, param);
       }
-    }
-    if (values.length === 2) {
+    } else if (values.length === 2) {
       const param1 = convertValue(values[0]);
       const param2 = convertValue(values[1]);
       if (fn.length >= 3) {
-        return fn.call(device, param1, param2, true);
+        result = fn.call(device, param1, param2, true);
       } else {
-        return fn.call(device, param1, param2);
+        result = fn.call(device, param1, param2);
       }
-    }
-    if (values.length > 2) {
+    } else {
       if (fn.length >= 4) {
-        return fn.call(device, ...values, true);
+        result = fn.call(device, ...values, true);
       } else {
-        return fn.call(device, ...values);
+        result = fn.call(device, ...values);
       }
     }
+    try {
+      notifyMatterSwitchTargetDeviceAction(device.id, resolved.methodName, values);
+    } catch {
+      /* Matter-Bindings optional */
+    }
+    return result;
   } catch (err) {
     logger.error({ err, methodName, deviceId: device.id }, "Fehler bei invokeDeviceMethodOnDevice");
   }

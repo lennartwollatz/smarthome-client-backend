@@ -21,6 +21,8 @@ function argsLooselyEqual(
   const n = normalizeWorkflowArgList((a.values as unknown[] | undefined) ?? []);
   const m = normalizeWorkflowArgList(values);
   if (n.length === 0 && m.length === 0) return true;
+  /** In der UI oft `values: []` — tatsächliche Aufrufe liefern z. B. `[true]`. Selber Funktionsname reicht. */
+  if (n.length === 0) return true;
   return JSON.stringify(n) === JSON.stringify(m);
 }
 
