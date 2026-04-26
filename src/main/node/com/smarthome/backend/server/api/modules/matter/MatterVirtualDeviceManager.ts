@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { OnOffServer } from "@matter/node/behaviors/on-off";
 import { ServerNode, Endpoint, VendorId, DeviceTypeId } from "@matter/main";
 import { OnOffPlugInUnitDevice } from "@matter/main/devices";
@@ -390,7 +390,9 @@ export class MatterVirtualDeviceManager {
     userId?: string
   ): Promise<VirtualDeviceData> {
     this.ensureRuntime();
-    const nodeId = this.generateVirtualNodeId(deviceName);
+    // nodeId muss pro Neuanlage eindeutig sein — der Anzeigename ist oft identisch
+    // (z. B. immer „Matter Schalter“), daher zufälligen Suffix miteinbeziehen.
+    const nodeId = this.generateVirtualNodeId(`${deviceName}\0${randomUUID()}`);
     const passcode = this.generatePasscode();
     const discriminator = Math.floor(Math.random() * 4096);
     const port = this.allocatePort();
