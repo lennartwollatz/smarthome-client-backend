@@ -45,9 +45,22 @@ export class UserManager implements EntityManager {
     if (user.emailNotificationsEnabled == null) user.emailNotificationsEnabled = false;
     if (user.smsNotificationsEnabled == null) user.smsNotificationsEnabled = false;
 
+    // User zuerst anlegen, damit MatterVirtualDeviceManager.createPresenceDevice den Namen per findById setzen kann.
+    try {
+      this.userRepository.save(user.id, user);
+    } catch (err) {
+      logger.error({ err }, "createUser: initiales Speichern fehlgeschlagen");
+      return null;
+    }
+
+    let createdPresenceDeviceId: string | null = null;
     try {
       const matter = await this.matterModuleManager?.createPresenceDeviceForUser(user.id);
-      if (!matter) return null;
+      if (!matter) {
+        this.userRepository.deleteById(user.id);
+        return null;
+      }
+      createdPresenceDeviceId = matter.presenceDeviceId;
       user.presenceNodeId = matter.nodeId;
       user.presenceDevicePort = matter.port;
       user.presencePairingCode = matter.pairingCode;
@@ -55,11 +68,24 @@ export class UserManager implements EntityManager {
       user.presencePasscode = matter.passcode;
       user.presenceDiscriminator = matter.discriminator;
       user.presenceDeviceId = matter.presenceDeviceId;
+      this.userRepository.save(user.id, user);
     } catch (err) {
+      logger.error({ err }, "createUser: Matter-Presence fehlgeschlagen");
+      if (createdPresenceDeviceId && this.matterModuleManager) {
+        try {
+          await this.matterModuleManager.removeVirtualDevice(createdPresenceDeviceId);
+        } catch (rmErr) {
+          logger.error({ err: rmErr, deviceId: createdPresenceDeviceId }, "createUser: Rollback Matter-Geraet fehlgeschlagen");
+        }
+      }
+      try {
+        this.userRepository.deleteById(user.id);
+      } catch (delErr) {
+        logger.error({ err: delErr, userId: user.id }, "createUser: Rollback User loeschen fehlgeschlagen");
+      }
       return null;
     }
 
-    this.userRepository.save(user.id, user);
     return user;
   }
 

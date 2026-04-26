@@ -115,25 +115,33 @@ export class EventManager {
     }
 
     public async triggerEvent(event: Event) {
-        event.source = getCurrentSource();
-        this.eventLogger.log(event);
-        for (const cb of this.onEventCallbacks) {
-            try { cb(event); } catch { /* DataCollector-Fehler dürfen Events nicht blockieren */ }
-        }
-        const { deviceId, eventType } = event;
+        try {
+            event.source = getCurrentSource();
+            this.eventLogger.log(event);
+            for (const cb of this.onEventCallbacks) {
+                try { cb(event); } catch { /* DataCollector-Fehler dürfen Events nicht blockieren */ }
+            }
+            const { deviceId, eventType } = event;
 
-        if (!this.listeners.has(deviceId)) {
-            logger.warn({ deviceId, eventType }, "EventManager: Kein Listener fuer deviceId");
-            return;
-        }
-        const byDevice = this.listeners.get(deviceId)!;
-        if (!byDevice.has(eventType)) {
-            logger.warn({ deviceId, eventType }, "EventManager: Kein Listener fuer diesen Event-Typ");
-            return;
-        }
-        const listeners = byDevice.get(eventType)!;
-        for (const l of listeners) {
-            l.checkedRun(event);
+            if (!this.listeners.has(deviceId)) {
+                logger.warn({ deviceId, eventType }, "EventManager: Kein Listener fuer deviceId");
+                return;
+            }
+            const byDevice = this.listeners.get(deviceId)!;
+            if (!byDevice.has(eventType)) {
+                logger.warn({ deviceId, eventType }, "EventManager: Kein Listener fuer diesen Event-Typ");
+                return;
+            }
+            const listeners = byDevice.get(eventType)!;
+            for (const l of listeners) {
+                try {
+                    l.checkedRun(event);
+                } catch (err) {
+                    logger.error({ err, deviceId, eventType }, "EventManager: checkedRun fehlgeschlagen");
+                }
+            }
+        } catch (err) {
+            logger.error({ err }, "EventManager: triggerEvent fehlgeschlagen (abgefangen, kein unhandledRejection)");
         }
     }
 }
