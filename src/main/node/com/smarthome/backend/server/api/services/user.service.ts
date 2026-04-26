@@ -28,8 +28,8 @@ export function createUserRouter(deps: ServerDeps) {
     res.status(200).json({ success: true, user });
   });
 
-  router.post("/:userId/setPresent", async (req, res) => {
-    const user = await userManager.setUserPresent(req.params.userId);
+  router.post("/:userId/setPresent", (req, res) => {
+    const user = userManager.setUserPresent(req.params.userId);
     if (!user) {
       res.status(404).json({ success: false, error: "User not found" });
       return;
@@ -37,8 +37,8 @@ export function createUserRouter(deps: ServerDeps) {
     res.status(200).json({ success: true, user });
   });
 
-  router.post("/:userId/setAbsent", async (req, res) => {
-    const user = await userManager.setUserAbsent(req.params.userId);
+  router.post("/:userId/setAbsent", (req, res) => {
+    const user = userManager.setUserAbsent(req.params.userId);
     if (!user) {
       res.status(404).json({ success: false, error: "User not found" });
       return;

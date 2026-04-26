@@ -45,47 +45,20 @@ export class UserManager implements EntityManager {
     if (user.emailNotificationsEnabled == null) user.emailNotificationsEnabled = false;
     if (user.smsNotificationsEnabled == null) user.smsNotificationsEnabled = false;
 
-    // User zuerst anlegen, damit MatterVirtualDeviceManager.createPresenceDevice den Namen per findById setzen kann.
-    try {
-      this.userRepository.save(user.id, user);
-    } catch (err) {
-      logger.error({ err }, "createUser: initiales Speichern fehlgeschlagen");
-      return null;
-    }
-
-    let createdPresenceDeviceId: string | null = null;
     try {
       const matter = await this.matterModuleManager?.createPresenceDeviceForUser(user.id);
-      if (!matter) {
-        this.userRepository.deleteById(user.id);
-        return null;
-      }
-      createdPresenceDeviceId = matter.presenceDeviceId;
+      if (!matter) return null;
       user.presenceNodeId = matter.nodeId;
       user.presenceDevicePort = matter.port;
       user.presencePairingCode = matter.pairingCode;
-      user.presenceQrPairingCode = matter.qrPairingCode;
       user.presencePasscode = matter.passcode;
       user.presenceDiscriminator = matter.discriminator;
       user.presenceDeviceId = matter.presenceDeviceId;
-      this.userRepository.save(user.id, user);
     } catch (err) {
-      logger.error({ err }, "createUser: Matter-Presence fehlgeschlagen");
-      if (createdPresenceDeviceId && this.matterModuleManager) {
-        try {
-          await this.matterModuleManager.removeVirtualDevice(createdPresenceDeviceId);
-        } catch (rmErr) {
-          logger.error({ err: rmErr, deviceId: createdPresenceDeviceId }, "createUser: Rollback Matter-Geraet fehlgeschlagen");
-        }
-      }
-      try {
-        this.userRepository.deleteById(user.id);
-      } catch (delErr) {
-        logger.error({ err: delErr, userId: user.id }, "createUser: Rollback User loeschen fehlgeschlagen");
-      }
       return null;
     }
 
+    this.userRepository.save(user.id, user);
     return user;
   }
 
@@ -105,17 +78,6 @@ export class UserManager implements EntityManager {
       user.emailNotificationsEnabled = existingUser.emailNotificationsEnabled;
       user.smsNotificationsEnabled = existingUser.smsNotificationsEnabled;
       user.phoneNumber = existingUser.phoneNumber;
-      // Matter-/Anwesenheits-Metadaten: kommen nicht zuverlässig im JSON-Body an (bzw. fehlen Keys).
-      // JSON.stringify entfernt undefined — ohne diese Zeilen würde ein PUT die DB-Einträge löschen.
-      user.presenceNodeId = existingUser.presenceNodeId;
-      user.presenceDeviceId = existingUser.presenceDeviceId;
-      user.presencePairingCode = existingUser.presencePairingCode;
-      user.presenceQrPairingCode = existingUser.presenceQrPairingCode;
-      user.presencePasscode = existingUser.presencePasscode;
-      user.presenceDiscriminator = existingUser.presenceDiscriminator;
-      user.presenceDevicePort = existingUser.presenceDevicePort;
-      user.present = existingUser.present;
-      user.trackingToken = existingUser.trackingToken;
     }
 
     this.userRepository.save(user.id, user);
@@ -141,24 +103,20 @@ export class UserManager implements EntityManager {
     return user;
   }
 
-  async setUserPresent(userId: string): Promise<User | null> {
+  setUserPresent(userId: string): User | null {
     const user = this.userRepository.findById(userId);
     if (!user) return null;
-    if (!this.matterModuleManager) return null;
-    const ok = await this.matterModuleManager.setUserPresent(userId);
-    if (!ok) return null;
     user.present = true;
+    if (!this.matterModuleManager?.setUserPresent(user.id)) return null;
     this.userRepository.save(userId, user);
     return user;
   }
 
-  async setUserAbsent(userId: string): Promise<User | null> {
+  setUserAbsent(userId: string): User | null {
     const user = this.userRepository.findById(userId);
     if (!user) return null;
-    if (!this.matterModuleManager) return null;
-    const ok = await this.matterModuleManager.setUserAbsent(userId);
-    if (!ok) return null;
     user.present = false;
+    if (!this.matterModuleManager?.setUserAbsent(user.id)) return null;
     this.userRepository.save(userId, user);
     return user;
   }

@@ -14,8 +14,6 @@ export class User {
 
   presenceDevicePort: number = 0;
   presencePairingCode: string = "";
-  /** MT:… Matter-QR-Payload (wie vom virtuellen Server). */
-  presenceQrPairingCode: string = "";
   presencePasscode: number = 0;
   presenceDiscriminator: number = 0;
   presenceNodeId: string = "";
