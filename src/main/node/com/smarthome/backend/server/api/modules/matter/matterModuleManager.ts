@@ -477,12 +477,21 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     return MATTERCONFIG.managerId;
   }
 
-  async createPresenceDeviceForUser(userId: string): Promise<{ nodeId: string; port: number; pairingCode: string; passcode: number; discriminator: number; presenceDeviceId: string }> {
+  async createPresenceDeviceForUser(userId: string): Promise<{
+    nodeId: string;
+    port: number;
+    pairingCode: string;
+    qrPairingCode: string;
+    passcode: number;
+    discriminator: number;
+    presenceDeviceId: string;
+  }> {
     const data = await this.virtualDeviceManager.createPresenceDevice(userId);
     return {
       nodeId: data.nodeId,
       port: data.port,
       pairingCode: data.pairingCode,
+      qrPairingCode: data.qrPairingCode,
       passcode: data.passcode,
       discriminator: data.discriminator,
       presenceDeviceId: data.deviceId,

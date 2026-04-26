@@ -51,6 +51,7 @@ export class UserManager implements EntityManager {
       user.presenceNodeId = matter.nodeId;
       user.presenceDevicePort = matter.port;
       user.presencePairingCode = matter.pairingCode;
+      user.presenceQrPairingCode = matter.qrPairingCode;
       user.presencePasscode = matter.passcode;
       user.presenceDiscriminator = matter.discriminator;
       user.presenceDeviceId = matter.presenceDeviceId;
@@ -78,6 +79,17 @@ export class UserManager implements EntityManager {
       user.emailNotificationsEnabled = existingUser.emailNotificationsEnabled;
       user.smsNotificationsEnabled = existingUser.smsNotificationsEnabled;
       user.phoneNumber = existingUser.phoneNumber;
+      // Matter-/Anwesenheits-Metadaten: kommen nicht zuverlässig im JSON-Body an (bzw. fehlen Keys).
+      // JSON.stringify entfernt undefined — ohne diese Zeilen würde ein PUT die DB-Einträge löschen.
+      user.presenceNodeId = existingUser.presenceNodeId;
+      user.presenceDeviceId = existingUser.presenceDeviceId;
+      user.presencePairingCode = existingUser.presencePairingCode;
+      user.presenceQrPairingCode = existingUser.presenceQrPairingCode;
+      user.presencePasscode = existingUser.presencePasscode;
+      user.presenceDiscriminator = existingUser.presenceDiscriminator;
+      user.presenceDevicePort = existingUser.presenceDevicePort;
+      user.present = existingUser.present;
+      user.trackingToken = existingUser.trackingToken;
     }
 
     this.userRepository.save(user.id, user);
