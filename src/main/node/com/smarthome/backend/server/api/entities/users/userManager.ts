@@ -103,20 +103,24 @@ export class UserManager implements EntityManager {
     return user;
   }
 
-  setUserPresent(userId: string): User | null {
+  async setUserPresent(userId: string): Promise<User | null> {
     const user = this.userRepository.findById(userId);
     if (!user) return null;
+    if (!this.matterModuleManager) return null;
+    const ok = await this.matterModuleManager.setUserPresent(userId);
+    if (!ok) return null;
     user.present = true;
-    if (!this.matterModuleManager?.setUserPresent(user.id)) return null;
     this.userRepository.save(userId, user);
     return user;
   }
 
-  setUserAbsent(userId: string): User | null {
+  async setUserAbsent(userId: string): Promise<User | null> {
     const user = this.userRepository.findById(userId);
     if (!user) return null;
+    if (!this.matterModuleManager) return null;
+    const ok = await this.matterModuleManager.setUserAbsent(userId);
+    if (!ok) return null;
     user.present = false;
-    if (!this.matterModuleManager?.setUserAbsent(user.id)) return null;
     this.userRepository.save(userId, user);
     return user;
   }

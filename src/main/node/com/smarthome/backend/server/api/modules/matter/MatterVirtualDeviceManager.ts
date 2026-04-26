@@ -303,7 +303,7 @@ export class MatterVirtualDeviceManager {
     pairingCode: string,
     qrPairingCode: string
   ): void {
-    if (data.type !== DeviceType.VIRTUAL && data.type !== DeviceType.SPEECH_ASSISTANT) {
+    if (data.type !== DeviceType.VIRTUAL && data.type !== DeviceType.SPEECH_ASSISTANT && data.type !== DeviceType.PRESENCE) {
       return;
     }
     const d = device as Device & {
@@ -328,6 +328,7 @@ export class MatterVirtualDeviceManager {
     if (!device) {
       if (data.type === DeviceType.PRESENCE) {
         device = new DevicePresence({ id: data.deviceId, name: data.displayName, isConnected: true, isPairingMode: true });
+        this.applyStoredPairingToDevice(device, data, pairingCode, qrPairingCode);
       } else if (data.type === DeviceType.SPEECH_ASSISTANT) {
         device = new MatterSpeechAssistant(
           { id: data.deviceId, name: data.displayName, isConnected: true, isPairingMode: true },
@@ -434,11 +435,32 @@ export class MatterVirtualDeviceManager {
     return true;
   }
 
-  async setUserAbsent(deviceId: string): Promise<boolean> {
-    return this.setPresenceState(deviceId, false);
+  /**
+   * Wird mit **User-Id** (nicht deviceId) von {@link UserManager} aufgerufen.
+   * Zuvor fälschlich `getDevice(userId)` — Presence-Geräte hängen an `user.presenceDeviceId`.
+   */
+  async setUserAbsent(userId: string): Promise<boolean> {
+    const user = this.userManager.findById(userId);
+    if (!user?.presenceDeviceId) {
+      return false;
+    }
+    if (!this.setPresenceState(user.presenceDeviceId, false)) {
+      return false;
+    }
+    await this.setServerOnOff(user.presenceDeviceId, false);
+    return true;
   }
-  async setUserPresent(deviceId: string): Promise<boolean> {
-    return this.setPresenceState(deviceId, true);
+
+  async setUserPresent(userId: string): Promise<boolean> {
+    const user = this.userManager.findById(userId);
+    if (!user?.presenceDeviceId) {
+      return false;
+    }
+    if (!this.setPresenceState(user.presenceDeviceId, true)) {
+      return false;
+    }
+    await this.setServerOnOff(user.presenceDeviceId, true);
+    return true;
   }
 
   async setVirtualActive(deviceId: string): Promise<boolean> {
