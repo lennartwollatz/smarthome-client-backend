@@ -5,6 +5,7 @@ import { EventType } from "./event-types/EventType.js";
 import { EventLogger } from "./EventLogger.js";
 import { ActionRunnable } from "../api/entities/actions/runnable/ActionRunnable.js";
 import { ActionRunnableEventBased } from "../api/entities/actions/runnable/ActionRunnableEventBased.js";
+import { ActionRunnableTimeBased } from "../api/entities/actions/runnable/ActionRunnableTimeBased.js";
 import { getCurrentSource } from "./EventSource.js";
 
 export class EventManager {
@@ -38,6 +39,9 @@ export class EventManager {
     }
 
     public removeRunnable(runnable: ActionRunnable) {
+        if (runnable.type === "time") {
+            (runnable as ActionRunnableTimeBased).stop();
+        }
         const deviceId = runnable.type === "manual" ? runnable.actionId : runnable.type === "time" ? runnable.actionId : (runnable as ActionRunnableEventBased).event?.triggerDeviceId ?? "";
         const eventType = runnable.type === "manual" ? EventType.MANUAL : runnable.type === "time" ? EventType.TIME : (runnable as ActionRunnableEventBased).event?.triggerEvent ?? EventType.MANUAL;
 
@@ -62,10 +66,28 @@ export class EventManager {
     }
 
     public removeAllRunnables() {
+        for (const eventMap of this.listeners.values()) {
+            for (const listenersArr of eventMap.values()) {
+                for (const l of listenersArr) {
+                    if (l.runnable.type === "time") {
+                        (l.runnable as ActionRunnableTimeBased).stop();
+                    }
+                }
+            }
+        }
         this.listeners.clear();
     }
 
     public removeListenerForAction(actionId: string) {
+        for (const eventMap of this.listeners.values()) {
+            for (const listenersArr of eventMap.values()) {
+                for (const l of listenersArr) {
+                    if (l.runnable.actionId === actionId && l.runnable.type === "time") {
+                        (l.runnable as ActionRunnableTimeBased).stop();
+                    }
+                }
+            }
+        }
         this.listeners.delete(actionId);
         // Entferne alle EventListener aus der Klassenvariable listeners, deren runnable.actionId === actionId
         for (const eventMap of this.listeners.values()) {

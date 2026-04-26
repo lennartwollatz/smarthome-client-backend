@@ -167,6 +167,7 @@ export class Action {
       if(!data.timeTrigger) return;
       const runnable = new ActionRunnableTimeBased(this.actionId, data.runnable, data.timeTrigger);
       eventManager.addRunnable(runnable);
+      runnable.start();
     }
   }
 

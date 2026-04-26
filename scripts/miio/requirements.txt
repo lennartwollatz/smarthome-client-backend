@@ -1,0 +1,2 @@
+# Liefert Python-Modul ``miio`` (DeviceFactory, PushServer) und CLI ``miiocli`` (controller/discover).
+python-miio>=0.5.0
