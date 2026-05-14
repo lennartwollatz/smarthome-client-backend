@@ -222,16 +222,7 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
     const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
     
     for (const device of devices) {
-        if (device instanceof HueLight || 
-            device instanceof HueLightDimmer || 
-            device instanceof HueLightDimmerTemperatureColor || 
-            device instanceof HueLightDimmerTemperature || 
-            device instanceof HueLightLevelSensor || 
-            device instanceof HueTemperatureSensor || 
-            device instanceof HueMotionSensor ||
-            device instanceof HueSwitchDimmer) {
-          device.setHueDeviceController(this.deviceController);
-      }
+      (device as HueLight | HueLightDimmer | HueLightDimmerTemperatureColor | HueLightDimmerTemperature | HueLightLevelSensor | HueTemperatureSensor | HueMotionSensor | HueSwitchDimmer).setHueDeviceController(this.deviceController);
     }
   }
 }

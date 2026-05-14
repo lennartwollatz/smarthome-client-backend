@@ -22,7 +22,7 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
 
   constructor(managerId:string, controller: HueBridgeController, deviceManager: DeviceManager, databaseManager: DatabaseManager) {
     super(managerId, HUECONFIG.id, controller, deviceManager);
-    this.repository = new JsonRepository<HueBridgeDiscovered>(databaseManager, "HueDiscoveredBridge");
+    this.repository = new JsonRepository<HueBridgeDiscovered>(databaseManager, HUECONFIG.bridgeTypeName);
   }
 
   protected async startEventStream(callback: (event: HueEvent) => void): Promise<void> {
