@@ -9,6 +9,7 @@ export type LiveUpdateEvent =
   | "scene:removed"
   | "action:updated"
   | "action:removed"
+  | "actionExecution:updated"
   | "user:updated"
   | "toast";
 

@@ -4,6 +4,8 @@ import { DatabaseManager } from "./server/db/database.js";
 import { logger } from "./logger.js";
 import { EventManager } from "./server/events/EventManager.js";
 import { ActionManager } from "./server/api/entities/actions/ActionManager.js";
+import { ActionExecutionStore } from "./server/db/actionExecutionStore.js";
+import { ActionExecutionService } from "./server/api/entities/actions/execution/actionExecutionService.js";
 import { UserManager } from "./server/api/entities/users/userManager.js";
 import { SettingManager } from "./server/api/entities/settings/settingManager.js";
 import { FloorplanManager } from "./server/api/entities/floorplan/floorplanManager.js";
@@ -24,7 +26,18 @@ const sceneManager = new SceneManager(databaseManager, eventManager);
 const deviceManager = new DeviceManager(databaseManager, eventManager);
 const floorplanManager = new FloorplanManager(databaseManager, deviceManager);
 const userManager = new UserManager(databaseManager);
-const actionManager = new ActionManager(databaseManager, eventManager, floorplanManager, settingManager, sceneManager, deviceManager, userManager);
+const actionExecutionStore = new ActionExecutionStore(databaseManager);
+const actionExecutionService = new ActionExecutionService(actionExecutionStore);
+const actionManager = new ActionManager(
+  databaseManager,
+  eventManager,
+  floorplanManager,
+  settingManager,
+  sceneManager,
+  deviceManager,
+  userManager,
+  actionExecutionService
+);
 
 const dataCollector = new DataCollector(mlDbPath, deviceManager, settingManager, userManager, sceneManager);
 eventManager.addOnEventCallback((event) => dataCollector.onEvent(event));

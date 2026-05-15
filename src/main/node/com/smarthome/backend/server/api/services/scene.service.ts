@@ -8,7 +8,7 @@ async function runActionsForScene(deps: ServerDeps, actionIds: string[], sceneId
   const unique = [...new Set(actionIds.filter((id) => typeof id === "string" && id.trim() !== ""))];
   for (const actionId of unique) {
     try {
-      await deps.actionManager.runActionIgnoringTrigger(actionId);
+      await deps.actionManager.runActionIgnoringTrigger(actionId, "scene");
     } catch (err) {
       logger.warn({ err, actionId, sceneId, phase }, "Szene: Aktion konnte nicht ausgefuehrt werden");
     }

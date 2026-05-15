@@ -12,6 +12,8 @@ import { EntityManager } from "../EntityManager.js";
 import { MatterModuleManager } from "../../modules/matter/matterModuleManager.js";
 import { VoiceAssistantTrigger, type VoiceAssistantCommandAction } from "./action/VoiceAssistantTrigger.js";
 import type { ActionRunnableResponse } from "./runnable/ActionRunnableResponse.js";
+import type { ActionExecutionService } from "./execution/actionExecutionService.js";
+import type { ActionExecution, ActionExecutionTrigger } from "./execution/actionExecution.js";
 
 
 export class ActionManager implements EntityManager {
@@ -21,9 +23,23 @@ export class ActionManager implements EntityManager {
   private actions = new Map<string, Action>();
   
 
-  constructor(databaseManager: DatabaseManager, private eventManager: EventManager, private floorplanManager: FloorplanManager, private settingManager: SettingManager, private sceneManager: SceneManager, private deviceManager: DeviceManager, private userManager: UserManager) {
+  constructor(
+    databaseManager: DatabaseManager,
+    private eventManager: EventManager,
+    private floorplanManager: FloorplanManager,
+    private settingManager: SettingManager,
+    private sceneManager: SceneManager,
+    private deviceManager: DeviceManager,
+    private userManager: UserManager,
+    private readonly executionService?: ActionExecutionService
+  ) {
     this.actionRepository = new JsonRepository<Action>(databaseManager, "Action");
     this.initialize();
+  }
+
+  private wireExecutionService(action: Action): void {
+    action.setExecutionService(this.executionService);
+    action.setActionNameResolver((actionId) => this.actions.get(actionId)?.name);
   }
 
   initialize() {
@@ -33,6 +49,7 @@ export class ActionManager implements EntityManager {
 
   setLiveUpdateService(service: LiveUpdateService): void {
     this.liveUpdateService = service;
+    this.executionService?.setLiveUpdateService(service);
   }
 
   setMatterModuleManager(moduleManager: MatterModuleManager): void {
@@ -44,6 +61,7 @@ export class ActionManager implements EntityManager {
     actionDataList.forEach(actionData => {
       if (actionData?.actionId) {
         const action = new Action(actionData);
+        this.wireExecutionService(action);
         this.actions.set(action.actionId, action);
       }
     });
@@ -94,6 +112,7 @@ export class ActionManager implements EntityManager {
       return this.updateAction(action);
     }
     const instance = new Action(action);
+    this.wireExecutionService(instance);
     if(instance.triggerType === "voice_assistant") {
       this.createVoiceAssistantForAction(instance, instance.getVoiceAssistantTriggerKeyword(), instance.getVoiceAssistantTriggerActionType(), instance.getVoiceAssistantTriggerDeviceId() ?? undefined);
     }
@@ -108,6 +127,7 @@ export class ActionManager implements EntityManager {
 
   updateAction(instanceRaw: Action): Action | null {
     const instance = new Action(instanceRaw);
+    this.wireExecutionService(instance);
     const action = this.actions.get(instance.actionId);
     if (!action) return null;
     this.eventManager.removeListenerForAction(action.actionId);
@@ -206,7 +226,10 @@ export class ActionManager implements EntityManager {
   /**
    * Führt eine Aktion sofort aus (Workflow ab Startknoten), unabhängig vom Trigger-Typ.
    */
-  runActionIgnoringTrigger(actionId: string): Promise<ActionRunnableResponse> {
+  runActionIgnoringTrigger(
+    actionId: string,
+    triggerOverride?: ActionExecutionTrigger
+  ): Promise<ActionRunnableResponse> {
     const action = this.actions.get(actionId);
     if (!action) {
       return Promise.resolve({
@@ -215,9 +238,26 @@ export class ActionManager implements EntityManager {
         environment: { environment: new Map() }
       });
     }
+    if (triggerOverride) {
+      this.executionService?.setTriggerOverride(actionId, triggerOverride);
+    }
     const devices = this.deviceManager.getDevicesMap();
     const scenes = this.sceneManager.getScenesMap();
-    return action.runWorkflowIgnoringTrigger(devices, scenes, this.eventManager);
+    return action
+      .runWorkflowIgnoringTrigger(devices, scenes, this.eventManager)
+      .finally(() => {
+        if (triggerOverride) {
+          this.executionService?.clearTriggerOverride(actionId);
+        }
+      });
+  }
+
+  getExecutions(): ActionExecution[] {
+    return this.executionService?.getExecutions() ?? [];
+  }
+
+  getExecution(executionId: string): ActionExecution | null {
+    return this.executionService?.getExecution(executionId) ?? null;
   }
 
   acceptAiSuggestion(actionId: string): Action | null {

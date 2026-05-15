@@ -24,7 +24,14 @@ import {
   stripParensBase,
 } from "../../../utils/deviceMethodInvoke.js";
 import { executeRoomCategoryAction } from "../../../utils/roomCategoryActionExecutor.js";
-import { evaluateTimeCondition, millisecondsUntilLocalTime } from "../../../utils/timeConditionEvaluate.js";
+import {
+  evaluateTimeCondition,
+  getCurrentLocalMinutes,
+  millisecondsUntilLocalTime,
+} from "../../../utils/timeConditionEvaluate.js";
+import type { ActionExecutionConditionComparison } from "../execution/actionExecution.js";
+import type { ActionExecutionService } from "../execution/actionExecutionService.js";
+import type { ActionExecutionInvocation } from "../execution/actionExecution.js";
 
 /**
  * Im Workflow angegebener Funktionsname muss 1:1 dem Prototyp des Geräts entsprechen
@@ -85,8 +92,12 @@ type SceneMap = Map<string, Scene>;
 
 export type TriggerType = "manual" | "device" | "time" | "voice_assistant";
 
+type NodeExecContext = { parallelGroupId?: string; executionMode?: "sequential" | "parallel" };
+
 export class Action {
   private isExecuting = false;
+  private executionService?: ActionExecutionService;
+  private actionNameResolver?: (actionId: string) => string | undefined;
 
   actionId!: string;
   name!: string;
@@ -112,6 +123,19 @@ export class Action {
       this.workflow = new Workflow(init.workflow);
     }
     this.category = Action.normalizeCategory(this.category);
+  }
+
+  setExecutionService(service: ActionExecutionService | undefined): void {
+    this.executionService = service;
+  }
+
+  setActionNameResolver(resolver: ((actionId: string) => string | undefined) | undefined): void {
+    this.actionNameResolver = resolver;
+  }
+
+  private resolveActionDisplayName(actionId: string): string {
+    const resolved = this.actionNameResolver?.(actionId)?.trim();
+    return resolved && resolved.length > 0 ? resolved : actionId;
   }
 
   /**
@@ -293,42 +317,63 @@ export class Action {
     eventManager: EventManager,
     environment: ActionRunnableEnvironment
   ): Promise<ActionRunnableResponse> {
+    const execSvc = this.executionService;
+    const ownsExecution = Boolean(execSvc && !environment.executionId);
+    if (ownsExecution && execSvc) {
+      const trigger = environment.parentExecutionId ? "nested" : undefined;
+      const eid = execSvc.beginExecution(
+        this,
+        trigger,
+        environment.parentExecutionId
+      );
+      if (eid) environment.executionId = eid;
+    }
+
+    const finishExecution = (response: ActionRunnableResponse) => {
+      if (ownsExecution && execSvc) {
+        execSvc.finalize(this.actionId, response);
+      }
+      return response;
+    };
+
     if (this.isExecuting) {
-      return {
+      const response: ActionRunnableResponse = {
         success: true,
         warning: "Action wird bereits ausgefuehrt - Trigger ignoriert",
         environment: environment
       };
+      return finishExecution(response);
     }
     this.isExecuting = true;
 
     try {
       if (!this.workflow?.nodes || this.workflow.nodes.length <= 1) {
         logger.warn({ actionId: this.actionId }, "executeWorkflow: Kein ausführbarer Workflow (zu wenige Knoten)");
-        return {
+        return finishExecution({
           success: true,
           warning: "Kein ausführbarer Workflow (zu wenige Knoten)",
           environment: environment
-        };
+        });
       }
 
       const startNode = this.resolveStartNode(this.workflow);
       if (!startNode) {
         logger.warn({ actionId: this.actionId }, "executeWorkflow: Kein Startknoten");
-        return {
+        return finishExecution({
           success: false,
           error: "Kein Startknoten fuer Action gefunden, obwohl mehrere Nodes vorhanden sind",
           environment: environment
-        };
+        });
       }
 
-      return await this.executeNode(startNode, devices, scenes, eventManager, environment);
+      const result = await this.executeNode(startNode, devices, scenes, eventManager, environment);
+      return finishExecution(result);
     } catch (error) {
-      return {
+      return finishExecution({
         success: false,
-        error: error as string ?? "Unbekannter Fehler",
+        error: error instanceof Error ? error.message : String(error ?? "Unbekannter Fehler"),
         environment: environment
-      };
+      });
     } finally {
       this.isExecuting = false;
     }
@@ -339,7 +384,8 @@ export class Action {
     devices: DeviceMap,
     scenes: SceneMap,
     eventManager: EventManager,
-    environment: ActionRunnableEnvironment
+    environment: ActionRunnableEnvironment,
+    execContext?: NodeExecContext
   ): Promise<ActionRunnableResponse> {
     if (!node) return {
       success: false,
@@ -355,34 +401,50 @@ export class Action {
       };
     }
 
+    this.executionService?.recordNodeStart(this.actionId, node, execContext);
+
+    let result: ActionRunnableResponse;
     try {
       switch (nodeType) {
         case "trigger":
-          return await this.executeNextNodes(node, devices, scenes, eventManager, environment);
+          result = await this.executeNextNodes(node, devices, scenes, eventManager, environment);
+          break;
         case "action":
-          return await this.executeActionNode(node, devices, scenes, eventManager, environment);
+          result = await this.executeActionNode(node, devices, scenes, eventManager, environment);
+          break;
         case "condition":
-          return await this.executeConditionNode(node, devices, scenes, eventManager, environment);
+          result = await this.executeConditionNode(node, devices, scenes, eventManager, environment);
+          break;
         case "wait":
-          return await this.executeWaitNode(node, devices, scenes, eventManager, environment);
+          result = await this.executeWaitNode(node, devices, scenes, eventManager, environment);
+          break;
         case "loop":
-          return await this.executeLoopNode(node, devices, scenes, eventManager, environment);
+          result = await this.executeLoopNode(node, devices, scenes, eventManager, environment);
+          break;
         case "variable":
-          return await this.executeVariableNode(node, devices, scenes, eventManager, environment);
+          result = await this.executeVariableNode(node, devices, scenes, eventManager, environment);
+          break;
         default:
-          return {
+          result = {
             success: false,
             error: `Node ${node.name} hat einen unbekannten Typ: ${nodeType}`,
             environment: environment
           };
       }
     } catch (error) {
-      return {
+      result = {
         success: false,
-        error: error as string ?? "Unbekannter Fehler",
+        error: error instanceof Error ? error.message : String(error ?? "Unbekannter Fehler"),
         environment: environment
       };
     }
+
+    this.executionService?.recordNodeEnd(this.actionId, result);
+    return result;
+  }
+
+  private recordInvocation(invocation: ActionExecutionInvocation): void {
+    this.executionService?.recordInvocation(this.actionId, invocation);
   }
 
   private async executeActionNode(
@@ -420,7 +482,35 @@ export class Action {
         const stepAction = step?.action;
         if (!stepAction) continue;
         const stepValues = normalizeWorkflowArgList((step.values ?? []) as unknown[]);
-        const methodOut = await this.invokeDeviceMethod(device, stepAction, stepValues);
+        let methodOut: unknown;
+        try {
+          methodOut = await this.invokeDeviceMethod(device, stepAction, stepValues);
+          this.recordInvocation({
+            kind: "device",
+            label: stripParensBase(stepAction),
+            args: stepValues,
+            result: methodOut,
+            target: {
+              deviceId,
+              deviceName: device.name ?? deviceId,
+              method: stepAction,
+            },
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.recordInvocation({
+            kind: "device",
+            label: stripParensBase(stepAction),
+            args: stepValues,
+            error: msg,
+            target: {
+              deviceId,
+              deviceName: device.name ?? deviceId,
+              method: stepAction,
+            },
+          });
+          throw err;
+        }
         if (methodOut !== undefined && methodOut !== null) {
           const envKey = baseNodeKey
             ? `${baseNodeKey}:step${i}`
@@ -440,7 +530,23 @@ export class Action {
       } else {
         const nested = eventManager.getRunnable(nestedActionId);
         if (nested?.type === "manual") {
-          result = await (nested as ActionRunnableManualBased).run(result.environment);
+          const nestedEnv: ActionRunnableEnvironment = {
+            environment: result.environment.environment,
+            parentExecutionId: environment.executionId,
+          };
+          result = await (nested as ActionRunnableManualBased).run(nestedEnv);
+          const nestedName = this.resolveActionDisplayName(nestedActionId);
+          this.recordInvocation({
+            kind: "nested_action",
+            label: nestedName,
+            nestedExecutionId: nestedEnv.executionId,
+            result: result.success,
+            error: result.error,
+            target: {
+              actionId: nestedActionId,
+              actionName: nestedName,
+            },
+          });
         } else {
           result = {
             success: result.success,
@@ -452,6 +558,20 @@ export class Action {
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     } else if (actionType === "room") {
       const roomWarnings = await executeRoomCategoryAction(actionConfig, devices);
+      const roomId = actionConfig.roomId?.trim() || undefined;
+      const roomCategory = actionConfig.roomCategory?.trim() || undefined;
+      const roomCommand = actionConfig.roomCommand?.trim() || undefined;
+      this.recordInvocation({
+        kind: "room",
+        label: roomCategory ?? roomId ?? "room",
+        args: [roomCommand ?? roomCategory],
+        result: roomWarnings.length === 0 ? true : roomWarnings,
+        target: {
+          roomId,
+          roomCategory,
+          roomCommand,
+        },
+      });
       if (roomWarnings.length > 0) {
         result = {
           success: result.success,
@@ -517,7 +637,13 @@ export class Action {
       result = {success: result.success, warning: `Condition-Node ${node.name} hat keine ConditionConfig`, environment: result.environment};
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     }
-    const conditionResult = this.evaluateCondition(conditionConfig, devices, environment);
+    const evaluated = this.evaluateConditionWithDetails(conditionConfig, devices, environment);
+    this.recordInvocation({
+      kind: "condition_branch",
+      label: evaluated.result ? "true" : "false",
+      comparison: evaluated.comparison,
+    });
+    const conditionResult = evaluated.result;
     const nextNodes = conditionResult ? node.trueNodes : node.falseNodes;
     if (nextNodes && nextNodes.length) {
       for (const nextNodeId of nextNodes) {
@@ -566,60 +692,148 @@ export class Action {
     }
     const value = String(variableConfig.value ?? "");
     result.environment.environment.set(`var:${name}`, value);
+    this.recordInvocation({
+      kind: "variable",
+      label: name,
+      args: [value],
+    });
     return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
+  }
+
+  private formatLocalTimeFromMinutes(minutes: number): string {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   }
 
   private evaluateCondition(
     conditionConfig: ConditionConfig,
     devices: DeviceMap,
     environment?: ActionRunnableEnvironment
-  ) {
+  ): boolean {
+    return this.evaluateConditionWithDetails(conditionConfig, devices, environment).result;
+  }
+
+  private evaluateConditionWithDetails(
+    conditionConfig: ConditionConfig,
+    devices: DeviceMap,
+    environment?: ActionRunnableEnvironment
+  ): { result: boolean; comparison: ActionExecutionConditionComparison } {
     if (conditionConfig.source === "time") {
-      return evaluateTimeCondition(
-        conditionConfig.operator,
-        conditionConfig.compareLiteral != null
-          ? String(conditionConfig.compareLiteral)
-          : undefined
-      );
+      const target = conditionConfig.compareLiteral != null
+        ? String(conditionConfig.compareLiteral)
+        : undefined;
+      const operator = conditionConfig.operator ?? "equals";
+      const nowMinutes = getCurrentLocalMinutes();
+      const currentTime = this.formatLocalTimeFromMinutes(nowMinutes);
+      const result = evaluateTimeCondition(operator, target);
+      return {
+        result,
+        comparison: {
+          source: "time",
+          operator,
+          left: currentTime,
+          right: target ?? "",
+          leftDescription: "Aktuelle Uhrzeit",
+          rightDescription: "Ziel-Uhrzeit",
+        },
+      };
     }
 
-    // Variable-Quelle: Vergleich einer Workflow-Variable gegen Literal oder andere Variable.
     if (conditionConfig.source === "variable") {
       const env = environment?.environment;
       const leftName = (conditionConfig.variableName ?? "").trim();
       const left = env && leftName ? String(env.get(`var:${leftName}`) ?? "") : "";
       const compareSource = conditionConfig.compareSource ?? "literal";
+      const operator = conditionConfig.operator ?? "equals";
       let right: string;
+      let rightDescription: string;
       if (compareSource === "variable") {
         const rightName = (conditionConfig.compareVariableName ?? "").trim();
         right = env && rightName ? String(env.get(`var:${rightName}`) ?? "") : "";
+        rightDescription = rightName ? `Variable "${rightName}"` : "Variable";
       } else {
         right = String(conditionConfig.compareLiteral ?? "");
+        rightDescription = "Literal";
       }
-      return conditionConfig.operator === "notEquals" ? left !== right : left === right;
+      const result = operator === "notEquals" ? left !== right : left === right;
+      return {
+        result,
+        comparison: {
+          source: "variable",
+          operator,
+          left,
+          right,
+          leftDescription: leftName ? `Variable "${leftName}"` : "Variable",
+          rightDescription,
+        },
+      };
     }
 
-    // Standard: Device-Quelle (rueckwaertskompatibel).
     const deviceId = conditionConfig.deviceId;
-    const property = conditionConfig.property;
+    const property = conditionConfig.property ?? "";
     const values = normalizeWorkflowArgList((conditionConfig.values ?? []) as unknown[]);
-    if (!deviceId || !property) return false;
-    const device = this.getWorkflowDevice(deviceId, devices);
-    if (!device) return false;
-    const resolved = getDeviceMethodExact(device, property);
-    if (!resolved) return false;
-    const fn = resolved.fn;
+    const device = deviceId ? this.getWorkflowDevice(deviceId, devices) : null;
+    const deviceLabel = device?.name ?? deviceId ?? "Gerät";
 
+    if (!deviceId || !property) {
+      return {
+        result: false,
+        comparison: {
+          source: "device",
+          leftDescription: `${deviceLabel}.${property || "?"}`,
+          left: false,
+        },
+      };
+    }
+    if (!device) {
+      return {
+        result: false,
+        comparison: {
+          source: "device",
+          leftDescription: `${deviceLabel}.${property}`,
+          left: false,
+          rightDescription: "Gerät nicht gefunden",
+        },
+      };
+    }
+    const resolved = getDeviceMethodExact(device, property);
+    if (!resolved) {
+      return {
+        result: false,
+        comparison: {
+          source: "device",
+          leftDescription: `${deviceLabel}.${property}`,
+          left: false,
+          rightDescription: "Methode nicht gefunden",
+        },
+      };
+    }
+    const fn = resolved.fn;
+    const callLabel =
+      values.length > 0
+        ? `${deviceLabel}.${stripParensBase(property)}(${values.map(v => JSON.stringify(v)).join(", ")})`
+        : `${deviceLabel}.${stripParensBase(property)}()`;
+
+    let rawResult: unknown;
     if (!values || values.length === 0) {
-      const result = fn.call(device);
-      return Boolean(result);
+      rawResult = fn.call(device);
+    } else if (values.length === 1) {
+      rawResult = fn.call(device, this.convertValue(values[0]));
+    } else {
+      rawResult = fn.call(device, this.convertValue(values[0]), this.convertValue(values[1]));
     }
-    if (values.length === 1) {
-      const result = fn.call(device, this.convertValue(values[0]));
-      return Boolean(result);
-    }
-    const result = fn.call(device, this.convertValue(values[0]), this.convertValue(values[1]));
-    return Boolean(result);
+    const result = Boolean(rawResult);
+    return {
+      result,
+      comparison: {
+        source: "device",
+        operator: "truthy",
+        left: rawResult,
+        leftDescription: callLabel,
+        rightDescription: "Erwartet: wahr",
+      },
+    };
   }
 
   private async executeWaitNode(
@@ -637,6 +851,7 @@ export class Action {
 
     if (waitConfig.type === "time") {
       const waitTime = waitConfig.waitTime ?? 0;
+      this.recordInvocation({ kind: "wait", label: "time", args: [waitTime] });
       if (waitTime > 0) {
         await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
       }
@@ -644,6 +859,9 @@ export class Action {
     }
 
     if (waitConfig.type === "untilTime") {
+      const untilLabel =
+        waitConfig.waitUntilTime != null ? String(waitConfig.waitUntilTime) : "";
+      this.recordInvocation({ kind: "wait", label: "untilTime", args: [untilLabel] });
       const ms = millisecondsUntilLocalTime(
         waitConfig.waitUntilTime != null ? String(waitConfig.waitUntilTime) : undefined
       );
@@ -660,6 +878,11 @@ export class Action {
     }
 
     if (waitConfig.type === "trigger") {
+      this.recordInvocation({
+        kind: "wait",
+        label: "trigger",
+        args: [waitConfig.deviceId, waitConfig.triggerEvent, waitConfig.timeout],
+      });
       const deviceId = waitConfig.deviceId;
       const triggerEvent = waitConfig.triggerEvent;
       const triggerValues = workflowTriggerValuesToEventParameters(
@@ -735,10 +958,18 @@ export class Action {
     if (loopConfig.type === "for") {
       const count = loopConfig.count ?? 0;
       for (let i = 0; i < count; i += 1) {
+        const groupId = `loop:${node.nodeId ?? node.name}:iter:${i}`;
         for (const loopNodeId of loopNodes) {
           const loopNode = this.findNodeById(this.workflow?.nodes, loopNodeId);
           if (loopNode) {
-            result = await this.executeNode(loopNode, devices, scenes, eventManager, result.environment);
+            result = await this.executeNode(
+              loopNode,
+              devices,
+              scenes,
+              eventManager,
+              result.environment,
+              { parallelGroupId: groupId }
+            );
             if(!result.success) {
               return result;
             }
@@ -759,10 +990,18 @@ export class Action {
         }
         const conditionResult = condition ? this.evaluateCondition(condition, devices, result.environment) : false;
         if (!conditionResult) break;
+        const groupId = `loop:${node.nodeId ?? node.name}:iter:${iteration}`;
         for (const loopNodeId of loopNodes) {
           const loopNode = this.findNodeById(this.workflow?.nodes, loopNodeId);
           if (loopNode) {
-            result = await this.executeNode(loopNode, devices, scenes, eventManager, result.environment);
+            result = await this.executeNode(
+              loopNode,
+              devices,
+              scenes,
+              eventManager,
+              result.environment,
+              { parallelGroupId: groupId }
+            );
             if(!result.success) {
               return result;
             }

@@ -65,6 +65,19 @@ export function createActionRouter(deps: ServerDeps) {
     res.status(200).json(updated);
   });
 
+  router.get("/executions", (_req, res) => {
+    res.status(200).json(deps.actionManager.getExecutions());
+  });
+
+  router.get("/executions/:executionId", (req, res) => {
+    const execution = deps.actionManager.getExecution(req.params.executionId);
+    if (execution) {
+      res.status(200).json(execution);
+    } else {
+      res.status(404).json({ error: "Execution not found" });
+    }
+  });
+
   router.get("/", (_req, res) => {
     res.status(200).json(deps.actionManager.getActions());
   });
@@ -168,7 +181,7 @@ export function createActionRouter(deps: ServerDeps) {
   /** Workflow direkt starten (Trigger wird ignoriert), z. B. zum Testen aus der Aktionsliste. */
   router.post("/:actionId/run-now", async (req, res) => {
     try {
-      const result = await deps.actionManager.runActionIgnoringTrigger(req.params.actionId);
+      const result = await deps.actionManager.runActionIgnoringTrigger(req.params.actionId, "run_now");
       const payload = {
         success: result.success,
         error: result.error,
