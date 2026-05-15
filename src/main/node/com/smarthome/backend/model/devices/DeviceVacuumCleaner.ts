@@ -393,6 +393,23 @@ export abstract class DeviceVacuumCleaner extends Device {
 
   protected abstract executeDock(): Promise<void>;
 
+  /**
+   * Workflows liefern oft einen einzelnen Grundriss-Raum als `string`; {@link invokeDeviceMethodOnDevice}
+   * übergibt diesen als ersten Parameter ohne Array-Hülle — hier zu `string[]` normalisieren.
+   */
+  protected normalizeRoomIdsForCleaning(roomIds: unknown): string[] {
+    if (Array.isArray(roomIds)) {
+      return roomIds.map((x) => String(x)).filter((s) => s.trim() !== "");
+    }
+    if (typeof roomIds === "string") {
+      const s = roomIds.trim();
+      return s === "" ? [] : [s];
+    }
+    if (typeof roomIds === "number" && Number.isFinite(roomIds)) {
+      return [String(roomIds)];
+    }
+    return [];
+  }
 
   protected resolveSegmentIdsForRoomCleaning(incomingRoomIds: string[]): string[] {
     const mapping = this.roomMapping;
@@ -410,15 +427,16 @@ export abstract class DeviceVacuumCleaner extends Device {
   }
 
   async startCleaningRoom(roomIds: string[], execute: boolean, trigger: boolean = true) {
+    const normalizedRoomIds = this.normalizeRoomIdsForCleaning(roomIds);
     const deviceBefore = { ...this };
     this.deviceState.mode = DEVICE_MODE.CLEANING_ROOM;
-    this.deviceState.currentRooms = roomIds;
+    this.deviceState.currentRooms = normalizedRoomIds;
     if (execute) {
-      await this.executeStartCleaningRoom(roomIds);
+      await this.executeStartCleaningRoom(normalizedRoomIds);
     }
     if (trigger) {
       this.eventManager?.triggerEvent(new EventVacuumCleaningStarted(this.id, deviceBefore));
-      this.eventManager?.triggerEvent(new EventVacuumCleaningRoomStarted(this.id, deviceBefore, roomIds));
+      this.eventManager?.triggerEvent(new EventVacuumCleaningRoomStarted(this.id, deviceBefore, normalizedRoomIds));
       this.eventManager?.triggerEvent(new EventVacuumStatusChanged(this.id, deviceBefore, { ...this }));
     }
   }
