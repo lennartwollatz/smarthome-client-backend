@@ -146,7 +146,8 @@ async function invokeAndAwait(device: Device, methodName: string, values: unknow
 
 async function applyLightCommand(device: Device, command: RoomCommand): Promise<void> {
   const type = String(device.type);
-  if (type === DeviceType.LIGHT) {
+  /* Alle Licht-Typen (dimmer, Farbtemperatur, …) erben setOn/setOff von DeviceLight. */
+  if (LIGHT_TYPES.has(type)) {
     await invokeAndAwait(device, command === "on" ? "setOn" : "setOff");
     return;
   }

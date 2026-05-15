@@ -117,6 +117,35 @@ describe("roomCategoryActionExecutor", () => {
       expect(spy).toHaveBeenCalledWith(light, "setOff", []);
     });
 
+    it("ruft setOff auch fuer light-dimmer und Farblicht-Typen auf", async () => {
+      const dimmer = mockDevice({ id: "d1", type: DeviceType.LIGHT_DIMMER, room: "room-a" });
+      dimmer.setOff = vi.fn().mockResolvedValue(undefined);
+      const ct = mockDevice({ id: "t1", type: DeviceType.LIGHT_DIMMER_TEMPERATURE, room: "room-a" });
+      ct.setOff = vi.fn().mockResolvedValue(undefined);
+      const rgb = mockDevice({ id: "c1", type: DeviceType.LIGHT_DIMMER_TEMPERATURE_COLOR, room: "room-a" });
+      rgb.setOff = vi.fn().mockResolvedValue(undefined);
+
+      const spy = vi.spyOn(deviceMethodInvoke, "invokeDeviceMethodOnDevice");
+
+      const config = new ActionConfig({
+        type: "room",
+        roomId: "room-a",
+        roomCategory: "light",
+        roomCommand: "off",
+      });
+
+      const map = new Map([
+        [dimmer.id, dimmer],
+        [ct.id, ct],
+        [rgb.id, rgb],
+      ]);
+      const warnings = await executeRoomCategoryAction(config, map);
+      expect(warnings).toEqual([]);
+      expect(spy).toHaveBeenCalledWith(dimmer, "setOff", []);
+      expect(spy).toHaveBeenCalledWith(ct, "setOff", []);
+      expect(spy).toHaveBeenCalledWith(rgb, "setOff", []);
+    });
+
     it("startet Raumreinigung mit gemappten Segment-IDs", async () => {
       const vacuum = mockDevice({
         id: "v1",
