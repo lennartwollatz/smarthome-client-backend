@@ -7,9 +7,11 @@
  *  - source='variable': Vergleich einer Workflow-Variable gegen ein Literal oder
  *    eine andere Workflow-Variable. Felder variableName/operator/compareSource/
  *    compareLiteral/compareVariableName werden ausgewertet.
+ *  - source='time': Vergleich der aktuellen lokalen Uhrzeit mit compareLiteral (HH:mm).
+ *    operator: 'after' | 'before' | 'equals' | 'notEquals'
  */
 export class ConditionConfig {
-  source?: string; // 'device' | 'variable'
+  source?: string; // 'device' | 'variable' | 'time'
 
   // --- source 'device' ---
   deviceId?: string;

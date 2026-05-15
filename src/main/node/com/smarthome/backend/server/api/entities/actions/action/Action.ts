@@ -23,6 +23,8 @@ import {
   invokeDeviceMethodOnDevice,
   stripParensBase,
 } from "../../../utils/deviceMethodInvoke.js";
+import { executeRoomCategoryAction } from "../../../utils/roomCategoryActionExecutor.js";
+import { evaluateTimeCondition, millisecondsUntilLocalTime } from "../../../utils/timeConditionEvaluate.js";
 
 /**
  * Im Workflow angegebener Funktionsname muss 1:1 dem Prototyp des Geräts entsprechen
@@ -448,6 +450,16 @@ export class Action {
         }
       }
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
+    } else if (actionType === "room") {
+      const roomWarnings = await executeRoomCategoryAction(actionConfig, devices);
+      if (roomWarnings.length > 0) {
+        result = {
+          success: result.success,
+          warning: roomWarnings.join("; "),
+          environment: result.environment,
+        };
+      }
+      return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     } else {
       return {success: false, error: `Unbekannter Action-Typ fuer Node ${node.name}`, environment: result.environment};
     }
@@ -562,6 +574,15 @@ export class Action {
     devices: DeviceMap,
     environment?: ActionRunnableEnvironment
   ) {
+    if (conditionConfig.source === "time") {
+      return evaluateTimeCondition(
+        conditionConfig.operator,
+        conditionConfig.compareLiteral != null
+          ? String(conditionConfig.compareLiteral)
+          : undefined
+      );
+    }
+
     // Variable-Quelle: Vergleich einer Workflow-Variable gegen Literal oder andere Variable.
     if (conditionConfig.source === "variable") {
       const env = environment?.environment;
@@ -618,6 +639,22 @@ export class Action {
       const waitTime = waitConfig.waitTime ?? 0;
       if (waitTime > 0) {
         await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+      }
+      return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
+    }
+
+    if (waitConfig.type === "untilTime") {
+      const ms = millisecondsUntilLocalTime(
+        waitConfig.waitUntilTime != null ? String(waitConfig.waitUntilTime) : undefined
+      );
+      if (ms !== null && ms > 0) {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+      } else if (ms === null) {
+        result = {
+          success: result.success,
+          warning: `Wait-Node ${node.name}: ungueltige Ziel-Uhrzeit`,
+          environment: result.environment,
+        };
       }
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     }

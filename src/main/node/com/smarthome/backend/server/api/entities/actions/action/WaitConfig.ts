@@ -5,8 +5,9 @@ import { EventType } from "../../../../events/event-types/EventType.js";
  * Konfiguration für Warte-Knoten im Workflow.
  * Kompatibel mit Frontend-Datenmodell.
  * 
- * @property type - Typ des Wartens: 'time' | 'trigger'
- * @property waitTime - Wartezeit in Millisekunden (für type='time')
+ * @property type - Typ des Wartens: 'time' | 'trigger' | 'untilTime'
+ * @property waitTime - Wartezeit in Sekunden (fuer type='time')
+ * @property waitUntilTime - Ziel-Uhrzeit HH:mm (fuer type='untilTime')
  * @property deviceId - ID des Geräts für Trigger-Event (für type='trigger')
  * @property moduleId - ID des Moduls des Geräts
  * @property triggerEvent - Name des Trigger-Events
@@ -14,8 +15,9 @@ import { EventType } from "../../../../events/event-types/EventType.js";
  * @property timeout - Timeout in Millisekunden (für type='trigger')
  */
 export class WaitConfig {
-  type?: string; // 'time' | 'trigger'
+  type?: string; // 'time' | 'trigger' | 'untilTime'
   waitTime?: number;
+  waitUntilTime?: string;
   deviceId?: string;
   moduleId?: string;
   triggerEvent?: EventType;

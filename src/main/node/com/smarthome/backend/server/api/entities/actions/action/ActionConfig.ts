@@ -4,7 +4,10 @@ import { ActionStep } from "./ActionStep.js";
  * Konfiguration fuer Aktionen im Workflow.
  * Kompatibel mit Frontend-Datenmodell.
  *
- * @property type - Typ der Aktion: 'device' | 'scene' | 'action'
+ * @property type - Typ der Aktion: 'device' | 'scene' | 'action' | 'room'
+ * @property roomId - Grundriss-Raum-ID; leer = alle Raeume (nur type='room')
+ * @property roomCategory - Kategorie: light | speaker | media | cleaner | fan
+ * @property roomCommand - on | off
  * @property steps - Liste von Funktionsaufrufen auf demselben Geraet (fuer type='device')
  * @property deviceId - ID des Zielgeraets (fuer type='device')
  * @property moduleId - ID des Moduls des Geraets
@@ -12,12 +15,15 @@ import { ActionStep } from "./ActionStep.js";
  * @property actionId - ID einer verschachtelten Aktion (fuer type='action')
  */
 export class ActionConfig {
-  type?: string; // 'device' | 'scene' | 'action'
+  type?: string; // 'device' | 'scene' | 'action' | 'room'
   steps?: ActionStep[];
   deviceId?: string;
   moduleId?: string;
   sceneId?: string;
   actionId?: string;
+  roomId?: string;
+  roomCategory?: string;
+  roomCommand?: string;
 
   /** @deprecated Wird beim Laden in `steps[0].action` migriert. */
   action?: string;
