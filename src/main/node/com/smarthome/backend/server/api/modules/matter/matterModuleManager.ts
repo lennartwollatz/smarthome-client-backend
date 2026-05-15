@@ -23,6 +23,7 @@ import { ActionManager } from "../../entities/actions/ActionManager.js";
 import { UserManager } from "../../entities/users/userManager.js";
 import { MatterVirtual } from "./devices/matterVirtual.js";
 import { MatterSpeechAssistant } from "./devices/matterSpeechAssistant.js";
+import { DevicePresence } from "../../../../model/devices/DevicePresence.js";
 import { DeviceVirtualBinding } from "../../../../model/devices/DeviceVirtual.js";
 import { invokeDeviceMethodOnDevice } from "../../utils/deviceMethodInvoke.js";
 import { EventType } from "../../../events/event-types/EventType.js";
@@ -477,8 +478,11 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     return MATTERCONFIG.managerId;
   }
 
-  async createPresenceDeviceForUser(userId: string): Promise<{ nodeId: string; port: number; pairingCode: string; passcode: number; discriminator: number; presenceDeviceId: string }> {
-    const data = await this.virtualDeviceManager.createPresenceDevice(userId);
+  async createPresenceDeviceForUser(
+    userId: string,
+    personDisplayNameFallback?: string
+  ): Promise<{ nodeId: string; port: number; pairingCode: string; passcode: number; discriminator: number; presenceDeviceId: string }> {
+    const data = await this.virtualDeviceManager.createPresenceDevice(userId, personDisplayNameFallback);
     return {
       nodeId: data.nodeId,
       port: data.port,
@@ -730,6 +734,18 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
         await speechAssistantDevice.updateValues();
         convertedDevice = speechAssistantDevice;
         break;
+      case DeviceType.PRESENCE: {
+        const presenceDevice = new DevicePresence();
+        Object.assign(presenceDevice, device);
+        if (typeof presenceDevice.present !== "boolean") {
+          presenceDevice.present = Boolean(presenceDevice.present);
+        }
+        if (!presenceDevice.lastDetect || typeof presenceDevice.lastDetect !== "string") {
+          presenceDevice.lastDetect = new Date().toISOString();
+        }
+        convertedDevice = presenceDevice;
+        break;
+      }
     }
 
     return convertedDevice;

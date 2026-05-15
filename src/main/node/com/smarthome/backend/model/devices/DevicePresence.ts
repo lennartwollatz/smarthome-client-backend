@@ -1,5 +1,6 @@
 import { Device } from "./Device.js";
 import { DeviceType } from "./helper/DeviceType.js";
+import { logger } from "../../logger.js";
 import { EventPresenceStatusChanged } from "../../server/events/events/EventPresenceStatusChanged.js";
 import { EventPresenceHome } from "../../server/events/events/EventPresenceHome.js";
 import { EventPresenceHomeSince } from "../../server/events/events/EventPresenceHomeSince.js";
@@ -15,10 +16,14 @@ export class DevicePresence extends Device {
   present: boolean;
   lastDetect: string;
 
+  /** Nutzer, dem dieses virtuelle Anwesenheits-Gerät zugeordnet ist (Matter). */
+  presenceUserId?: string;
+
   constructor(init?: Partial<DevicePresence>) {
     super(init);
     this.present = init?.present ?? false;
     this.lastDetect = init?.lastDetect ?? new Date().toISOString();
+    this.presenceUserId = init?.presenceUserId;
     this.type = DeviceType.PRESENCE;
   }
 
@@ -56,6 +61,12 @@ export class DevicePresence extends Device {
     const deviceBefore = { ...this };
     this.present = true;
     this.lastDetect = new Date().toISOString();
+    if (deviceBefore.present !== this.present) {
+      logger.info(
+        { deviceId: this.id, deviceName: this.name, present: this.present, moduleId: this.moduleId },
+        "Presence-Schalter: Status geändert (anwesend)"
+      );
+    }
     if (trigger && this.eventManager) {
       this.eventManager.triggerEvent(new EventPresenceStatusChanged(this.id, deviceBefore, { ...this }));
       this.eventManager.triggerEvent(new EventPresenceHomeSince(this.id, deviceBefore, this.lastDetect));
@@ -67,6 +78,12 @@ export class DevicePresence extends Device {
     const deviceBefore = { ...this };
     this.present = false;
     this.lastDetect = new Date().toISOString();
+    if (deviceBefore.present !== this.present) {
+      logger.info(
+        { deviceId: this.id, deviceName: this.name, present: this.present, moduleId: this.moduleId },
+        "Presence-Schalter: Status geändert (abwesend)"
+      );
+    }
     if (trigger && this.eventManager) {
       this.eventManager.triggerEvent(new EventPresenceStatusChanged(this.id, deviceBefore, { ...this }));
       this.eventManager.triggerEvent(new EventPresenceAwaySince(this.id, deviceBefore, this.lastDetect));

@@ -34,6 +34,19 @@ export class UserManager implements EntityManager {
     return this.userRepository.findById(userId);
   }
 
+  /** Zuordnung Presence-Gerät → Nutzer (Fallback, wenn VirtualDeviceStored kein `userId` hat). */
+  findUserIdByPresenceDeviceId(presenceDeviceId: string): string | null {
+    if (!presenceDeviceId) {
+      return null;
+    }
+    for (const user of this.userRepository.findAll()) {
+      if (user.presenceDeviceId === presenceDeviceId) {
+        return user.id;
+      }
+    }
+    return null;
+  }
+
   async createUser(body: User): Promise<User | null> {
     const user = body;
 
@@ -46,7 +59,7 @@ export class UserManager implements EntityManager {
     if (user.smsNotificationsEnabled == null) user.smsNotificationsEnabled = false;
 
     try {
-      const matter = await this.matterModuleManager?.createPresenceDeviceForUser(user.id);
+      const matter = await this.matterModuleManager?.createPresenceDeviceForUser(user.id, user.name);
       if (!matter) return null;
       user.presenceNodeId = matter.nodeId;
       user.presenceDevicePort = matter.port;

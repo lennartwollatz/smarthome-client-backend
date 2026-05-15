@@ -296,6 +296,47 @@ export class MatterVirtualDeviceManager {
     return { pairingCode, qrPairingCode };
   }
 
+  /**
+   * `pres-…`-Anzeigename aus dem verknüpften Nutzer ableiten (historisch oft „Unbekannt“, wenn beim Anlegen kein Name gesetzt war).
+   */
+  private syncPresenceDeviceDisplayName(deviceId: string, storedRow: VirtualDeviceStored): void {
+    if (!this.stored || storedRow.type !== DeviceType.PRESENCE) {
+      return;
+    }
+    const device = this.deviceManager.getDevice(deviceId);
+    if (!(device instanceof DevicePresence)) {
+      return;
+    }
+
+    let userId = storedRow.userId?.trim();
+    if (!userId) {
+      const fallback = this.userManager.findUserIdByPresenceDeviceId(deviceId);
+      if (!fallback) {
+        return;
+      }
+      userId = fallback;
+    }
+
+    const user = this.userManager.findById(userId);
+    const personLabel = user?.name?.trim() || "Unbekannt";
+    const displayName = `pres-${personLabel}`;
+
+    if (device.presenceUserId !== userId) {
+      device.presenceUserId = userId;
+    }
+    if (device.name !== displayName) {
+      device.name = displayName;
+    }
+
+    const effectiveUserId = storedRow.userId?.trim() || userId;
+    const storedNeedsSave =
+      storedRow.displayName !== displayName || (!storedRow.userId?.trim() && !!effectiveUserId);
+
+    if (storedNeedsSave) {
+      this.stored.save(deviceId, { ...storedRow, displayName, userId: effectiveUserId });
+    }
+  }
+
   /** Bestehendes Gerät (z. B. flaches JSON aus der DB) um Commissioning-Felder ergänzen */
   private applyStoredPairingToDevice(
     device: Device,
@@ -327,7 +368,13 @@ export class MatterVirtualDeviceManager {
     let device = this.deviceManager.getDevice(data.deviceId);
     if (!device) {
       if (data.type === DeviceType.PRESENCE) {
-        device = new DevicePresence({ id: data.deviceId, name: data.displayName, isConnected: true, isPairingMode: true });
+        device = new DevicePresence({
+          id: data.deviceId,
+          name: data.displayName,
+          isConnected: true,
+          isPairingMode: true,
+          presenceUserId: data.userId,
+        });
       } else if (data.type === DeviceType.SPEECH_ASSISTANT) {
         device = new MatterSpeechAssistant(
           { id: data.deviceId, name: data.displayName, isConnected: true, isPairingMode: true },
@@ -349,6 +396,11 @@ export class MatterVirtualDeviceManager {
           data.discriminator
         );
       }
+    } else if (data.type === DeviceType.PRESENCE && !(device instanceof DevicePresence)) {
+      const rehydrated = new DevicePresence();
+      Object.assign(rehydrated, device);
+      device = rehydrated;
+      this.applyStoredPairingToDevice(device, data, pairingCode, qrPairingCode);
     } else {
       this.applyStoredPairingToDevice(device, data, pairingCode, qrPairingCode);
     }
@@ -357,7 +409,12 @@ export class MatterVirtualDeviceManager {
       return;
     }
 
-    if (device instanceof DevicePresence || device instanceof MatterSpeechAssistant || device instanceof MatterVirtual) {
+    if (device instanceof DevicePresence) {
+      device.moduleId = "matter";
+      device.setEventManager(this.eventManager!);
+      this.syncPresenceDeviceDisplayName(data.deviceId, data);
+      this.deviceManager.saveDevice(device);
+    } else if (device instanceof MatterSpeechAssistant || device instanceof MatterVirtual) {
       device.moduleId = "matter";
       device.setEventManager(this.eventManager!);
       this.deviceManager.saveDevice(device);
@@ -370,9 +427,11 @@ export class MatterVirtualDeviceManager {
     }
   }
 
-  async createPresenceDevice(userId: string): Promise<VirtualDeviceData> {
+  async createPresenceDevice(userId: string, personDisplayNameFallback?: string): Promise<VirtualDeviceData> {
     const user = this.userManager.findById(userId);
-    const displayName = "pres-" + (user?.name?.trim() || "Unbekannt");
+    const personLabel =
+      (personDisplayNameFallback?.trim() || user?.name?.trim()) || "Unbekannt";
+    const displayName = `pres-${personLabel}`;
     return this.createDevice(displayName, DeviceType.PRESENCE, userId);
   }
 
