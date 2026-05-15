@@ -1,244 +1,381 @@
 import { logger } from "../../../../logger.js";
-import { ConnectedDrive, CarBrand, Regions } from 'bmw-connected-drive';
 import { ModuleDeviceControllerEvent } from "../moduleDeviceControllerEvent.js";
 import { BMWEvent } from "./bmwEvent.js";
-import type { DeviceCarAddress, DeviceCarDoors, DeviceCarWindows } from "../../../../model/devices/DeviceCar.js";
-import type { BMWCredentials } from "./bmwCredentialsStore.js";
 import type { BMWCar } from "./devices/bmwCar.js";
 import { BMWDeviceDiscovered } from "./bmwDeviceDiscovered.js";
 import type { BMWTokenStore } from "./bmwTokenStore.js";
-import { BMWConnectedDriveLogger } from "./bmwConnectedDriveLogger.js";
+import type { BMWCredentialsStore } from "./bmwCredentialsStore.js";
+import {
+  BMW_CARDATA_DEFAULT_MQTT_HOST,
+  BMW_CARDATA_DEFAULT_MQTT_PORT,
+  BMW_CARDATA_DISCOVERY_TIMEOUT_MS
+} from "./bmwCarDataDefaults.js";
+import {
+  generatePkcePair,
+  pollDeviceToken,
+  requestDeviceCode,
+  type DeviceCodeStartResponse
+} from "./bmwCarDataOAuth.js";
+import { BmwCarDataMqttHub, type BmwCarDataMqttEnvelope } from "./bmwCarDataMqttHub.js";
+import type { BmwCarTelemetryHistoryStore } from "../../../db/bmwCarTelemetryHistoryStore.js";
+import { isTrackedTelemetryKey } from "./bmwCarDataTelemetryKeys.js";
+
+export type DeviceCodePollApiResult =
+  | { status: "success" }
+  | { status: "pending"; slowDownExtraSec?: number }
+  | { status: "denied" | "error"; message: string };
 
 export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, BMWCar> {
-  private api?: ConnectedDrive;
-  private connectedUsername?: string;
-  private connectedPassword?: string;
-  private connectedDriveLogger = new BMWConnectedDriveLogger();
+  private readonly hub = new BmwCarDataMqttHub();
+  private pendingAuth: {
+    device_code: string;
+    code_verifier: string;
+    intervalMs: number;
+    expires_at_ms: number;
+  } | null = null;
 
-  constructor(private tokenStore: BMWTokenStore) {
+  private streamVinUnsub: (() => void) | null = null;
+  private streamMessageUnsub: (() => void) | null = null;
+  private hubDisconnectUnsub: (() => void) | null = null;
+  private resolveDeviceIdsForVin: ((vin: string) => string[]) | null = null;
+  private onVinObserved: ((vin: string) => void) | null = null;
+
+  private idTokenRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private reconnecting = false;
+
+  private static readonly ID_TOKEN_REFRESH_AHEAD_MS = 5 * 60 * 1000; // ~5 Minuten vor Ablauf
+  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
+
+  constructor(
+    private readonly tokenStore: BMWTokenStore,
+    private readonly credentialsStore: BMWCredentialsStore,
+    private readonly telemetryHistory?: BmwCarTelemetryHistoryStore
+  ) {
     super();
   }
 
-  private ensureCredentials(credentials: BMWCredentials): boolean {
-    // captchaToken ist nur beim allerersten Login notwendig.
-    return Boolean(credentials.username && credentials.password);
+  setVinDeviceResolver(resolver: (vin: string) => string[]): void {
+    this.resolveDeviceIdsForVin = resolver;
   }
 
-  private async connect(credentials: BMWCredentials): Promise<{
-    api: ConnectedDrive;
-    carBrand: CarBrand;
-  } | null> {
-    if (!this.ensureCredentials(credentials)) {
-      return null;
-    }
-    const username = credentials.username;
-    const password = credentials.password ?? "";
-    const captchaToken = credentials.captchaToken?.trim() || undefined;
-
-    if (
-      this.api &&
-      this.connectedUsername === username &&
-      this.connectedPassword === password
-    ) {
-      return { api: this.api, carBrand: CarBrand.Bmw };
-    }
-
-    logger.info({ username }, "BMW DeviceController connect");
-
-    this.api = new ConnectedDrive(
-      username,
-      password,
-      Regions.RestOfWorld,
-      this.tokenStore,
-      this.connectedDriveLogger,
-      captchaToken
-    );
-
-    logger.info({ api: this.api }, "BMW DeviceController connected");
-    this.connectedUsername = username;
-    this.connectedPassword = password;
-    return { api: this.api, carBrand: CarBrand.Bmw };
+  /** Wird bei jeder MQTT-Nachricht mit VIN aufgerufen (idempotent registrieren). */
+  setOnVinObserved(handler: (vin: string) => void): void {
+    this.onVinObserved = handler;
   }
 
-  async discoverVehicles(credentials: BMWCredentials): Promise<BMWDeviceDiscovered[]> {
-    logger.info({ credentials }, "BMW DeviceController discoverVehicles");
-    const apiContext = await this.connect(credentials);
-    logger.info({ apiContext }, "BMW DeviceController discoverVehicles apiContext");
-    if (!apiContext) return [];
-    try {
-      const vehicles = await apiContext.api.getVehicles();
-      logger.info({ vehicles }, "BMW DeviceController discoverVehicles vehicles");
-      const list = Array.isArray(vehicles) ? vehicles : [];
-      return list
-        .map(vehicle => this.toDiscoveredVehicle(vehicle))
-        .filter((vehicle): vehicle is BMWDeviceDiscovered => vehicle !== null);
-    } catch (err) {
-      logger.error({ err }, "Fehler beim Abrufen der BMW Fahrzeuge");
-      return [];
-    }
+  getHub(): BmwCarDataMqttHub {
+    return this.hub;
   }
 
-  async getVehicleStatus(credentials: BMWCredentials, vin: string): Promise<unknown | null> {
-    const apiContext = await this.connect(credentials);
-    if (!apiContext) return null;
-    try {
-      return await apiContext.api.getVehicleStatus(vin, apiContext.carBrand);
-    } catch (err) {
-      logger.error({ err, vin }, "Fehler beim Abrufen des BMW Fahrzeugstatus");
-      return null;
-    }
+  private getClientId(): string | null {
+    const id = this.credentialsStore.getCredentials().clientId?.trim();
+    return id && id.length > 0 ? id : null;
   }
 
-  async startClimateControl(credentials: BMWCredentials, vin: string): Promise<boolean> {
-    const apiContext = await this.connect(credentials);
-    if (!apiContext) return false;
-    try {
-      await apiContext.api.startClimateControl(vin, apiContext.carBrand);
-      return true;
-    } catch (err) {
-      logger.error({ err, vin }, "Fehler beim Starten der BMW Klimatisierung");
-      return false;
-    }
-  }
-
-  async stopClimateControl(credentials: BMWCredentials, vin: string): Promise<boolean> {
-    const apiContext = await this.connect(credentials);
-    if (!apiContext) return false;
-    try {
-      await apiContext.api.stopClimateControl(vin, apiContext.carBrand);
-      return true;
-    } catch (err) {
-      logger.error({ err, vin }, "Fehler beim Stoppen der BMW Klimatisierung");
-      return false;
-    }
-  }
-
-  async sendAddress(credentials: BMWCredentials, vin: string, subject: string, address: DeviceCarAddress): Promise<boolean> {
-    const apiContext = await this.connect(credentials);
-    if (!apiContext) return false;
-    try {
-      await apiContext.api.sendMessage(
-        vin,
-        apiContext.carBrand,
-        subject,
-        JSON.stringify({
-          places: [
-            {
-              lng: address.coordinates.longitude,
-              lat: address.coordinates.latitude,
-              name: address.name,
-              title: subject,
-              formattedAddress: address.name,
-              position: {
-                lng: address.coordinates.longitude,
-                lat: address.coordinates.latitude
-              }
-            }
-          ],
-          vehicleInformation: { vin }
-        })
-      );
-      return true;
-    } catch (err) {
-      logger.error({ err, vin }, "Fehler beim Senden der BMW Zieladresse");
-      return false;
-    }
-  }
-
-  toCarStatus(status: unknown): {
-    fuelLevelPercent?: number;
-    rangeKm?: number;
-    mileageKm?: number;
-    lockedState?: boolean;
-    inUseState?: boolean;
-    climateControlState?: boolean;
-    location?: DeviceCarAddress;
-    windows?: DeviceCarWindows;
-    doors?: DeviceCarDoors;
-  } {
-    const value = (status ?? {}) as Record<string, any>;
-    const location = value.location as Record<string, any> | undefined;
-    const windowsState = value.windowsState as Record<string, any> | undefined;
-    const doorsState = value.doorsState as Record<string, any> | undefined;
-
-    const parsedLocation =
-      location?.coordinates &&
-      typeof location.coordinates.lat === "number" &&
-      typeof location.coordinates.lng === "number"
-        ? {
-            coordinates: {
-              latitude: location.coordinates.lat,
-              longitude: location.coordinates.lng
-            },
-            name: String(location.address?.formatted ?? "")
-          }
-        : undefined;
-
-    const parsedWindows = windowsState
-      ? {
-          leftFront: windowsState.leftFront === "CLOSED",
-          leftRear: windowsState.leftRear === "CLOSED",
-          rightFront: windowsState.rightFront === "CLOSED",
-          rightRear: windowsState.rightRear === "CLOSED",
-          combinedState: windowsState.combinedState === "CLOSED"
-        }
-      : undefined;
-
-    const parsedDoors = doorsState
-      ? {
-          combinedSecurityState: doorsState.combinedSecurityState === "SECURED",
-          leftFront: doorsState.leftFront === "CLOSED",
-          leftRear: doorsState.leftRear === "CLOSED",
-          rightFront: doorsState.rightFront === "CLOSED",
-          rightRear: doorsState.rightRear === "CLOSED",
-          combinedState: doorsState.combinedState === "CLOSED",
-          hood: doorsState.hood === "CLOSED",
-          trunk: doorsState.trunk === "CLOSED"
-        }
-      : undefined;
-
-    const fuelPercent =
-      typeof value.combustionFuelLevel?.remainingFuelPercent === "number"
-        ? value.combustionFuelLevel.remainingFuelPercent
-        : undefined;
-
+  private getMqttHostPort(): { host: string; port: number } {
+    const c = this.credentialsStore.getCredentials();
     return {
-      fuelLevelPercent: fuelPercent,
-      rangeKm: typeof value.range === "number" ? value.range : undefined,
-      mileageKm: typeof value.currentMilage === "number" ? value.currentMilage : undefined,
-      lockedState: typeof value.securityOverviewMode === "string" ? value.securityOverviewMode === "ARMED" : undefined,
-      inUseState: typeof value.pwf === "string" ? value.pwf !== "STANDING_CUSTOMER_NOT_IN_VEH" : undefined,
-      climateControlState:
-        typeof value.climateControlState === "string" ? value.climateControlState !== "OFF" : undefined,
-      location: parsedLocation,
-      windows: parsedWindows,
-      doors: parsedDoors
+      host: (c.mqttHost && c.mqttHost.trim()) || BMW_CARDATA_DEFAULT_MQTT_HOST,
+      port: typeof c.mqttPort === "number" && c.mqttPort > 0 ? c.mqttPort : BMW_CARDATA_DEFAULT_MQTT_PORT
     };
   }
 
-  private toDiscoveredVehicle(vehicle: unknown): BMWDeviceDiscovered | null {
-    const value = (vehicle ?? {}) as Record<string, any>;
-    const vin = typeof value.vin === "string" ? value.vin : "";
-    if (!vin) return null;
-    const model = typeof value.model === "string" ? value.model : undefined;
-    const brand = typeof value.brand === "string" ? value.brand : "BMW";
-    const nameCandidates = [
-      value.name,
-      value.vehicleFinder?.description,
-      value.model,
-      `BMW ${vin.slice(-6)}`
-    ].map(candidate => (typeof candidate === "string" ? candidate.trim() : ""));
-    const name = nameCandidates.find(candidate => candidate.length > 0) ?? `BMW ${vin.slice(-6)}`;
-    const id = `bmw-${vin.toLowerCase()}`;
-    return new BMWDeviceDiscovered(id, name, vin, brand, model);
+  /**
+   * Aktualisiert ID-/Access-Token bei Bedarf (MQTT nutzt ID-Token als Passwort).
+   */
+  async ensureFreshTokens(): Promise<boolean> {
+    const clientId = this.getClientId();
+    if (!clientId) return false;
+    if (!this.tokenStore.hasRefreshToken()) return false;
+    if (this.tokenStore.isRefreshExpired()) {
+      logger.warn("BMW Refresh-Token abgelaufen – erneute Anmeldung erforderlich");
+      return false;
+    }
+    if (!this.tokenStore.needsTokenRefresh(120_000)) {
+      return true;
+    }
+    logger.info("BMW Token abgelaufen – Refresh per refresh_token");
+    return await this.tokenStore.refreshWithStoredToken(clientId);
   }
 
-  public async startEventStream(_device: BMWCar, _callback: (event: BMWEvent) => void): Promise<void> {
-    // BMW nutzt im Modulmanager Polling fuer alle Fahrzeuge.
+  private warnStreamingScopeHint(): void {
+    const streamingScope = "cardata:streaming:read";
+    if (this.tokenStore.hasIdTokenScope(streamingScope)) return;
+    logger.warn(
+      "BMW MQTT: ID-Token enthaelt `cardata:streaming:read` nicht in scope/scp-Claims – Verbindung wird trotzdem versucht (BMW-Broker entscheidet)"
+    );
+    if (process.env.BMW_CAR_DATA_DEBUG_SCOPES === "1") {
+      logger.info("BMW MQTT: Scope-Diagnose aktiv (BMW_CAR_DATA_DEBUG_SCOPES=1)");
+    }
   }
 
-  public async stopEventStream(_device: BMWCar): Promise<void> {
-    // BMW nutzt im Modulmanager Polling fuer alle Fahrzeuge.
+  async ensureMqttConnected(): Promise<boolean> {
+    if (!(await this.ensureFreshTokens())) return false;
+    this.warnStreamingScopeHint();
+    const tokens = this.tokenStore.getCarDataTokens();
+    if (!tokens) return false;
+    const { host, port } = this.getMqttHostPort();
+    try {
+      await this.hub.connectTls({
+        host,
+        port,
+        username: tokens.gcid,
+        password: tokens.idToken
+      });
+      this.reconnectAttempt = 0;
+      if (!this.hubDisconnectUnsub) {
+        this.hubDisconnectUnsub = this.hub.onDisconnect(reason => {
+          void this.onHubMqttDisconnected(reason);
+        });
+      }
+      this.scheduleIdTokenRefreshTimer();
+      return true;
+    } catch (err) {
+      logger.error({ err }, "BMW MQTT connect fehlgeschlagen");
+      return false;
+    }
+  }
+
+  private getIdTokenExpiresAtMs(): number | undefined {
+    const raw = this.tokenStore.getPersisted().idExpiresAt;
+    if (!raw) return undefined;
+    const t = new Date(raw).getTime();
+    return Number.isFinite(t) ? t : undefined;
+  }
+
+  private async refreshTokensNow(): Promise<boolean> {
+    const clientId = this.getClientId();
+    if (!clientId) return false;
+    logger.info("BMW Token: proaktiver Refresh vor MQTT-Reconnect");
+    return await this.tokenStore.refreshWithStoredToken(clientId);
+  }
+
+  private clearReconnectTimers(): void {
+    if (this.idTokenRefreshTimeout) {
+      clearTimeout(this.idTokenRefreshTimeout);
+      this.idTokenRefreshTimeout = null;
+    }
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+  }
+
+  private scheduleIdTokenRefreshTimer(): void {
+    if (this.idTokenRefreshTimeout) {
+      clearTimeout(this.idTokenRefreshTimeout);
+      this.idTokenRefreshTimeout = null;
+    }
+    const expiresMs = this.getIdTokenExpiresAtMs();
+    if (!expiresMs) return;
+
+    const refreshAt = expiresMs - BMWDeviceController.ID_TOKEN_REFRESH_AHEAD_MS;
+    const delayMs = Math.max(0, refreshAt - Date.now());
+
+    this.idTokenRefreshTimeout = setTimeout(() => {
+      void this.onIdTokenAboutToExpire();
+    }, delayMs);
+  }
+
+  private async onIdTokenAboutToExpire(): Promise<void> {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    try {
+      logger.info("BMW MQTT: ID-Token Ablauf nahe – Refresh + Reconnect wird vorbereitet");
+      await this.refreshTokensNow();
+      this.hub.disconnect();
+      await this.ensureMqttConnected();
+    } finally {
+      this.reconnecting = false;
+    }
+  }
+
+  private async onHubMqttDisconnected(reason: string): Promise<void> {
+    if (this.reconnecting) return;
+    if (this.reconnectAttempt >= BMWDeviceController.MAX_RECONNECT_ATTEMPTS) {
+      logger.error(
+        { reason, attempts: this.reconnectAttempt },
+        "BMW MQTT: Max. Reconnect-Versuche erreicht – manuelle Anmeldung/Retry erforderlich"
+      );
+      return;
+    }
+
+    this.reconnectAttempt += 1;
+    const delayMs = Math.min(30_000, 1000 * this.reconnectAttempt);
+    logger.warn({ reason, delayMs, attempts: this.reconnectAttempt }, "BMW MQTT: Disconnect – Reconnect geplant");
+
+    if (this.reconnectTimeout) return;
+    this.reconnectTimeout = setTimeout(async () => {
+      try {
+        this.reconnecting = true;
+        this.reconnectTimeout = null;
+        const ok = await this.ensureMqttConnected();
+        if (!ok) {
+          // Weitere Versuche werden durch erneute Disconnect-Events getriggert oder über den Timer erneut versucht.
+          logger.warn({ reason: "reconnect_failed" }, "BMW MQTT: Reconnect fehlgeschlagen – weiterer Versuch folgt bei Disconnect");
+        }
+      } finally {
+        this.reconnecting = false;
+      }
+    }, delayMs);
+  }
+
+  /**
+   * Startet OAuth2 Device Code Flow (PKCE). pendingAuth liegt im Speicher bis erfolgreich/abgelaufen.
+   */
+  async startDeviceCodeFlow(): Promise<DeviceCodeStartResponse> {
+    const clientId = this.getClientId();
+    if (!clientId) {
+      throw new Error("BMW CarData Client-ID fehlt – bitte in den Einstellungen speichern.");
+    }
+    const { codeVerifier, codeChallenge } = generatePkcePair();
+    const start = await requestDeviceCode(clientId, codeChallenge);
+    this.pendingAuth = {
+      device_code: start.device_code,
+      code_verifier: codeVerifier,
+      intervalMs: Math.max(start.interval, 5) * 1000,
+      expires_at_ms: Date.now() + start.expires_in * 1000
+    };
+    return start;
+  }
+
+  /**
+   * Ein Poll-Schritt gegen den BMW-Token-Endpunkt.
+   */
+  async pollDeviceTokenOnce(): Promise<DeviceCodePollApiResult> {
+    const clientId = this.getClientId();
+    if (!clientId) {
+      return { status: "error", message: "Client-ID fehlt" };
+    }
+    if (!this.pendingAuth) {
+      return { status: "error", message: "Kein aktiver Device-Code – Flow zuerst starten." };
+    }
+    if (Date.now() > this.pendingAuth.expires_at_ms) {
+      this.pendingAuth = null;
+      return { status: "denied", message: "Device-Code abgelaufen" };
+    }
+    const p = this.pendingAuth;
+    const result = await pollDeviceToken(clientId, p.device_code, p.code_verifier);
+    if (result.ok) {
+      this.tokenStore.storeFromOAuthBody(result.body);
+      this.pendingAuth = null;
+      void this.ensureMqttConnected().catch(err => {
+        logger.warn({ err }, "BMW MQTT: Verbindung nach Anmeldung fehlgeschlagen");
+      });
+      return { status: "success" };
+    }
+    if ("pending" in result && result.pending) {
+      return { status: "pending", slowDownExtraSec: result.slowDownExtraSec };
+    }
+    const denied = result as { denied: true; error: string; error_description?: string };
+    this.pendingAuth = null;
+    return { status: "denied", message: denied.error_description ?? denied.error };
+  }
+
+  clearPendingAuth(): void {
+    this.pendingAuth = null;
+  }
+
+  hasPendingDeviceAuth(): boolean {
+    return this.pendingAuth != null;
+  }
+
+  /**
+   * Discovery: MQTT `gcid/+`, VINs aus Nachrichten sammeln (bis Timeout).
+   */
+  async discoverVehiclesViaMqtt(timeoutMs = BMW_CARDATA_DISCOVERY_TIMEOUT_MS): Promise<BMWDeviceDiscovered[]> {
+    this.hub.clearSeenVins();
+    const ok = await this.ensureMqttConnected();
+    if (!ok) {
+      logger.warn("BMW Discovery: MQTT nicht verbunden (Token/Client-ID pruefen)");
+      return [];
+    }
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const vins = this.hub.getSeenVins();
+      if (vins.length > 0) {
+        await new Promise(r => setTimeout(r, 2500));
+        break;
+      }
+      await new Promise(r => setTimeout(r, 1500));
+    }
+    const vins = [...new Set(this.hub.getSeenVins())];
+    return vins.map(vin => {
+      const id = `bmw-${vin.toLowerCase()}`;
+      return new BMWDeviceDiscovered(id, `BMW ${vin.slice(-6)}`, vin, "BMW", undefined);
+    });
+  }
+
+  getTelemetrySnapshot(vin: string): Record<string, unknown> | undefined {
+    return this.hub.getSnapshot(vin);
+  }
+
+  handleMqttTelemetryMessage(envelope: BmwCarDataMqttEnvelope): void {
+    const { vin, data, timestamp: envelopeTs } = envelope;
+    if (!vin || !data) return;
+    this.onVinObserved?.(vin);
+
+    const deviceIds = this.resolveDeviceIdsForVin?.(vin) ?? [];
+    if (!this.telemetryHistory || deviceIds.length === 0) return;
+
+    const fallbackMs =
+      typeof envelopeTs === "number" && Number.isFinite(envelopeTs) ? envelopeTs : Date.now();
+
+    for (const [key, meta] of Object.entries(data)) {
+      if (!isTrackedTelemetryKey(key)) continue;
+      if (!meta || typeof meta !== "object" || !("value" in meta)) continue;
+      const entry = meta as { timestamp?: number; value: unknown };
+      const timeMs =
+        typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)
+          ? entry.timestamp
+          : fallbackMs;
+      for (const deviceId of deviceIds) {
+        this.telemetryHistory.append(deviceId, key, entry.value, timeMs);
+      }
+    }
+  }
+
+  /**
+   * Registriert Listener fuer alle VIN-Updates (MQTT).
+   */
+  setStreamVinListener(cb: (vin: string) => void): void {
+    this.clearStreamVinListener();
+    this.streamMessageUnsub = this.hub.onMessage(env => this.handleMqttTelemetryMessage(env));
+    this.streamVinUnsub = this.hub.onVin(cb);
+  }
+
+  clearStreamVinListener(): void {
+    if (this.streamMessageUnsub) {
+      this.streamMessageUnsub();
+      this.streamMessageUnsub = null;
+    }
+    if (this.streamVinUnsub) {
+      this.streamVinUnsub();
+      this.streamVinUnsub = null;
+    }
+  }
+
+  disconnectMqtt(): void {
+    this.clearStreamVinListener();
+    this.clearReconnectTimers();
+    this.hub.disconnect();
+  }
+
+  getMqttConnected(): boolean {
+    return this.hub.isConnected();
+  }
+
+  getLastMessageAt(): number | undefined {
+    return this.hub.getLastMessageAt();
+  }
+
+  async startEventStream(_device: BMWCar, _callback: (event: BMWEvent) => void): Promise<void> {
+    // Pro-Device-Streams nutzt BMWEventStreamManager den Hub zentral.
+  }
+
+  async stopEventStream(_device: BMWCar): Promise<void> {
+    // siehe disconnectMqtt / EventStreamManager
   }
 }
-

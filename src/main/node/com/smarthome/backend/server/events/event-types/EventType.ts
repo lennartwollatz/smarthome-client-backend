@@ -41,6 +41,7 @@ export enum EventType {
     CAR_DOORS_CHANGED = "carDoorsChanged",
     CAR_DOORS_OPENED = "carDoorsOpened",
     CAR_DOORS_CLOSED = "carDoorsClosed",
+    CAR_WHEELS_CHANGED = "carWheelsChanged",
     FAN_STATUS_CHANGED = "fanStatusChanged",
     FAN_SPEED_CHANGED = "fanSpeedChanged",
     FAN_SPEED_EQUALS = "fanSpeedEquals",

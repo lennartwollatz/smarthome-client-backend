@@ -3,17 +3,13 @@ import type { DatabaseManager } from "../../../db/database.js";
 
 const BMW_CREDENTIALS_ID = "bmw";
 
-export interface BMWCredentials {
-  username: string;
-  password?: string;
-  captchaToken?: string;
+export interface BMWCarDataCredentials {
+  clientId?: string;
+  mqttHost?: string;
+  mqttPort?: number;
 }
 
-type BMWCredentialsPersisted = {
-  username?: string;
-  password?: string;
-  captchaToken?: string;
-};
+type BMWCredentialsPersisted = BMWCarDataCredentials;
 
 export class BMWCredentialsStore {
   private repository: JsonRepository<BMWCredentialsPersisted>;
@@ -26,49 +22,30 @@ export class BMWCredentialsStore {
     return this.repository.findById(BMW_CREDENTIALS_ID) ?? {};
   }
 
-  setUsername(username: string) {
+  setClientId(clientId: string): void {
     const current = this.getCredentials();
     this.repository.save(BMW_CREDENTIALS_ID, {
       ...current,
-      username
+      clientId: clientId.trim()
     });
   }
 
-  setPassword(password: string) {
+  setMqttEndpoint(host?: string, port?: number): void {
     const current = this.getCredentials();
-    this.repository.save(BMW_CREDENTIALS_ID, {
-      ...current,
-      password
-    });
+    const next: BMWCredentialsPersisted = { ...current };
+    if (typeof host === "string" && host.trim()) next.mqttHost = host.trim();
+    else delete next.mqttHost;
+    if (typeof port === "number" && !Number.isNaN(port) && port > 0) next.mqttPort = port;
+    else delete next.mqttPort;
+    this.repository.save(BMW_CREDENTIALS_ID, next);
   }
 
-  setCaptchaToken(captchaToken: string) {
-    const current = this.getCredentials();
-    this.repository.save(BMW_CREDENTIALS_ID, {
-      ...current,
-      captchaToken
-    });
-  }
-
-  clearCaptchaToken() {
-    const current = this.getCredentials();
-    const { captchaToken: _captchaToken, ...rest } = current;
-    this.repository.save(BMW_CREDENTIALS_ID, rest);
-  }
-
-  hasPassword(): boolean {
-    const current = this.getCredentials();
-    return typeof current.password === "string" && current.password.length > 0;
-  }
-
-  hasCaptchaToken(): boolean {
-    const current = this.getCredentials();
-    return typeof current.captchaToken === "string" && current.captchaToken.length > 0;
+  hasClientId(): boolean {
+    const c = this.getCredentials().clientId;
+    return typeof c === "string" && c.trim().length > 0;
   }
 
   canDiscover(): boolean {
-    const current = this.getCredentials();
-    return Boolean(current.username && current.password);
+    return this.hasClientId();
   }
 }
-

@@ -1,49 +1,48 @@
 import { logger } from "../../../../../logger.js";
+import { Device } from "../../../../../model/devices/Device.js";
 import { DeviceCar, type DeviceCarAddress } from "../../../../../model/devices/DeviceCar.js";
 import { BMWDeviceController } from "../bmwDeviceController.js";
-import type { BMWCredentials } from "../bmwCredentialsStore.js";
-import { BMWCONFIG } from "../bmwModule.js";
+import { BMWCONFIG, BMWMODULE } from "../bmwModule.js";
+import { DeviceType } from "../../../../../model/devices/helper/DeviceType.js";
+import { mapTelemetrySnapshotToCarFields, type TirePressureQuad } from "../bmwCarDataPayloadMapper.js";
+import { scheduleCarLocationEnrichment } from "../bmwCarLocationEnricher.js";
 
 export class BMWCar extends DeviceCar {
-  private bmwController?: BMWDeviceController;
-  private credentialsProvider?: () => BMWCredentials | null;
+  carDataTelemetry?: Record<string, unknown>;
+  tirePressuresKpa?: TirePressureQuad;
+  tirePressureTargetKpa?: TirePressureQuad;
+  headingDegrees?: number;
+  climateRemainingTime?: number;
 
-  constructor(
-    name?: string,
-    id?: string,
-    vin?: string,
-    bmwController?: BMWDeviceController,
-    credentialsProvider?: () => BMWCredentials | null
-  ) {
+  private bmwController?: BMWDeviceController;
+
+  constructor(name?: string, id?: string, vin?: string, bmwController?: BMWDeviceController) {
     super();
     this.name = name ?? BMWCONFIG.defaultDeviceName;
     this.id = id ?? "";
     this.vin = vin;
     this.bmwController = bmwController;
-    this.credentialsProvider = credentialsProvider;
     this.moduleId = BMWCONFIG.id;
+    this.type = DeviceType.CAR;
+    (this as Device & { icon?: string }).icon = BMWMODULE.icon;
     this.isConnected = true;
+    this.quickAccess = true;
   }
 
   setBMWController(controller: BMWDeviceController) {
     this.bmwController = controller;
   }
 
-  setCredentialsProvider(credentialsProvider: () => BMWCredentials | null) {
-    this.credentialsProvider = credentialsProvider;
-  }
-
   override async updateValues(): Promise<void> {
-    if (!this.bmwController || !this.credentialsProvider || !this.vin) return;
-    const credentials = this.credentialsProvider();
-    if (!credentials?.username || !credentials.password) {
-      logger.debug({ deviceId: this.id }, "BMW updateValues uebersprungen - Credentials fehlen");
-      return;
-    }
+    if (!this.bmwController || !this.vin) return;
     try {
-      const rawStatus = await this.bmwController.getVehicleStatus(credentials, this.vin);
-      if (!rawStatus) return;
-      const status = this.bmwController.toCarStatus(rawStatus);
+      const snap = this.bmwController.getTelemetrySnapshot(this.vin);
+      if (!snap || Object.keys(snap).length === 0) {
+        this.isConnected = this.bmwController.getHub().isConnected();
+        return;
+      }
+      const previousLocation = this.location;
+      const status = mapTelemetrySnapshotToCarFields(snap);
       this.fuelLevelPercent = status.fuelLevelPercent;
       this.rangeKm = status.rangeKm;
       this.mileageKm = status.mileageKm;
@@ -51,8 +50,25 @@ export class BMWCar extends DeviceCar {
       this.inUseState = status.inUseState;
       this.climateControlState = status.climateControlState;
       this.location = status.location;
+      if (status.location) {
+        scheduleCarLocationEnrichment(
+          () => this.location,
+          loc => {
+            this.location = loc;
+          },
+          status.location,
+          previousLocation,
+          () => undefined
+        );
+      }
       this.windows = status.windows;
       this.doors = status.doors;
+      this.tirePressuresKpa = status.tirePressuresKpa;
+      this.tirePressureTargetKpa = status.tirePressureTargetKpa;
+      this.headingDegrees = status.headingDegrees;
+      this.climateRemainingTime = status.climateRemainingTime;
+      this.carDataTelemetry = status.carDataTelemetry;
+      this.isConnected = true;
     } catch (err) {
       this.isConnected = false;
       logger.error({ err, deviceId: this.id }, "Fehler beim Aktualisieren der BMW Werte");
@@ -60,30 +76,14 @@ export class BMWCar extends DeviceCar {
   }
 
   protected async executeStartClimateControl(): Promise<void> {
-    if (!this.bmwController || !this.credentialsProvider || !this.vin) return;
-    const credentials = this.credentialsProvider();
-    if (!credentials?.username || !credentials.password) return;
-    await this.bmwController.startClimateControl(credentials, this.vin).catch(err => {
-      logger.error({ err, deviceId: this.id }, "Fehler beim Starten der BMW Klimatisierung");
-    });
+    logger.info({ deviceId: this.id }, "BMW Klimasteuerung: CarData-Streaming unterstuetzt keine Remote-Befehle");
   }
 
   protected async executeStopClimateControl(): Promise<void> {
-    if (!this.bmwController || !this.credentialsProvider || !this.vin) return;
-    const credentials = this.credentialsProvider();
-    if (!credentials?.username || !credentials.password) return;
-    await this.bmwController.stopClimateControl(credentials, this.vin).catch(err => {
-      logger.error({ err, deviceId: this.id }, "Fehler beim Stoppen der BMW Klimatisierung");
-    });
+    logger.info({ deviceId: this.id }, "BMW Klimasteuerung: CarData-Streaming unterstuetzt keine Remote-Befehle");
   }
 
-  protected async executeSendAddress(subject: string, address: DeviceCarAddress): Promise<void> {
-    if (!this.bmwController || !this.credentialsProvider || !this.vin) return;
-    const credentials = this.credentialsProvider();
-    if (!credentials?.username || !credentials.password) return;
-    await this.bmwController.sendAddress(credentials, this.vin, subject, address).catch(err => {
-      logger.error({ err, deviceId: this.id }, "Fehler beim Senden einer BMW Zieladresse");
-    });
+  protected async executeSendAddress(_subject: string, _address: DeviceCarAddress): Promise<void> {
+    logger.info({ deviceId: this.id }, "BMW Ziel senden: CarData-Streaming unterstuetzt keine Remote-Befehle");
   }
 }
-

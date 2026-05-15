@@ -13,10 +13,13 @@ import type { LiveUpdateService } from "../../services/live.service.js";
 import type { ModuleManager } from "../../modules/moduleManager.js";
 import { EntityManager } from "../EntityManager.js";
 import { EnergyHistoryArchiveStore } from "../../../db/energyHistoryArchiveStore.js";
+import { BmwCarTelemetryHistoryStore } from "../../../db/bmwCarTelemetryHistoryStore.js";
+import { serializeDeviceForApi } from "./deviceSerialize.js";
 
 export class DeviceManager implements EntityManager {
   private deviceRepository: JsonRepository<Device>;
   private energyHistoryArchive: EnergyHistoryArchiveStore;
+  private bmwTelemetryHistory: BmwCarTelemetryHistoryStore;
   private moduleManagers = new Map<string, ModuleManager<any, any, any, any, any, any, any>>();
   private liveUpdateService?: LiveUpdateService;
   private devices = new Map<string, Device>();
@@ -24,7 +27,12 @@ export class DeviceManager implements EntityManager {
   constructor(databaseManager: DatabaseManager, private eventManager: EventManager) {
     this.deviceRepository = new JsonRepository<Device>(databaseManager, "Device");
     this.energyHistoryArchive = new EnergyHistoryArchiveStore(databaseManager);
+    this.bmwTelemetryHistory = new BmwCarTelemetryHistoryStore(databaseManager);
     this.initialize();
+  }
+
+  getBmwTelemetryHistoryStore(): BmwCarTelemetryHistoryStore {
+    return this.bmwTelemetryHistory;
   }
 
   initialize() {
@@ -88,7 +96,7 @@ export class DeviceManager implements EntityManager {
       if (device.room === roomId) {
         device.room = undefined;
         if (device.id) {
-          this.deviceRepository.save(device.id, device);
+          this.deviceRepository.save(device.id, serializeDeviceForApi(device) as unknown as Device);
           if (device.moduleId !== "voice-assistant") {
             this.liveUpdateService?.emit("device:updated", device);
           }
@@ -115,6 +123,7 @@ export class DeviceManager implements EntityManager {
     this.devices.delete(deviceId);
     this.deviceRepository.deleteById(deviceId);
     this.energyHistoryArchive.deleteByDeviceId(deviceId);
+    this.bmwTelemetryHistory.deleteByDeviceId(deviceId);
     device?.delete();
     // Event-basierte Trigger dieses Geräts sind entfernt; gespeicherte Workflows/Scenes können verwaiste deviceIds enthalten.
     if (!isVoiceAssistant) {
@@ -131,7 +140,7 @@ export class DeviceManager implements EntityManager {
     if (!device?.id) return false;
     this.wireEventManager(device);
     this.devices.set(device.id, device);
-    this.deviceRepository.save(device.id, device);
+    this.deviceRepository.save(device.id, serializeDeviceForApi(device) as unknown as Device);
     if (device.moduleId !== "voice-assistant") {
       this.liveUpdateService?.emit("device:updated", device);
     }

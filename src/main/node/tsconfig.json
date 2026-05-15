@@ -10,6 +10,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["com", "types"]
+  "include": ["com", "types"],
+  "exclude": ["**/__tests__/**"]
 }
 

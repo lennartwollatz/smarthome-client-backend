@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../../../../logger.js";
 import { BMWModuleManager } from "../../modules/bmw/bmwModuleManager.js";
 import type { ServerDeps } from "../../server.js";
+import { serializeDevicesForApi } from "../../entities/devices/deviceSerialize.js";
 
 export function createBMWModuleRouter(deps: ServerDeps) {
   const router = Router();
@@ -9,45 +10,58 @@ export function createBMWModuleRouter(deps: ServerDeps) {
   deps.deviceManager.registerModuleManager(bmwModule);
 
   router.get("/credentials", (_req, res) => {
-    const info = bmwModule.getCredentialsInfo();
-    // Passwort ist absichtlich write-only und wird nie zurueckgegeben.
-    res.status(200).json(info);
+    res.status(200).json(bmwModule.getCredentialsInfo());
   });
 
   router.put("/credentials", (req, res) => {
-    const usernameRaw = (req.body ?? {}).username;
-    const passwordRaw = (req.body ?? {}).password;
-    const captchaTokenRaw = (req.body ?? {}).captchaToken;
-    const username = typeof usernameRaw === "string" ? usernameRaw.trim() : "";
-    const password = typeof passwordRaw === "string" ? passwordRaw : undefined;
-    const captchaToken = typeof captchaTokenRaw === "string" ? captchaTokenRaw : undefined;
-    if (!username) {
-      res.status(400).json({ error: "username ist erforderlich" });
+    const body = req.body ?? {};
+    const clientIdRaw = body.clientId;
+    const mqttHostRaw = body.mqttHost;
+    const mqttPortRaw = body.mqttPort;
+    const clientId = typeof clientIdRaw === "string" ? clientIdRaw.trim() : "";
+    if (!clientId) {
+      res.status(400).json({ error: "clientId ist erforderlich" });
       return;
     }
-    bmwModule.setCredentials(username, password, captchaToken);
+    const mqttHost = typeof mqttHostRaw === "string" && mqttHostRaw.trim() ? mqttHostRaw.trim() : undefined;
+    const mqttPort =
+      typeof mqttPortRaw === "number"
+        ? mqttPortRaw
+        : typeof mqttPortRaw === "string" && mqttPortRaw.trim()
+          ? Number(mqttPortRaw)
+          : undefined;
+    bmwModule.setCarDataConfig(clientId, mqttHost, Number.isFinite(mqttPort as number) ? (mqttPort as number) : undefined);
     res.status(200).json(bmwModule.getCredentialsInfo());
   });
 
-  router.put("/credentials/password", (req, res) => {
-    const passwordRaw = (req.body ?? {}).password;
-    const password = typeof passwordRaw === "string" ? passwordRaw : "";
-    if (!password) {
-      res.status(400).json({ error: "password ist erforderlich" });
-      return;
+  router.post("/auth/device-code", async (_req, res) => {
+    try {
+      const start = await bmwModule.startDeviceCodeFlow();
+      res.status(200).json({
+        user_code: start.user_code,
+        verification_uri: start.verification_uri,
+        verification_uri_complete: start.verification_uri_complete,
+        expires_in: start.expires_in,
+        interval: start.interval
+      });
+    } catch (err: any) {
+      logger.error({ err }, "BMW Device Code Start fehlgeschlagen");
+      res.status(400).json({ error: err?.message ?? "Device Code Start fehlgeschlagen" });
     }
-    bmwModule.setPassword(password);
-    res.status(200).json(bmwModule.getCredentialsInfo());
   });
 
-  router.put("/credentials/captchaToken", (req, res) => {
-    const tokenRaw = (req.body ?? {}).captchaToken;
-    const captchaToken = typeof tokenRaw === "string" ? tokenRaw : "";
-    if (!captchaToken) {
-      res.status(400).json({ error: "captchaToken ist erforderlich" });
-      return;
+  router.post("/auth/poll", async (_req, res) => {
+    try {
+      const result = await bmwModule.pollDeviceTokenOnce();
+      res.status(200).json({ ...result, credentials: bmwModule.getCredentialsInfo() });
+    } catch (err: any) {
+      logger.error({ err }, "BMW Token Poll fehlgeschlagen");
+      res.status(500).json({ error: err?.message ?? "Poll fehlgeschlagen" });
     }
-    bmwModule.setCaptchaToken(captchaToken);
+  });
+
+  router.post("/auth/clear", (_req, res) => {
+    bmwModule.clearTokens();
     res.status(200).json(bmwModule.getCredentialsInfo());
   });
 
@@ -56,68 +70,88 @@ export function createBMWModuleRouter(deps: ServerDeps) {
       const creds = bmwModule.getCredentialsInfo();
       if (!creds.canDiscover) {
         res.status(400).json({
-          error: creds.hasBmwToken
-            ? "Discovery ist erst nach Setzen von Username und Passwort moeglich"
-            : "Discovery ist erst nach Setzen von Username und Passwort moeglich (Captcha nur beim ersten Login noetig)",
+          error: "Discovery nicht moeglich: Client-ID speichern und bei BMW anmelden (gueltige Token).",
           credentials: creds
         });
         return;
       }
       const devices = await bmwModule.discoverDevices();
-      res.status(200).json(devices);
+      res.status(200).json(serializeDevicesForApi(devices));
     } catch (error) {
       logger.error({ error }, "Fehler beim Discover von BMW Fahrzeugen");
       res.status(500).json({ error: "Fehler beim Discover von BMW Fahrzeugen" });
     }
   });
 
-  router.post("/devices/:deviceId/climate/start", async (req, res) => {
+  router.get("/devices/:deviceId/telemetry/keys", (req, res) => {
     const deviceId = req.params.deviceId;
-    if (!deviceId) {
-      res.status(400).json({ error: "Ungueltige Device ID" });
+    const device = deps.deviceManager.getDevice(deviceId);
+    if (!device || device.moduleId !== "bmw") {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
       return;
     }
-    const success = await bmwModule.startClimateControl(deviceId);
-    res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Fahrzeug nicht gefunden" });
+    res.status(200).json(bmwModule.getTelemetryKeys());
   });
 
-  router.post("/devices/:deviceId/climate/stop", async (req, res) => {
+  router.get("/devices/:deviceId/trips", (req, res) => {
     const deviceId = req.params.deviceId;
-    if (!deviceId) {
-      res.status(400).json({ error: "Ungueltige Device ID" });
+    const fromRaw = req.query.from;
+    const toRaw = req.query.to;
+    const fromMs = typeof fromRaw === "string" ? Number(fromRaw) : NaN;
+    const toMs = typeof toRaw === "string" ? Number(toRaw) : NaN;
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+      res.status(400).json({ error: "from und to (Unix-ms) sind erforderlich" });
       return;
     }
-    const success = await bmwModule.stopClimateControl(deviceId);
-    res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Fahrzeug nicht gefunden" });
+    const result = bmwModule.getTrips(deviceId, { fromMs, toMs });
+    if (!result) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json(result);
   });
 
-  router.post("/devices/:deviceId/sendAddress", async (req, res) => {
+  router.get("/devices/:deviceId/telemetry/history", (req, res) => {
     const deviceId = req.params.deviceId;
-    if (!deviceId) {
-      res.status(400).json({ error: "Ungueltige Device ID" });
+    const fromRaw = req.query.from;
+    const toRaw = req.query.to;
+    const keysRaw = req.query.keys;
+    const fromMs = typeof fromRaw === "string" ? Number(fromRaw) : NaN;
+    const toMs = typeof toRaw === "string" ? Number(toRaw) : NaN;
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+      res.status(400).json({ error: "from und to (Unix-ms) sind erforderlich" });
       return;
     }
-
-    const subjectRaw = (req.body ?? {}).subject;
-    const nameRaw = (req.body ?? {}).name;
-    const latitudeRaw = (req.body ?? {}).latitude;
-    const longitudeRaw = (req.body ?? {}).longitude;
-
-    const subject = typeof subjectRaw === "string" && subjectRaw.trim() ? subjectRaw.trim() : "Ziel";
-    const name = typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : "";
-    const latitude = typeof latitudeRaw === "number" ? latitudeRaw : Number(latitudeRaw);
-    const longitude = typeof longitudeRaw === "number" ? longitudeRaw : Number(longitudeRaw);
-
-    if (!name || Number.isNaN(latitude) || Number.isNaN(longitude)) {
-      res.status(400).json({ error: "name, latitude und longitude sind erforderlich" });
+    const keys =
+      typeof keysRaw === "string" && keysRaw.trim()
+        ? keysRaw.split(",").map(k => k.trim()).filter(Boolean)
+        : undefined;
+    const result = bmwModule.getTelemetryHistory(deviceId, { fromMs, toMs, keys });
+    if (!result) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
       return;
     }
+    res.status(200).json(result);
+  });
 
-    const success = await bmwModule.sendAddress(deviceId, subject, {
-      name,
-      coordinates: { latitude, longitude }
-    });
-    res.status(success ? 200 : 404).json(success ? { success: true } : { error: "Fahrzeug nicht gefunden" });
+  router.get("/vehicle-names", (_req, res) => {
+    res.status(200).json({ names: bmwModule.getVehicleNames() });
+  });
+
+  router.put("/vehicles/:vin/name", async (req, res) => {
+    const vin = typeof req.params.vin === "string" ? req.params.vin.trim() : "";
+    const nameRaw = req.body?.name;
+    const name = typeof nameRaw === "string" ? nameRaw : "";
+    if (!vin) {
+      res.status(400).json({ error: "VIN ist erforderlich" });
+      return;
+    }
+    const car = await bmwModule.setVehicleName(vin, name);
+    if (!car) {
+      res.status(404).json({ error: "Fahrzeug mit dieser VIN wurde noch nicht angelegt (Discovery ausführen)." });
+      return;
+    }
+    res.status(200).json({ success: true, device: serializeDevicesForApi([car])[0] });
   });
 
   router.post("/devices/:deviceId/refresh", async (req, res) => {
@@ -132,4 +166,3 @@ export function createBMWModuleRouter(deps: ServerDeps) {
 
   return router;
 }
-

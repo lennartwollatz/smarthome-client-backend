@@ -21,6 +21,7 @@ import { EventCarWindowsChanged } from "../../server/events/events/EventCarWindo
 import { EventCarWindowsOpened } from "../../server/events/events/EventCarWindowsOpened.js";
 import { EventCarWindowsClosed } from "../../server/events/events/EventCarWindowsClosed.js";
 import { EventCarDoorsChanged } from "../../server/events/events/EventCarDoorsChanged.js";
+import { EventCarWheelsChanged } from "../../server/events/events/EventCarWheelsChanged.js";
 import { EventCarDoorsOpened } from "../../server/events/events/EventCarDoorsOpened.js";
 import { EventCarDoorsClosed } from "../../server/events/events/EventCarDoorsClosed.js";
 import { EventCarFuelLevelEquals } from "../../server/events/events/EventCarFuelLevelEquals.js";
@@ -45,6 +46,17 @@ export interface DeviceCarWindows {
   combinedState: boolean;
 }
 
+export interface DeviceCarWheels {
+  leftFront: number;
+  leftRear: number;
+  rightFront: number;
+  rightRear: number;
+  leftFrontTarget: number;
+  leftRearTarget: number;
+  rightFrontTarget: number;
+  rightRearTarget: number;
+}
+
 export interface DeviceCarDoors {
   combinedSecurityState: boolean;
   leftFront: boolean;
@@ -67,6 +79,7 @@ export abstract class DeviceCar extends Device {
   location?: DeviceCarAddress;
   windows?: DeviceCarWindows;
   doors?: DeviceCarDoors;
+  wheels?: DeviceCarWheels;
 
   constructor(init?: Partial<DeviceCar>) {
     super();
@@ -255,6 +268,15 @@ export abstract class DeviceCar extends Device {
       this.eventManager?.triggerEvent(new EventCarStatusChanged(this.id, carBefore, {...this}));
       this.eventManager?.triggerEvent(new EventCarWindowsChanged(this.id, carBefore, windows));
       this.eventManager?.triggerEvent(windows.combinedState ? new EventCarWindowsOpened(this.id, carBefore, windows) : new EventCarWindowsClosed(this.id, carBefore, windows));
+    }
+  }
+
+  async setWheels(wheels: DeviceCarWheels, trigger: boolean = true) {
+    let carBefore = { ...this };
+    this.wheels = wheels;
+    if( trigger ){
+      this.eventManager?.triggerEvent(new EventCarStatusChanged(this.id, carBefore, {...this}));
+      this.eventManager?.triggerEvent(new EventCarWheelsChanged(this.id, carBefore, wheels));
     }
   }
 

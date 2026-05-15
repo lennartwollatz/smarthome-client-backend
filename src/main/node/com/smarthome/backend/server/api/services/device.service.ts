@@ -1,13 +1,14 @@
 import { Router } from "express";
 import { logger } from "../../../logger.js";
 import type { ServerDeps } from "../server.js";
+import { serializeDevicesForApi } from "../entities/devices/deviceSerialize.js";
 
 export function createDeviceRouter(deps: ServerDeps) {
   const router = Router();
 
   router.get("/", (_req, res) => {
     const devices = deps.deviceManager.getDevices();
-    res.status(200).json(devices);
+    res.status(200).json(serializeDevicesForApi(devices));
   });
 
   /** Energieverlauf (kWh pro Mess-Slot), Live 7d + optional Archiv. Query: from, to (ms), buttonId, includeArchive=1 */

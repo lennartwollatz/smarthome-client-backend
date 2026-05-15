@@ -365,6 +365,8 @@ export class Action {
           return await this.executeWaitNode(node, devices, scenes, eventManager, environment);
         case "loop":
           return await this.executeLoopNode(node, devices, scenes, eventManager, environment);
+        case "variable":
+          return await this.executeVariableNode(node, devices, scenes, eventManager, environment);
         default:
           return {
             success: false,
@@ -396,8 +398,6 @@ export class Action {
     }
 
     const actionType = actionConfig.type;
-    const actionName = actionConfig.action;
-    const values = normalizeWorkflowArgList((actionConfig.values ?? []) as unknown[]);
 
     if (actionType === "device") {
       const deviceId = actionConfig.deviceId;
@@ -410,19 +410,25 @@ export class Action {
         result = {success: result.success, warning: `Device nicht gefunden fuer Action-Node ${node.name}`, environment: result.environment};
         return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
       }
-      if (actionName) {
-        const methodOut = await this.invokeDeviceMethod(device, actionName, values);
+      const steps = actionConfig.steps ?? [];
+      const baseNodeKey =
+        (node.nodeId && String(node.nodeId).trim() !== "") ? String(node.nodeId) : "";
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        const stepAction = step?.action;
+        if (!stepAction) continue;
+        const stepValues = normalizeWorkflowArgList((step.values ?? []) as unknown[]);
+        const methodOut = await this.invokeDeviceMethod(device, stepAction, stepValues);
         if (methodOut !== undefined && methodOut !== null) {
-          const envKey =
-            (node.nodeId && String(node.nodeId).trim() !== "")
-              ? String(node.nodeId)
-              : `device:${deviceId}:${stripParensBase(actionName)}`;
+          const envKey = baseNodeKey
+            ? `${baseNodeKey}:step${i}`
+            : `device:${deviceId}:${stripParensBase(stepAction)}`;
           result.environment.environment.set(envKey, methodOut);
         }
       }
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     } else if (actionType === "action") {
-      const nestedActionId = (actionConfig.actionId ?? actionName ?? "").trim();
+      const nestedActionId = (actionConfig.actionId ?? "").trim();
       if (!nestedActionId || !eventManager.hasRunnable(nestedActionId)) {
         result = {
           success: result.success,
@@ -499,7 +505,7 @@ export class Action {
       result = {success: result.success, warning: `Condition-Node ${node.name} hat keine ConditionConfig`, environment: result.environment};
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     }
-    const conditionResult = this.evaluateCondition(conditionConfig, devices);
+    const conditionResult = this.evaluateCondition(conditionConfig, devices, environment);
     const nextNodes = conditionResult ? node.trueNodes : node.falseNodes;
     if (nextNodes && nextNodes.length) {
       for (const nextNodeId of nextNodes) {
@@ -515,7 +521,64 @@ export class Action {
     return result;
   }
 
-  private evaluateCondition(conditionConfig: ConditionConfig, devices: DeviceMap) {
+  /**
+   * Setzt einen Variablenwert in der Workflow-Environment unter dem Key `var:NAME`.
+   * Mehrere Variable-Nodes mit dem gleichen Namen ueberschreiben den Wert deterministisch
+   * gemaess der Ausfuehrungsreihenfolge.
+   */
+  private async executeVariableNode(
+    node: Node,
+    devices: DeviceMap,
+    scenes: SceneMap,
+    eventManager: EventManager,
+    environment: ActionRunnableEnvironment
+  ): Promise<ActionRunnableResponse> {
+    let result: ActionRunnableResponse = { success: true, environment: environment };
+    const variableConfig = node.variableConfig;
+    if (!variableConfig) {
+      result = {
+        success: result.success,
+        warning: `Variable-Node ${node.name} hat keine VariableConfig`,
+        environment: result.environment
+      };
+      return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
+    }
+    const name = (variableConfig.name ?? "").trim();
+    if (!name) {
+      result = {
+        success: result.success,
+        warning: `Variable-Node ${node.name} hat keinen Variablen-Namen`,
+        environment: result.environment
+      };
+      return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
+    }
+    const value = String(variableConfig.value ?? "");
+    result.environment.environment.set(`var:${name}`, value);
+    return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
+  }
+
+  private evaluateCondition(
+    conditionConfig: ConditionConfig,
+    devices: DeviceMap,
+    environment?: ActionRunnableEnvironment
+  ) {
+    // Variable-Quelle: Vergleich einer Workflow-Variable gegen Literal oder andere Variable.
+    if (conditionConfig.source === "variable") {
+      const env = environment?.environment;
+      const leftName = (conditionConfig.variableName ?? "").trim();
+      const left = env && leftName ? String(env.get(`var:${leftName}`) ?? "") : "";
+      const compareSource = conditionConfig.compareSource ?? "literal";
+      let right: string;
+      if (compareSource === "variable") {
+        const rightName = (conditionConfig.compareVariableName ?? "").trim();
+        right = env && rightName ? String(env.get(`var:${rightName}`) ?? "") : "";
+      } else {
+        right = String(conditionConfig.compareLiteral ?? "");
+      }
+      return conditionConfig.operator === "notEquals" ? left !== right : left === right;
+    }
+
+    // Standard: Device-Quelle (rueckwaertskompatibel).
     const deviceId = conditionConfig.deviceId;
     const property = conditionConfig.property;
     const values = normalizeWorkflowArgList((conditionConfig.values ?? []) as unknown[]);
@@ -657,7 +720,7 @@ export class Action {
         if (maxIterations > 0 && iteration > maxIterations) {
           break;
         }
-        const conditionResult = condition ? this.evaluateCondition(condition, devices) : false;
+        const conditionResult = condition ? this.evaluateCondition(condition, devices, result.environment) : false;
         if (!conditionResult) break;
         for (const loopNodeId of loopNodes) {
           const loopNode = this.findNodeById(this.workflow?.nodes, loopNodeId);

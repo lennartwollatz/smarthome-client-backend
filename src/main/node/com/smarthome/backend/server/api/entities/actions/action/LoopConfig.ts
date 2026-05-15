@@ -8,5 +8,8 @@ export class LoopConfig {
 
   constructor(init?: Partial<LoopConfig>) {
     Object.assign(this, init);
+    if (init?.condition) {
+      this.condition = new ConditionConfig(init.condition);
+    }
   }
 }
