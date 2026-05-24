@@ -29,6 +29,8 @@ export function createSettingsRouter(deps: ServerDeps) {
 
   router.delete("/data", (_req, res) => {
     deps.dataCollector?.clearMlData();
+    deps.eventLogStore?.clearAll();
+    deps.deviceChangeLogStore?.clearAll();
     res.status(204).send();
   });
 

@@ -14,6 +14,8 @@ import type { FloorplanManager } from "./entities/floorplan/floorplanManager.js"
 import { DeviceManager } from "./entities/devices/deviceManager.js";
 import { SceneManager } from "./entities/scenes/sceneManager.js";
 import type { DataCollector } from "../ml/dataCollector.js";
+import type { EventLogStore } from "../db/eventLogStore.js";
+import type { DeviceChangeLogStore } from "../db/deviceChangeLogStore.js";
 import { createUserRouter } from "./services/user.service.js";
 import { createSettingsRouter } from "./services/settings.service.js";
 import { createSceneRouter } from "./services/scene.service.js";
@@ -21,6 +23,7 @@ import { createModuleRouter } from "./services/module.service.js";
 import { createDeviceRouter } from "./services/device.service.js";
 import { createActionRouter } from "./services/action.service.js";
 import { createFloorPlanRouter } from "./services/floorplan.service.js";
+import { createAuditRouter } from "./services/audit.service.js";
 
 export type ServerDeps = {
   databaseManager: DatabaseManager;
@@ -32,6 +35,8 @@ export type ServerDeps = {
   userManager: UserManager;
   actionManager: ActionManager;
   dataCollector?: DataCollector;
+  eventLogStore?: EventLogStore;
+  deviceChangeLogStore?: DeviceChangeLogStore;
 };
 
 export function createApiRouter(deps: ServerDeps) {
@@ -44,6 +49,7 @@ export function createApiRouter(deps: ServerDeps) {
   router.use("/devices", createDeviceRouter(deps));
   router.use("/actions", createActionRouter(deps));
   router.use("/floorplan", createFloorPlanRouter(deps));
+  router.use("/audit", createAuditRouter(deps));
 
   return router;
 }

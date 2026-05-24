@@ -13,6 +13,11 @@ import { EventSpeakerZonePowerOn } from "../../server/events/events/EventSpeaker
 import { EventSpeakerZonePowerOff } from "../../server/events/events/EventSpeakerZonePowerOff.js";
 import { EventSpeakerSourceSet } from "../../server/events/events/EventSpeakerSourceSet.js";
 
+/** Plain Objects aus DB/API vor {@link hydrateNestedCollections}. */
+type SubwooferInit = Pick<Subwoofer, "id" | "name" | "power" | "db">;
+type ZoneInit = Pick<Zone, "name" | "displayName" | "power">;
+type SourceInit = Pick<Source, "index" | "displayName" | "selected">;
+
 export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   zones?: Zone[];
   subwoofers?: Subwoofer[];
@@ -55,21 +60,21 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
     }
   }
 
-  private toSubwooferInstance(s: Subwoofer): Subwoofer {
+  private toSubwooferInstance(s: Subwoofer | SubwooferInit): Subwoofer {
     if (s instanceof Subwoofer) {
       return s;
     }
     return new Subwoofer(s.id, s.name, s.power, s.db);
   }
 
-  private toZoneInstance(z: Zone): Zone {
+  private toZoneInstance(z: Zone | ZoneInit): Zone {
     if (z instanceof Zone) {
       return z;
     }
     return new Zone(z.name, z.displayName, z.power);
   }
 
-  private toSourceInstance(s: Source): Source {
+  private toSourceInstance(s: Source | SourceInit): Source {
     if (s instanceof Source) {
       return s;
     }

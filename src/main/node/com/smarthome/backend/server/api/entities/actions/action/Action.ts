@@ -756,31 +756,61 @@ export class Action {
       };
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     }
+    const usesDeviceSource = this.variableConfigUsesDeviceSource(variableConfig);
     let value: string;
-    const valueSource = variableConfig.valueSource ?? "manual";
-    if (valueSource === "device") {
-      const deviceEval = this.evaluateConditionWithDetails(
-        new ConditionConfig({
-          source: "device",
-          deviceId: variableConfig.deviceId,
-          moduleId: variableConfig.moduleId,
-          property: variableConfig.property,
-          values: variableConfig.values,
-        }),
-        devices,
-        environment
-      );
-      value = deviceEval.result ? "true" : "false";
+    let deviceComparison: ActionExecutionConditionComparison | undefined;
+
+    if (usesDeviceSource) {
+      const deviceId = (variableConfig.deviceId ?? "").trim();
+      const property = (variableConfig.property ?? "").trim();
+      if (!deviceId || !property) {
+        value = "false";
+        result = {
+          ...result,
+          warning: `Variable-Node ${node.name}: Gerät oder boolesche Funktion fehlt`,
+        };
+      } else {
+        const deviceEval = this.evaluateConditionWithDetails(
+          new ConditionConfig({
+            source: "device",
+            deviceId: variableConfig.deviceId,
+            moduleId: variableConfig.moduleId,
+            property: variableConfig.property,
+            values: variableConfig.values,
+          }),
+          devices,
+          environment
+        );
+        value = deviceEval.result ? "true" : "false";
+        deviceComparison = deviceEval.comparison;
+      }
     } else {
       value = String(variableConfig.value ?? "");
     }
+
     result.environment.environment.set(`var:${name}`, value);
     this.recordInvocation({
       kind: "variable",
       label: name,
       args: [value],
+      result: value,
+      comparison: deviceComparison,
     });
     return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
+  }
+
+  /** Manuell oder boolesche Geraetefunktion (valueSource oder deviceId+property). */
+  private variableConfigUsesDeviceSource(variableConfig: {
+    valueSource?: string;
+    deviceId?: string;
+    property?: string;
+  }): boolean {
+    if (variableConfig.valueSource === "device") {
+      return true;
+    }
+    const deviceId = (variableConfig.deviceId ?? "").trim();
+    const property = (variableConfig.property ?? "").trim();
+    return deviceId.length > 0 && property.length > 0;
   }
 
   private formatLocalTimeFromMinutes(minutes: number): string {

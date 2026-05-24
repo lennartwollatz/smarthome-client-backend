@@ -149,6 +149,10 @@ export interface Cleaning {
 
 export type Cleanings =  Cleaning[];
 
+export type VacuumCleaningHistoryReader = {
+  hasCleaningToday(deviceId: string, now?: Date): boolean;
+};
+
 export abstract class DeviceVacuumCleaner extends Device {
   deviceState: DeviceState = {
     mode: DEVICE_MODE.SLEEPING,
@@ -178,6 +182,12 @@ export abstract class DeviceVacuumCleaner extends Device {
    * Wert.segmentId = die an MiIO zu sendende Segment-ID (immer gesetzt; i. d. R. identisch zum Schlüssel).
    */
   roomMapping: Record<string, { name: string; id: string; segmentId: string }> = {};
+
+  private cleaningHistoryReader?: VacuumCleaningHistoryReader;
+
+  setCleaningHistoryReader(reader: VacuumCleaningHistoryReader | undefined): void {
+    this.cleaningHistoryReader = reader;
+  }
 
   constructor(init?: Partial<DeviceVacuumCleaner>) {
     super();
@@ -284,6 +294,14 @@ export abstract class DeviceVacuumCleaner extends Device {
   }
   isCleaningPaused(): boolean {
     return this.deviceState.mode === DEVICE_MODE.CLEANING_PAUSED || this.deviceState.mode === DEVICE_MODE.CLEANING_ZONED_PAUSED || this.deviceState.mode === DEVICE_MODE.CLEANING_ROOM_PAUSED;
+  }
+
+  /** Ob heute (lokaler Kalendertag) mindestens eine Reinigung abgeschlossen wurde. */
+  cleanedToday(now: Date = new Date()): boolean {
+    if (!this.id || !this.cleaningHistoryReader) {
+      return false;
+    }
+    return this.cleaningHistoryReader.hasCleaningToday(this.id, now);
   }
 
   async setPower(power: boolean, execute: boolean, trigger: boolean = true) {

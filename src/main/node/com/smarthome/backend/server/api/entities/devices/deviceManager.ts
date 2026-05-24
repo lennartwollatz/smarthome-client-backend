@@ -9,7 +9,6 @@ import { DeviceMotion } from "../../../../model/devices/DeviceMotion.js";
 import { DeviceLightLevel } from "../../../../model/devices/DeviceLightLevel.js";
 import { DeviceTemperature } from "../../../../model/devices/DeviceTemperature.js";
 import { DeviceLightLevelMotionTemperature } from "../../../../model/devices/DeviceLightLevelMotionTemperature.js";
-import { DeviceVacuumCleaner } from "../../../../model/devices/DeviceVacuumCleaner.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { JsonRepository } from "../../../db/jsonRepository.js";
 import { EventManager } from "../../../events/EventManager.js";
@@ -26,22 +25,34 @@ import {
   type TemperatureHistoryPoint,
   type LightLevelHistoryPoint
 } from "../../../db/sensorHistoryStore.js";
+import { VacuumCleaningHistoryStore } from "../../../db/vacuumCleaningHistoryStore.js";
+import { DEVICE_MODE, DeviceVacuumCleaner } from "../../../../model/devices/DeviceVacuumCleaner.js";
 import { serializeDeviceForApi } from "./deviceSerialize.js";
+import type { DeviceChangeLogStore } from "../../../db/deviceChangeLogStore.js";
+import { detectDeviceChanges } from "../../../audit/deviceChangeDetector.js";
+import { getCurrentSource } from "../../../events/EventSource.js";
 
 export class DeviceManager implements EntityManager {
   private deviceRepository: JsonRepository<Device>;
   private energyHistoryArchive: EnergyHistoryArchiveStore;
   private bmwTelemetryHistory: BmwCarTelemetryHistoryStore;
   private sensorHistory: SensorHistoryStore;
+  private vacuumCleaningHistory: VacuumCleaningHistoryStore;
   private moduleManagers = new Map<string, ModuleManager<any, any, any, any, any, any, any>>();
   private liveUpdateService?: LiveUpdateService;
   private devices = new Map<string, Device>();
 
-  constructor(databaseManager: DatabaseManager, private eventManager: EventManager) {
+  constructor(
+    databaseManager: DatabaseManager,
+    private eventManager: EventManager,
+    vacuumCleaningHistory: VacuumCleaningHistoryStore,
+    private deviceChangeLogStore?: DeviceChangeLogStore
+  ) {
     this.deviceRepository = new JsonRepository<Device>(databaseManager, "Device");
     this.energyHistoryArchive = new EnergyHistoryArchiveStore(databaseManager);
     this.bmwTelemetryHistory = new BmwCarTelemetryHistoryStore(databaseManager);
     this.sensorHistory = new SensorHistoryStore(databaseManager);
+    this.vacuumCleaningHistory = vacuumCleaningHistory;
     this.initialize();
   }
 
@@ -61,6 +72,12 @@ export class DeviceManager implements EntityManager {
     Device.prototype.setEventManager.call(device, this.eventManager);
   }
 
+  private wireVacuumCleaningHistory(device: Device): void {
+    if (device instanceof DeviceVacuumCleaner) {
+      device.setCleaningHistoryReader(this.vacuumCleaningHistory);
+    }
+  }
+
   setLiveUpdateService(service: LiveUpdateService): void {
     this.liveUpdateService = service;
   }
@@ -70,6 +87,7 @@ export class DeviceManager implements EntityManager {
     devices.forEach(device => {
       if (device?.id) {
         this.wireEventManager(device);
+        this.wireVacuumCleaningHistory(device);
         if (device instanceof DeviceSwitch) {
           if (this.trimAndArchiveSwitchEnergyHistory(device)) {
             this.deviceRepository.save(device.id, serializeDeviceForApi(device) as unknown as Device);
@@ -87,6 +105,7 @@ export class DeviceManager implements EntityManager {
       const convertedDevice = await moduleManager.convertDeviceFromDatabase(device);
       if (!convertedDevice) return;
       this.wireEventManager(convertedDevice);
+      this.wireVacuumCleaningHistory(convertedDevice);
       this.devices.set(device.id, convertedDevice);
     });
     Promise.all(convertPromises)
@@ -144,6 +163,7 @@ export class DeviceManager implements EntityManager {
     this.energyHistoryArchive.deleteByDeviceId(deviceId);
     this.bmwTelemetryHistory.deleteByDeviceId(deviceId);
     this.sensorHistory.deleteByDeviceId(deviceId);
+    this.vacuumCleaningHistory.deleteByDeviceId(deviceId);
     device?.delete();
     // Event-basierte Trigger dieses Geräts sind entfernt; gespeicherte Workflows/Scenes können verwaiste deviceIds enthalten.
     if (!isVoiceAssistant) {
@@ -160,16 +180,41 @@ export class DeviceManager implements EntityManager {
     if (!device?.id) return false;
     const prev = this.devices.get(device.id);
     this.wireEventManager(device);
+    this.wireVacuumCleaningHistory(device);
     if (device instanceof DeviceSwitch) {
       this.trimAndArchiveSwitchEnergyHistory(device);
     }
     this.recordSensorHistoryIfChanged(prev, device);
+    this.recordVacuumCleaningHistoryIfCompleted(prev, device);
+    this.recordDeviceChangesIfAny(prev, device);
     this.devices.set(device.id, device);
     this.deviceRepository.save(device.id, serializeDeviceForApi(device) as unknown as Device);
     if (device.moduleId !== "voice-assistant") {
       this.liveUpdateService?.emit("device:updated", device);
     }
     return true;
+  }
+
+  private recordDeviceChangesIfAny(prev: Device | undefined, device: Device): void {
+    if (!this.deviceChangeLogStore || !prev) return;
+    try {
+      const prevSnap = serializeDeviceForApi(prev);
+      const nextSnap = serializeDeviceForApi(device);
+      const changes = detectDeviceChanges(prevSnap, nextSnap);
+      if (!changes.length) return;
+      this.deviceChangeLogStore.append(
+        device.id,
+        device.name ?? device.id,
+        changes,
+        getCurrentSource()
+      );
+    } catch {
+      /* Protokollierung darf Speichern nicht blockieren */
+    }
+  }
+
+  queryDeviceChangeLog(query: Parameters<DeviceChangeLogStore["query"]>[0] = {}) {
+    return this.deviceChangeLogStore?.query(query) ?? { total: 0, items: [] };
   }
 
   /**
@@ -464,6 +509,44 @@ export class DeviceManager implements EntityManager {
       out[bid] = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
     }
     return { buttons: out };
+  }
+
+  private static readonly VACUUM_ACTIVE_CLEANING_MODES = new Set<DEVICE_MODE>([
+    DEVICE_MODE.CLEANING,
+    DEVICE_MODE.CLEANING_ROOM,
+    DEVICE_MODE.CLEANING_ZONED,
+    DEVICE_MODE.DOCKING,
+  ]);
+
+  private static readonly VACUUM_CLEANING_COMPLETED_MODES = new Set<DEVICE_MODE>([
+    DEVICE_MODE.DOCKED,
+    DEVICE_MODE.SLEEPING,
+    DEVICE_MODE.CLEANING_STOPPED,
+    DEVICE_MODE.CLEANING_ROOM_STOPPED,
+    DEVICE_MODE.CLEANING_ZONED_STOPPED,
+  ]);
+
+  private recordVacuumCleaningHistoryIfCompleted(prev: Device | undefined, next: Device): void {
+    if (!next.id || !(next instanceof DeviceVacuumCleaner)) return;
+    const prevMode = prev instanceof DeviceVacuumCleaner ? prev.deviceState.mode : undefined;
+    const nextMode = next.deviceState.mode;
+    if (
+      prevMode === undefined ||
+      !DeviceManager.VACUUM_ACTIVE_CLEANING_MODES.has(prevMode) ||
+      !DeviceManager.VACUUM_CLEANING_COMPLETED_MODES.has(nextMode)
+    ) {
+      return;
+    }
+    const rooms =
+      prev instanceof DeviceVacuumCleaner && prev.deviceState.currentRooms?.length
+        ? [...prev.deviceState.currentRooms]
+        : next.deviceState.currentRooms?.length
+          ? [...next.deviceState.currentRooms]
+          : [];
+    this.vacuumCleaningHistory.recordCleaning(next.id, {
+      mode: nextMode,
+      rooms,
+    });
   }
 
   private recordSensorHistoryIfChanged(prev: Device | undefined, next: Device): void {

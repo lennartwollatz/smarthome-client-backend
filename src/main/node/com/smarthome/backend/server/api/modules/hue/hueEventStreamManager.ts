@@ -14,8 +14,19 @@ import { DeviceTemperature } from "../../../../model/devices/DeviceTemperature.j
 import { HueBridgeController } from "./hueBridgeController.js";
 import { HueEvent } from "./hueEvent.js";
 import { HUECONFIG } from "./hueModule.js";
+import type { Device } from "../../../../model/devices/Device.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { mirekToLightTemperaturePercent } from "./hueDeviceController.js";
+import { DeviceLightLevelMotionTemperature } from "com/smarthome/backend/model/devices/DeviceLightLevelMotionTemperature.js";
+import { DeviceSwitchDimmer } from "com/smarthome/backend/model/devices/DeviceSwitchDimmer.js";
+
+type HueDeviceWithResources = Device & {
+  bridgeId?: string;
+  hueResourceId?: string;
+  motionRid?: string;
+  lightLevelRid?: string;
+  temperatureRid?: string;
+};
 
 export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeController, HueEvent> {
   private repository: JsonRepository<HueBridgeDiscovered>;
@@ -42,7 +53,7 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
   }
 
   protected async handleEvent(event: HueEvent): Promise<void> {
-    logger.debug("handleEvent: " + JSON.stringify(event.data));
+    logger.debug({ bridgeId: event.bridgeId, data: event.data }, "Hue Eventstream");
     const eventData = event.data;
 
     try {
@@ -56,30 +67,58 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
         resourceId = typeof eventData.id === "string" ? eventData.id : null;
       }
 
-      if (!resourceType || !resourceId) {
+      if (!resourceType || !resourceId || !event.bridgeId) {
         return;
       }
 
+      const bridgeId = event.bridgeId;
+
       // Verarbeite Event für Device-Updates
       if (resourceType === "light") {
-        this.updateLightFromEvent(resourceId, eventData);
+        this.updateLightFromEvent(bridgeId, resourceId, eventData);
       } else if (resourceType === "button") {
-        this.updateButtonFromEvent(resourceId, eventData);
+        this.updateButtonFromEvent(bridgeId, resourceId, eventData);
       } else if (resourceType === "motion") {
-        this.updateMotionSensorFromEvent(resourceId, eventData);
+        this.updateMotionSensorFromEvent(bridgeId, resourceId, eventData);
       } else if (resourceType === "temperature") {
-        this.updateTemperatureSensorFromEvent(resourceId, eventData);
+        this.updateTemperatureSensorFromEvent(bridgeId, resourceId, eventData);
       } else if (resourceType === "light_level") {
-        this.updateLightLevelSensorFromEvent(resourceId, eventData);
+        this.updateLightLevelSensorFromEvent(bridgeId, resourceId, eventData);
       }
     } catch (err) {
       logger.error({ err }, "Fehler beim Verarbeiten von Eventstream-Event");
     }
   }
 
-  private updateLightFromEvent(resourceId: string, eventData: Record<string, unknown>) {
-    const deviceId = `hue-light-${resourceId}`;
-    const device = this.deviceManager.getDevice(deviceId);
+  private hueDeviceId(bridgeId: string, resourceId: string): string {
+    return `hue-${bridgeId}-${resourceId}`;
+  }
+
+  /**
+   * Sucht Hue-Gerät per `hue-<bridgeId>-<resourceId>` oder per gespeicherter Service-RID
+   * (Discovery nutzt oft die Device-ID, Events liefern die Resource-ID).
+   */
+  private findHueDevice(bridgeId: string, resourceId: string): Device | undefined {
+    const direct = this.deviceManager.getDevice(this.hueDeviceId(bridgeId, resourceId));
+    if (direct) return direct;
+
+    for (const device of this.deviceManager.getDevicesForModule(HUECONFIG.id)) {
+      const d = device as HueDeviceWithResources;
+      if (d.bridgeId !== bridgeId) continue;
+      if (
+        d.hueResourceId === resourceId ||
+        d.motionRid === resourceId ||
+        d.lightLevelRid === resourceId ||
+        d.temperatureRid === resourceId
+      ) {
+        return device;
+      }
+    }
+    return undefined;
+  }
+
+  private updateLightFromEvent(bridgeId: string, resourceId: string, eventData: Record<string, unknown>) {
+    const device = this.findHueDevice(bridgeId, resourceId);
     if (!device) return;
     if (!(device instanceof DeviceLight)) return;
 
@@ -130,62 +169,54 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
     this.deviceManager.saveDevice(device);
   }
 
-  private updateButtonFromEvent(resourceId: string, eventData: Record<string, unknown>) {
-    const deviceId = `hue-button-${resourceId}`;
-    const device = this.deviceManager.getDevice(deviceId);
+  private updateButtonFromEvent(bridgeId: string, resourceId: string, eventData: Record<string, unknown>) {
+    const device = this.findHueDevice(bridgeId, resourceId);
     if (!device) return;
-    if (!(device instanceof DeviceSwitch)) return;
 
     const buttonId = typeof eventData.id === "string" ? eventData.id : resourceId;
     const report = (eventData as any).button_report as { event?: string } | undefined;
     const event = report?.event;
     if (event === "short_release" || event === "long_release") {
-      device.toggle(buttonId, false);
+      (device as DeviceSwitch | DeviceSwitchDimmer).toggle(buttonId, false);
     }
     this.deviceManager.saveDevice(device);
   }
 
-  private updateMotionSensorFromEvent(resourceId: string, eventData: Record<string, unknown>) {
-    const deviceId = `hue-motion-${resourceId}`;
-    const device = this.deviceManager.getDevice(deviceId);
+  private updateMotionSensorFromEvent(bridgeId: string, resourceId: string, eventData: Record<string, unknown>) {
+    const device = this.findHueDevice(bridgeId, resourceId);
     if (!device) return;
-    if (!(device instanceof DeviceMotion)) return;
 
     const motionObj = (eventData as any).motion as { motion_report?: any } | undefined;
     const report = motionObj?.motion_report;
     if (report && typeof report.changed === "string" && typeof report.motion === "boolean") {
-      device.setMotion(report.motion, report.changed, false);
+      (device as DeviceMotion | DeviceLightLevelMotionTemperature).setMotion(report.motion, report.changed, false);
     }
     this.deviceManager.saveDevice(device);
   }
 
-  private updateTemperatureSensorFromEvent(resourceId: string, eventData: Record<string, unknown>) {
-    const deviceId = `hue-temperature-${resourceId}`;
-    const device = this.deviceManager.getDevice(deviceId);
+  private updateTemperatureSensorFromEvent(bridgeId: string, resourceId: string, eventData: Record<string, unknown>) {
+    const device = this.findHueDevice(bridgeId, resourceId);
     if (!device) return;
-    if (!(device instanceof DeviceTemperature)) return;
 
     const tempObj = (eventData as any).temperature as { temperature?: number } | undefined;
     if (tempObj && typeof tempObj.temperature === "number") {
       const temperature = Math.round(tempObj.temperature);
-      if (device.temperature !== temperature) {
-        device.setTemperature(temperature, false);
+      if ((device as DeviceTemperature | DeviceLightLevelMotionTemperature).temperature !== temperature) {
+        (device as DeviceTemperature | DeviceLightLevelMotionTemperature).setTemperature(temperature, false);
       }
     }
     this.deviceManager.saveDevice(device);
   }
 
-  private updateLightLevelSensorFromEvent(resourceId: string, eventData: Record<string, unknown>) {
-    const deviceId = `hue-light_level-${resourceId}`;
-    const device = this.deviceManager.getDevice(deviceId);
+  private updateLightLevelSensorFromEvent(bridgeId: string, resourceId: string, eventData: Record<string, unknown>) {
+    const device = this.findHueDevice(bridgeId, resourceId);
     if (!device) return;
-    if (!(device instanceof DeviceLightLevel)) return;
 
     const lightObj = (eventData as any).light as { light_level?: number } | undefined;
     if (lightObj && typeof lightObj.light_level === "number") {
       const lightLevel = lightObj.light_level;
-      if (device.lightLevel !== lightLevel) {
-        device.setLightLevel(lightLevel, false);
+      if ((device as DeviceLightLevel | DeviceLightLevelMotionTemperature).lightLevel !== lightLevel) {
+        (device as DeviceLightLevel | DeviceLightLevelMotionTemperature).setLightLevel(lightLevel, false);
       }
     }
     this.deviceManager.saveDevice(device);

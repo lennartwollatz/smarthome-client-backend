@@ -3,6 +3,9 @@ import { EventListener } from "./EventListener.js";
 import { Event } from "./events/Event.js";
 import { EventType } from "./event-types/EventType.js";
 import { EventLogger } from "./EventLogger.js";
+import type { EventLogStore } from "../db/eventLogStore.js";
+import { serializeEventForLog } from "../audit/eventSerializer.js";
+import type { EventLogQuery, EventLogQueryResult } from "../audit/eventLogEntry.js";
 import { ActionRunnable } from "../api/entities/actions/runnable/ActionRunnable.js";
 import { ActionRunnableEventBased } from "../api/entities/actions/runnable/ActionRunnableEventBased.js";
 import { ActionRunnableTimeBased } from "../api/entities/actions/runnable/ActionRunnableTimeBased.js";
@@ -10,11 +13,29 @@ import { getCurrentSource } from "./EventSource.js";
 
 export class EventManager {
     private eventLogger: EventLogger;
+    private eventLogStore?: EventLogStore;
     private listeners: Map<string, Map<EventType, EventListener[]>> = new Map();
     private onEventCallbacks: ((event: Event) => void)[] = [];
 
-    constructor() {
+    constructor(eventLogStore?: EventLogStore) {
         this.eventLogger = new EventLogger();
+        this.eventLogStore = eventLogStore;
+    }
+
+    public queryEventLog(query: EventLogQuery = {}): EventLogQueryResult {
+        if (this.eventLogStore) {
+            return this.eventLogStore.query(query);
+        }
+        const recent = this.eventLogger.getEventsLast10Minutes().map(serializeEventForLog);
+        let items = recent;
+        if (query.deviceId) items = items.filter(e => e.deviceId === query.deviceId);
+        if (query.eventType) items = items.filter(e => e.eventType === query.eventType);
+        if (query.from != null) items = items.filter(e => e.timestamp >= query.from!);
+        if (query.to != null) items = items.filter(e => e.timestamp <= query.to!);
+        items.sort((a, b) => b.timestamp - a.timestamp);
+        const offset = Math.max(query.offset ?? 0, 0);
+        const limit = Math.min(Math.max(query.limit ?? 100, 1), 500);
+        return { total: items.length, items: items.slice(offset, offset + limit) };
     }
 
     public addOnEventCallback(callback: (event: Event) => void): void {
@@ -117,6 +138,11 @@ export class EventManager {
     public async triggerEvent(event: Event) {
         event.source = getCurrentSource();
         this.eventLogger.log(event);
+        try {
+            this.eventLogStore?.append(serializeEventForLog(event));
+        } catch {
+            /* Persistenz-Fehler dürfen Events nicht blockieren */
+        }
         for (const cb of this.onEventCallbacks) {
             try { cb(event); } catch { /* DataCollector-Fehler dürfen Events nicht blockieren */ }
         }
