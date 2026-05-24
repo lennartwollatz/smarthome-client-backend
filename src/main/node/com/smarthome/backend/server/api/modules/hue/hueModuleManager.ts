@@ -17,6 +17,7 @@ import { DeviceLightDimmer } from "../../../../model/devices/DeviceLightDimmer.j
 import { DeviceLightDimmerTemperature } from "../../../../model/devices/DeviceLightDimmerTemperature.js";
 import { DeviceLightDimmerTemperatureColor } from "../../../../model/devices/DeviceLightDimmerTemperatureColor.js";
 import { DeviceMotion } from "../../../../model/devices/DeviceMotion.js";
+import { DeviceLightLevelMotionTemperature } from "../../../../model/devices/DeviceLightLevelMotionTemperature.js";
 import { Device } from "../../../../model/devices/Device.js";
 import { HueBridgeDiscovered } from "./hueBridgeDiscovered.js";
 import { HueDeviceDiscovered } from "./hueDeviceDiscovered.js";
@@ -103,7 +104,12 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
     if (sensitivity < 0 || sensitivity > 100) return false;
     const device = this.deviceManager.getDevice(deviceId);
     if (!device) return false;
-    if (!(device instanceof DeviceMotion)) return false;
+    if (
+      !(device instanceof DeviceMotion) &&
+      !(device instanceof DeviceLightLevelMotionTemperature)
+    ) {
+      return false;
+    }
     await device.setSensibility(sensitivity, true);
     return this.deviceManager.saveDevice(device);
   }
@@ -222,7 +228,18 @@ export class HueModuleManager extends ModuleManagerBridged<HueEventStreamManager
     const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
     
     for (const device of devices) {
-      (device as HueLight | HueLightDimmer | HueLightDimmerTemperatureColor | HueLightDimmerTemperature | HueLightLevelSensor | HueTemperatureSensor | HueMotionSensor | HueSwitchDimmer).setHueDeviceController(this.deviceController);
+      (
+        device as
+          | HueLight
+          | HueLightDimmer
+          | HueLightDimmerTemperatureColor
+          | HueLightDimmerTemperature
+          | HueLightLevelSensor
+          | HueTemperatureSensor
+          | HueMotionSensor
+          | HueLightLevelMotionTemperature
+          | HueSwitchDimmer
+      ).setHueDeviceController(this.deviceController);
     }
   }
 }

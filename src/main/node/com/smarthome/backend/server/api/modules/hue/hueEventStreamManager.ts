@@ -16,7 +16,7 @@ import { HueEvent } from "./hueEvent.js";
 import { HUECONFIG } from "./hueModule.js";
 import type { Device } from "../../../../model/devices/Device.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
-import { mirekToLightTemperaturePercent } from "./hueDeviceController.js";
+import { mirekToLightTemperaturePercent, rawSensitivityToPercent } from "./hueDeviceController.js";
 import { DeviceLightLevelMotionTemperature } from "com/smarthome/backend/model/devices/DeviceLightLevelMotionTemperature.js";
 import { DeviceSwitchDimmer } from "com/smarthome/backend/model/devices/DeviceSwitchDimmer.js";
 
@@ -186,11 +186,30 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
     const device = this.findHueDevice(bridgeId, resourceId);
     if (!device) return;
 
+    const motionDevice = device as DeviceMotion | DeviceLightLevelMotionTemperature;
+
     const motionObj = (eventData as any).motion as { motion_report?: any } | undefined;
     const report = motionObj?.motion_report;
     if (report && typeof report.changed === "string" && typeof report.motion === "boolean") {
-      (device as DeviceMotion | DeviceLightLevelMotionTemperature).setMotion(report.motion, report.changed, false);
+      motionDevice.setMotion(report.motion, report.changed, false);
     }
+
+    const sensObj = (eventData as any).sensitivity as
+      | { sensitivity?: number; sensitivity_max?: number }
+      | undefined;
+    if (sensObj) {
+      if (typeof sensObj.sensitivity_max === "number" && sensObj.sensitivity_max > 0) {
+        motionDevice.max_sensitivity = sensObj.sensitivity_max;
+      }
+      if (typeof sensObj.sensitivity === "number") {
+        const max = motionDevice.max_sensitivity ?? sensObj.sensitivity_max ?? 0;
+        const percent = rawSensitivityToPercent(sensObj.sensitivity, max);
+        if (motionDevice.sensitivity !== percent) {
+          void motionDevice.setSensibility(percent, false);
+        }
+      }
+    }
+
     this.deviceManager.saveDevice(device);
   }
 

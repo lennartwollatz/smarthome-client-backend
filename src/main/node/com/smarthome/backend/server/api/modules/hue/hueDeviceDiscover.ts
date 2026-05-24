@@ -8,8 +8,11 @@ import {
   LightStatus,
   MotionStatus,
   TemperatureStatus,
-  mirekToLightTemperaturePercent
+  mirekToLightTemperaturePercent,
+  rawSensitivityToPercent
 } from "./hueDeviceController.js";
+import { DeviceMotion } from "../../../../model/devices/DeviceMotion.js";
+import { DeviceLightLevelMotionTemperature } from "../../../../model/devices/DeviceLightLevelMotionTemperature.js";
 import { HueLight } from "./devices/hueLight.js";
 import { HueLightDimmer } from "./devices/hueLightDimmer.js";
 import { HueLightDimmerTemperature } from "./devices/hueLightDimmerTemperature.js";
@@ -287,10 +290,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
       if (motion && changed) {
         sensor.setMotion(motion, changed, false);
       }
-      const sensitivity = motionStatus.sensitivity;
-      if (sensitivity) {
-        sensor.setSensibility(sensitivity, false);
-      }
+      this.applyMotionSensitivity(sensor, motionStatus);
     } else {
       return null;
     }
@@ -336,10 +336,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
       if (motion && changed) {
         sensor.setMotion(motion, changed, false);
       }
-      const sensitivity = motionStatus.sensitivity;
-      if (sensitivity) {
-        sensor.setSensibility(sensitivity, false);
-      }
+      this.applyMotionSensitivity(sensor, motionStatus);
     } else {
       return null;
     }
@@ -476,10 +473,7 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
       if (motion !== undefined && changed !== undefined) {
         sensor.setMotion(motion, changed, false);
       }
-      const sensitivity = motionStatus.sensitivity;
-      if (sensitivity !== undefined) {
-        sensor.setSensibility(sensitivity, false);
-      }
+      this.applyMotionSensitivity(sensor, motionStatus);
     } else {
       return null;
     }
@@ -548,6 +542,17 @@ export class HueDeviceDiscover extends ModuleDeviceDiscover<HueDeviceDiscovered>
       }
     }
     return device;
+  }
+
+  private applyMotionSensitivity(
+    sensor: DeviceMotion | DeviceLightLevelMotionTemperature,
+    motionStatus: MotionStatus
+  ): void {
+    if (motionStatus.sensitivity_max > 0) {
+      sensor.max_sensitivity = motionStatus.sensitivity_max;
+    }
+    const percent = rawSensitivityToPercent(motionStatus.sensitivity, motionStatus.sensitivity_max);
+    void sensor.setSensibility(percent, false);
   }
 }
 

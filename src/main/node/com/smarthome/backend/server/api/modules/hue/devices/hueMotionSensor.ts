@@ -1,6 +1,6 @@
 import { logger } from "../../../../../logger.js";
 import { DeviceMotion } from "../../../../../model/devices/DeviceMotion.js";
-import { HueDeviceController } from "../hueDeviceController.js";
+import { HueDeviceController, rawSensitivityToPercent } from "../hueDeviceController.js";
 
 export class HueMotionSensor extends DeviceMotion {
   protected bridgeId?: string;
@@ -28,14 +28,22 @@ export class HueMotionSensor extends DeviceMotion {
   }
 
   async updateValues(): Promise<void> {
-    if (!this.hueDeviceController) {
+    if (!this.hueDeviceController || !this.bridgeId || !this.hueResourceId) {
       logger.debug(
         "updateValues() uebersprungen fuer {} - hueDeviceController ist null",
         this.id
       );
       return;
     }
-    // HueDeviceController in Node ist aktuell stubbed.
+    const status = await this.hueDeviceController.getMotion(this.bridgeId, this.hueResourceId);
+    if (!status) return;
+    if (status.sensitivity_max > 0) {
+      this.max_sensitivity = status.sensitivity_max;
+    }
+    await this.setSensibility(
+      rawSensitivityToPercent(status.sensitivity, status.sensitivity_max),
+      false
+    );
   }
 
   protected async executeSetSensibility(sensitivity: number): Promise<void> {

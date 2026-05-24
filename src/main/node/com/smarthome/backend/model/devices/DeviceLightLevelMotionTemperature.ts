@@ -18,6 +18,8 @@ import { EventMotionStatusChanged } from "../../server/events/events/EventMotion
 
 export abstract class DeviceLightLevelMotionTemperature extends Device {
   sensitivity?: number;
+  /** Hue-API: Obergrenze für Rohwert `sensitivity` (Skalierung auf 0–100 %). */
+  max_sensitivity?: number;
   motion?: boolean;
   motion_last_detect?: string;
   lightLevel?: number;
@@ -36,6 +38,7 @@ export abstract class DeviceLightLevelMotionTemperature extends Device {
       ...super.toDatabaseJson(),
       m: this.motion ? 1 : 0,
       se: this.sensitivity ?? 0,
+      msx: this.max_sensitivity ?? 0,
       ll: this.lightLevel ?? 0,
       t: this.temperature ?? 0,
     };

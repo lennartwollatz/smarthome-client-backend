@@ -9,6 +9,8 @@ import { EventNoMotionDetectedSince } from "../../server/events/events/EventNoMo
 
 export abstract class DeviceMotion extends Device {
   sensitivity?: number;
+  /** Hue-API: Obergrenze für Rohwert `sensitivity` (Skalierung auf 0–100 %). */
+  max_sensitivity?: number;
   motion?: boolean;
   motion_last_detect?: string;
 
@@ -21,7 +23,12 @@ export abstract class DeviceMotion extends Device {
   abstract updateValues(): Promise<void>;
 
   override toDatabaseJson(): Record<string, unknown> {
-    return { ...super.toDatabaseJson(), m: this.motion ? 1 : 0, se: this.sensitivity ?? 0 };
+    return {
+      ...super.toDatabaseJson(),
+      m: this.motion ? 1 : 0,
+      se: this.sensitivity ?? 0,
+      msx: this.max_sensitivity ?? 0,
+    };
   }
 
   isMotionDetectedSince(seconds: number): boolean {

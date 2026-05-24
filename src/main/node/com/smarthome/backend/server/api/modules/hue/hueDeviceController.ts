@@ -16,6 +16,8 @@ type HueDeviceRecord = Record<string, unknown> & {
   temperatureRid?: string;
   batteryRid?: string;
   moduleId?: string;
+  max_sensitivity?: number;
+  msx?: number;
 };
 
 export type MotionStatus = {
@@ -71,6 +73,21 @@ function lightTemperaturePercentToMirek(percent: number): number {
 function clampHueColorXY(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+/** Hue-Rohwert → 0–100 % (linear zu {@link percentSensitivityToRaw}). */
+export function rawSensitivityToPercent(raw: number, max: number): number {
+  if (!Number.isFinite(raw) || raw < 0) return 0;
+  if (!Number.isFinite(max) || max <= 0) return Math.round(raw);
+  return Math.round((raw / max) * 100);
+}
+
+/** 0–100 % → Hue-Rohwert für PUT /resource/motion/{id}. */
+export function percentSensitivityToRaw(percent: number, max: number): number {
+  if (!Number.isFinite(percent)) return 0;
+  const p = Math.max(0, Math.min(100, percent));
+  if (!Number.isFinite(max) || max <= 0) return Math.round(p);
+  return Math.round((p / 100) * max);
 }
 
 export class HueDeviceController extends ModuleDeviceController<HueEvent, Device> {
@@ -291,15 +308,24 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
     }
   }
 
-  async setSensitivity(deviceId: string, sensitivity: number) {
+  async setSensitivity(deviceId: string, sensitivityPercent: number) {
     const info = await this.getDeviceInfo(deviceId);
     if (!info) return false;
-    // Für kombinierte Geräte verwende motionRid, sonst hueResourceId
     const motionRid = info.motionRid ?? info.hueResourceId;
     if (!motionRid) return false;
+
+    let maxSensitivity = info.max_sensitivity ?? 0;
+    if (maxSensitivity <= 0) {
+      const status = await this.getMotion(info.bridgeId, motionRid);
+      if (status && status.sensitivity_max > 0) {
+        maxSensitivity = status.sensitivity_max;
+      }
+    }
+
+    const rawSensitivity = percentSensitivityToRaw(sensitivityPercent, maxSensitivity);
     const data = {
       enabled: true,
-      sensitivity: { sensitivity },
+      sensitivity: { sensitivity: rawSensitivity },
       type: "motion"
     };
     await this.updateResource(info.bridgeId, "motion", motionRid, data);
@@ -384,12 +410,20 @@ export class HueDeviceController extends ModuleDeviceController<HueEvent, Device
       logger.warn({ deviceId }, "Device ohne Resource IDs");
       return null;
     }
+    const maxSensitivity =
+      typeof device.max_sensitivity === "number"
+        ? device.max_sensitivity
+        : typeof (device as Record<string, unknown>).msx === "number"
+          ? ((device as Record<string, unknown>).msx as number)
+          : undefined;
+
     return {
       bridgeId: device.bridgeId,
       hueResourceId: device.hueResourceId as string | undefined,
       motionRid: device.motionRid as string | undefined,
       lightLevelRid: device.lightLevelRid as string | undefined,
-      temperatureRid: device.temperatureRid as string | undefined
+      temperatureRid: device.temperatureRid as string | undefined,
+      max_sensitivity: maxSensitivity
     };
   }
 }

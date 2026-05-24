@@ -32,6 +32,13 @@ import type { DeviceChangeLogStore } from "../../../db/deviceChangeLogStore.js";
 import { detectDeviceChanges } from "../../../audit/deviceChangeDetector.js";
 import { getCurrentSource } from "../../../events/EventSource.js";
 
+type SensorValueSnapshot = {
+  motion?: boolean;
+  temperature?: number;
+  temperatureGoal?: number;
+  lightLevel?: number;
+};
+
 export class DeviceManager implements EntityManager {
   private deviceRepository: JsonRepository<Device>;
   private energyHistoryArchive: EnergyHistoryArchiveStore;
@@ -41,6 +48,8 @@ export class DeviceManager implements EntityManager {
   private moduleManagers = new Map<string, ModuleManager<any, any, any, any, any, any, any>>();
   private liveUpdateService?: LiveUpdateService;
   private devices = new Map<string, Device>();
+  /** Letzte bekannte Sensorwerte pro Gerät (unabhängig von In-Place-Mutationen im Geräte-Map). */
+  private sensorValueSnapshots = new Map<string, SensorValueSnapshot>();
 
   constructor(
     databaseManager: DatabaseManager,
@@ -94,6 +103,7 @@ export class DeviceManager implements EntityManager {
           }
         }
         this.devices.set(device.id, device);
+        this.seedSensorValueSnapshot(device);
       }
     });
   }
@@ -163,6 +173,7 @@ export class DeviceManager implements EntityManager {
     this.energyHistoryArchive.deleteByDeviceId(deviceId);
     this.bmwTelemetryHistory.deleteByDeviceId(deviceId);
     this.sensorHistory.deleteByDeviceId(deviceId);
+    this.sensorValueSnapshots.delete(deviceId);
     this.vacuumCleaningHistory.deleteByDeviceId(deviceId);
     device?.delete();
     // Event-basierte Trigger dieses Geräts sind entfernt; gespeicherte Workflows/Scenes können verwaiste deviceIds enthalten.
@@ -549,30 +560,49 @@ export class DeviceManager implements EntityManager {
     });
   }
 
-  private recordSensorHistoryIfChanged(prev: Device | undefined, next: Device): void {
+  private seedSensorValueSnapshot(device: Device): void {
+    if (!device.id || this.sensorValueSnapshots.has(device.id)) return;
+    this.sensorValueSnapshots.set(device.id, this.readSensorValueSnapshot(device));
+  }
+
+  private readSensorValueSnapshot(device: Device): SensorValueSnapshot {
+    return {
+      motion: this.readMotion(device),
+      temperature: this.readTemperature(device),
+      temperatureGoal: this.readTemperatureGoal(device),
+      lightLevel: this.readLightLevel(device)
+    };
+  }
+
+  private recordSensorHistoryIfChanged(_prev: Device | undefined, next: Device): void {
     if (!next.id) return;
     const now = Date.now();
     const id = next.id;
 
-    const prevMotion = this.readMotion(prev);
+    if (!this.sensorValueSnapshots.has(id)) {
+      this.sensorValueSnapshots.set(id, this.readSensorValueSnapshot(next));
+      return;
+    }
+
+    const snap = this.sensorValueSnapshots.get(id)!;
+
     const nextMotion = this.readMotion(next);
-    if (nextMotion !== undefined && prevMotion !== nextMotion) {
+    if (nextMotion !== undefined && snap.motion !== nextMotion) {
       this.sensorHistory.appendMotion(id, nextMotion, now);
     }
 
-    const prevTemp = this.readTemperature(prev);
     const nextTemp = this.readTemperature(next);
-    const prevGoal = this.readTemperatureGoal(prev);
     const nextGoal = this.readTemperatureGoal(next);
-    if (nextTemp !== undefined && (prevTemp !== nextTemp || prevGoal !== nextGoal)) {
+    if (nextTemp !== undefined && (snap.temperature !== nextTemp || snap.temperatureGoal !== nextGoal)) {
       this.sensorHistory.appendTemperature(id, nextTemp, nextGoal, now);
     }
 
-    const prevLl = this.readLightLevel(prev);
     const nextLl = this.readLightLevel(next);
-    if (nextLl !== undefined && prevLl !== nextLl) {
+    if (nextLl !== undefined && snap.lightLevel !== nextLl) {
       this.sensorHistory.appendLightLevel(id, nextLl, now);
     }
+
+    this.sensorValueSnapshots.set(id, this.readSensorValueSnapshot(next));
   }
 
   private readMotion(device: Device | undefined): boolean | undefined {
@@ -634,10 +664,17 @@ export class DeviceManager implements EntityManager {
       if (!(device instanceof DeviceTemperature || device instanceof DeviceLightLevelMotionTemperature)) {
         return null;
       }
+      let points = this.sensorHistory.getTemperature(deviceId, range);
+      if (points.length === 0) {
+        const value = this.readTemperature(device);
+        if (value !== undefined) {
+          points = [{ time: Date.now(), value, goal: this.readTemperatureGoal(device) }];
+        }
+      }
       return {
         metric: "temperature",
         range,
-        points: this.sensorHistory.getTemperature(deviceId, range)
+        points
       };
     }
 
@@ -645,10 +682,17 @@ export class DeviceManager implements EntityManager {
       if (!(device instanceof DeviceLightLevel || device instanceof DeviceLightLevelMotionTemperature)) {
         return null;
       }
+      let points = this.sensorHistory.getLightLevel(deviceId, range);
+      if (points.length === 0) {
+        const value = this.readLightLevel(device);
+        if (value !== undefined) {
+          points = [{ time: Date.now(), value }];
+        }
+      }
       return {
         metric: "lightLevel",
         range,
-        points: this.sensorHistory.getLightLevel(deviceId, range)
+        points
       };
     }
 
