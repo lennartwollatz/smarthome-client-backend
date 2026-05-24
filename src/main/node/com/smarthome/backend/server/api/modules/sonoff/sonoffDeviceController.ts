@@ -156,7 +156,7 @@ export class SonoffDeviceController extends ModuleDeviceControllerEvent<SonoffEv
   }
 
   private async setSwitchBrightness(device: SonoffLanEndDevice, outlet:string, level:number): Promise<Record<string, unknown> | null> {
-    const on_off = device.getButton(outlet)?.on ?? false;
+    const on_off = level > 0 ? true: (device.getButton(outlet)?.on ?? false);
     const args = [
       "-m",
       "pysonofflanr3.cli",

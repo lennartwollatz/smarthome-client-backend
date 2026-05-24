@@ -107,6 +107,7 @@ export class SonoffSwitchDimmer extends DeviceSwitchDimmer implements SonoffLanE
   }
 
   protected async executeSetBrightness(buttonId: string, brightness: number): Promise<void> {
+    await this.on(buttonId, false, true);
     await this.sonoffController?.setIntensity(this, buttonId, brightness);
   }
 }
