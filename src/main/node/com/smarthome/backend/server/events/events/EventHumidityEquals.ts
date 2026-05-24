@@ -18,7 +18,7 @@ export class EventHumidityEquals extends Event {
       type: "num",
       value: humidity
     };
-    super(eventId, deviceId, Date.now(), EventType.HUMIDITY_EQUALS, [eventCondition], [], [resultCondition], false);
+    super(eventId, deviceId, Date.now(), EventType.HUMIDITY_EQUALS, [eventCondition], [], [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

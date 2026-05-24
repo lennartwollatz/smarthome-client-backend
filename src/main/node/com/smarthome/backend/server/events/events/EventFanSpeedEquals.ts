@@ -18,7 +18,7 @@ export class EventFanSpeedEquals extends Event{
             type: "num",
             value: speed
         };
-        super(eventId, deviceId, Date.now(), EventType.FAN_SPEED_EQUALS, [eventCondition], [], [resultCondition], false);
+        super(eventId, deviceId, Date.now(), EventType.FAN_SPEED_EQUALS, [eventCondition], [], [resultCondition]);
     }
 
     public matchesListener(listener: EventListener): boolean {

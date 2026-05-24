@@ -36,8 +36,13 @@ export class EventSpeakerUngrouped extends Event {
     super(eventId, deviceId, Date.now(), EventType.SPEAKER_UNGROUPED, [eventCondition], [], [
       resultGrouped,
       resultDevice,
-    ], true);
+    ]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

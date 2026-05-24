@@ -18,7 +18,7 @@ export class EventWeatherCodeEquals extends Event {
       type: "num",
       value: weatherCode
     };
-    super(eventId, deviceId, Date.now(), EventType.WEATHER_CODE_EQUALS, [eventCondition], [], [resultCondition], false);
+    super(eventId, deviceId, Date.now(), EventType.WEATHER_CODE_EQUALS, [eventCondition], [], [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

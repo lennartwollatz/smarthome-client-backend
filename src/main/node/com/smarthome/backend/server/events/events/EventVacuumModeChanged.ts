@@ -18,8 +18,13 @@ export class EventVacuumModeChanged extends Event {
       type: "str",
       value: mode
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_MODE_CHANGED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_MODE_CHANGED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

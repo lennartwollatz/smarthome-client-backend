@@ -12,8 +12,13 @@ export class EventPrevious extends Event {
       type: "obj",
       value: deviceBefore
     };
-    super(eventId, deviceId, Date.now(), EventType.PREVIOUS, [eventCondition], [], [], true);
+    super(eventId, deviceId, Date.now(), EventType.PREVIOUS, [eventCondition], [], []);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

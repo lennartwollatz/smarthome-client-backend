@@ -31,9 +31,7 @@ export class EventCarWheelsChanged extends Event {
       EventType.CAR_WHEELS_CHANGED,
       [eventCondition],
       [],
-      [resultCondition],
-      false
-    );
+      [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

@@ -19,8 +19,13 @@ export class EventCarWindowsOpened extends Event{
             type: "obj",
             value: windows
         };
-        super(eventId, deviceId, Date.now(), EventType.CAR_WINDOWS_OPENED, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.CAR_WINDOWS_OPENED, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

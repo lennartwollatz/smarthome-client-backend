@@ -18,7 +18,7 @@ export class EventVacuumBatteryEquals extends Event {
       type: "num",
       value: battery
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_BATTERY_EQUALS, [eventCondition], [], [resultCondition], false);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_BATTERY_EQUALS, [eventCondition], [], [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

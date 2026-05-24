@@ -18,8 +18,13 @@ export class EventTVScreenOn extends Event {
       type: "bool",
       value: screen
     };
-    super(eventId, deviceId, Date.now(), EventType.TV_SCREEN_ON, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.TV_SCREEN_ON, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

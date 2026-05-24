@@ -18,8 +18,13 @@ export class EventNoMotionDetected extends Event{
             type: "bool",
             value: false
         };
-        super(eventId, deviceId, Date.now(), EventType.NO_MOTION_DETECTED, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.NO_MOTION_DETECTED, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

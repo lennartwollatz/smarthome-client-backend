@@ -19,8 +19,13 @@ export class EventCalendarEntryChangedNotice extends Event{
             type: "str",
             value: notice
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_NOTICE, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_NOTICE, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

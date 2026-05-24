@@ -18,8 +18,13 @@ export class EventCarRangeChanged extends Event {
       type: "num",
       value: rangeKm,
     };
-    super(eventId, deviceId, Date.now(), EventType.CAR_RANGE_CHANGED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.CAR_RANGE_CHANGED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

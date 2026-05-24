@@ -8,7 +8,7 @@ export function serializeEventForLog(event: Event): EventLogEntry {
     timestamp: event.timestamp,
     eventType: event.eventType,
     source: event.source,
-    mlcollect: event.mlcollect,
+    mlcollect: event.mlRelevant(),
     parameters: event.eventParameters.map(p => ({ name: p.name, value: p.value })),
     results: event.eventResults.map(r => ({ name: r.name, value: r.value }))
   };

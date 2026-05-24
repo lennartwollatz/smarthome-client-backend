@@ -19,8 +19,13 @@ export class EventCalendarEntryChangedTimeEnd extends Event{
             type: "str",
             value: newEndIso
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_TIME_END, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_TIME_END, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

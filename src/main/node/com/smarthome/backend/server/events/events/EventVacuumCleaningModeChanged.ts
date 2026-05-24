@@ -18,7 +18,7 @@ export class EventVacuumCleaningModeChanged extends Event {
       type: "int",
       value: cleaningMode
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_MODE_CHANGED, [eventCondition], [], [resultCondition], false);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_MODE_CHANGED, [eventCondition], [], [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

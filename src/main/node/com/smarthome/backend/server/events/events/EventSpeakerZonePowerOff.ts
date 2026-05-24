@@ -23,8 +23,13 @@ export class EventSpeakerZonePowerOff extends Event {
       type: "str",
       value: zoneName
     };
-    super(eventId, deviceId, Date.now(), EventType.SPEAKER_ZONE_POWER_OFF, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.SPEAKER_ZONE_POWER_OFF, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

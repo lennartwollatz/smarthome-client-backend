@@ -54,7 +54,6 @@ export abstract class Event {
   eventConditions: EventCondition[];
   eventParameters: EventParameter[];
   eventResults: EventResult[];
-  mlcollect:boolean;
   source: EventSource = EventSource.SYSTEM;
 
   constructor(
@@ -64,8 +63,7 @@ export abstract class Event {
     eventType: EventType,
     eventConditions: EventCondition[],
     eventParameters: EventParameter[],
-    eventResults: EventResult[],
-    mlcollect:boolean
+    eventResults: EventResult[]
   ) {
     this.eventId = eventId;
     this.deviceId = deviceId;
@@ -74,7 +72,11 @@ export abstract class Event {
     this.eventConditions = eventConditions;
     this.eventParameters = eventParameters;
     this.eventResults = eventResults;
-    this.mlcollect = mlcollect;
+  }
+
+  /** Gibt an, ob das Event fuer Machine-Learning in der Datenbank gespeichert werden soll. */
+  public mlRelevant(): boolean {
+    return false;
   }
 
   public abstract matchesListener(listener: EventListener): boolean;

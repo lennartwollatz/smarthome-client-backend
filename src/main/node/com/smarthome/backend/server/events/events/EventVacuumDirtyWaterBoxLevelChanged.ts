@@ -18,8 +18,13 @@ export class EventVacuumDirtyWaterBoxLevelChanged extends Event {
       type: "num",
       value: level
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_DIRTY_WATER_BOX_LEVEL_CHANGED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_DIRTY_WATER_BOX_LEVEL_CHANGED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

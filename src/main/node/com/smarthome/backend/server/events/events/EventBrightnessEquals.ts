@@ -18,7 +18,7 @@ export class EventBrightnessEquals extends Event{
             type: "num",
             value: brightness
         };
-        super(eventId, deviceId, Date.now(), EventType.BRIGHTNESS_EQUALS, [eventCondition], [], [resultCondition], false);
+        super(eventId, deviceId, Date.now(), EventType.BRIGHTNESS_EQUALS, [eventCondition], [], [resultCondition]);
     }
 
     public matchesListener(listener: EventListener): boolean {

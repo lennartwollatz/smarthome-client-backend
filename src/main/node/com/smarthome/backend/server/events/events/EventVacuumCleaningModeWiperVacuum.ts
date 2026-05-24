@@ -18,8 +18,13 @@ export class EventVacuumCleaningModeWiperVacuum extends Event {
       type: "int",
       value: cleaningMode
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_MODE_WIPER_VACUUM, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_MODE_WIPER_VACUUM, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

@@ -18,8 +18,13 @@ export class EventTVAppChanged extends Event {
       type: "str",
       value: appId
     };
-    super(eventId, deviceId, Date.now(), EventType.TV_APP_CHANGED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.TV_APP_CHANGED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

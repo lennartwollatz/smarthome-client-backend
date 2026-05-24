@@ -12,8 +12,13 @@ export class EventVacuumWashStarted extends Event {
       type: "obj",
       value: deviceBefore
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_WASH_STARTED, [eventCondition], [], [], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_WASH_STARTED, [eventCondition], [], []);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

@@ -23,7 +23,7 @@ export class EventThermostatStateChanged extends Event {
       type: "str",
       value: state
     };
-    super(eventId, deviceId, Date.now(), EventType.THERMOSTAT_STATE_CHANGED, [eventCondition], [], [resultCondition], false);
+    super(eventId, deviceId, Date.now(), EventType.THERMOSTAT_STATE_CHANGED, [eventCondition], [], [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

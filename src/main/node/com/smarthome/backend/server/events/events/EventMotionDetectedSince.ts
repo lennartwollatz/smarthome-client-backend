@@ -18,7 +18,7 @@ export class EventMotionDetectedSince extends Event{
             type: "str",
             value: motion_last_detect
         };
-        super(eventId, deviceId, Date.now(), EventType.MOTION_DETECTED_SINCE, [eventCondition], [], [resultCondition], false);
+        super(eventId, deviceId, Date.now(), EventType.MOTION_DETECTED_SINCE, [eventCondition], [], [resultCondition]);
     }
 
     public matchesListener(listener: EventListener): boolean {

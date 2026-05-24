@@ -18,8 +18,13 @@ export class EventVacuumZoneCleaned extends Event {
       type: "str",
       value: zoneId
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_ZONE_CLEANED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_ZONE_CLEANED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

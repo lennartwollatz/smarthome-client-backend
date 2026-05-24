@@ -23,8 +23,13 @@ export class EventSpeakerSourceSet extends Event {
       type: "str",
       value: sourceIndex
     };
-    super(eventId, deviceId, Date.now(), EventType.SPEAKER_SOURCE_SET, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.SPEAKER_SOURCE_SET, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

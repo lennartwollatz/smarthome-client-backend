@@ -18,7 +18,7 @@ export class EventVacuumWaterBoxLevelGreater extends Event {
       type: "num",
       value: level
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_WATER_BOX_LEVEL_GREATER, [eventCondition], [], [resultCondition], false);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_WATER_BOX_LEVEL_GREATER, [eventCondition], [], [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

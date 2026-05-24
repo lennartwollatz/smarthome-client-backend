@@ -23,8 +23,13 @@ export class EventTemperatureSchedulesChanged extends Event {
       type: "obj",
       value: temperatureSchedules
     };
-    super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_SCHEDULES_CHANGED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_SCHEDULES_CHANGED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

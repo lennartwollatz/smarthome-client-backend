@@ -22,8 +22,13 @@ export class EventSubwooferLevelChanged extends Event {
       { id: 0, name: "subwooferId", type: "str", value: subwooferId },
       { id: 0, name: "level", type: "num", value: level }
     ];
-    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_LEVEL_CHANGED, [eventCondition], [], resultConditions, true);
+    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_LEVEL_CHANGED, [eventCondition], [], resultConditions);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

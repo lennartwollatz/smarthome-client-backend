@@ -22,7 +22,7 @@ export class EventSubwooferPowerChanged extends Event {
       { id: 0, name: "subwooferId", type: "str", value: subwooferId },
       { id: 0, name: "power", type: "bool", value: power }
     ];
-    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_POWER_CHANGED, [eventCondition], [], resultConditions, false);
+    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_POWER_CHANGED, [eventCondition], [], resultConditions);
   }
 
   public matchesListener(listener: EventListener): boolean {

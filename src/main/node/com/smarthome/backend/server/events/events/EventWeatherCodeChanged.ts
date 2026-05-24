@@ -18,8 +18,13 @@ export class EventWeatherCodeChanged extends Event {
       type: "num",
       value: weatherCode
     };
-    super(eventId, deviceId, Date.now(), EventType.WEATHER_CODE_CHANGED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.WEATHER_CODE_CHANGED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

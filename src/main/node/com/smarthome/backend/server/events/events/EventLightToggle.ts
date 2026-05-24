@@ -18,8 +18,13 @@ export class EventLightToggle extends Event{
             type: "bool",
             value: lightOn
         };
-        super(eventId, deviceId, Date.now(), EventType.LIGHT_TOGGLE, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.LIGHT_TOGGLE, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

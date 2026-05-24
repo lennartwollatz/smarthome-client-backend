@@ -18,7 +18,7 @@ export class EventVolumeGreater extends Event {
       type: "num",
       value: volume
     };
-    super(eventId, deviceId, Date.now(), EventType.VOLUME_GREATER, [eventCondition], [], [resultCondition], false);
+    super(eventId, deviceId, Date.now(), EventType.VOLUME_GREATER, [eventCondition], [], [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

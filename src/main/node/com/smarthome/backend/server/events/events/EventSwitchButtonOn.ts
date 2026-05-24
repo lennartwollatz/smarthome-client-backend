@@ -23,8 +23,13 @@ export class EventSwitchButtonOn extends Event {
       type: "str",
       value: buttonId
     };
-    super(eventId, deviceId, Date.now(), EventType.SWITCH_BUTTON_ON, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.SWITCH_BUTTON_ON, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     if (listener.deviceId !== this.deviceId) return false;

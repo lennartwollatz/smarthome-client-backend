@@ -13,8 +13,13 @@ export class EventCalendarEntryDeleted extends Event{
             type: "obj",
             value: entry
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_DELETED, [eventCondition], [], [], true);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_DELETED, [eventCondition], [], []);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

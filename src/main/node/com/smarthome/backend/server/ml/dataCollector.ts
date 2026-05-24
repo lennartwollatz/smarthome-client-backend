@@ -284,7 +284,7 @@ export class DataCollector {
 
   onEvent(event: Event): void {
     if (!this.isAiLearningEnabled()) return;
-    if (!event.mlcollect) return;
+    if (!event.mlRelevant()) return;
     try {
       const did = this.resolveDevice(event.deviceId);
       if (did === null) return;

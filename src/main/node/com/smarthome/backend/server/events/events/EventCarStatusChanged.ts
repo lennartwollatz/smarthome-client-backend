@@ -18,7 +18,7 @@ export class EventCarStatusChanged extends Event{
             type: "obj",
             value: carAfter
         };
-        super(eventId, deviceId, Date.now(), EventType.CAR_STATUS_CHANGED, [eventCondition], [], [resultCondition], false);
+        super(eventId, deviceId, Date.now(), EventType.CAR_STATUS_CHANGED, [eventCondition], [], [resultCondition]);
     }
 
     public matchesListener(listener: EventListener): boolean {

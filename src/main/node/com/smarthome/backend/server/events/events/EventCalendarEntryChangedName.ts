@@ -19,8 +19,13 @@ export class EventCalendarEntryChangedName extends Event{
             type: "str",
             value: newName
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_NAME, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_NAME, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

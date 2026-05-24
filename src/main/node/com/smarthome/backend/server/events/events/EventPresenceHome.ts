@@ -18,8 +18,13 @@ export class EventPresenceHome extends Event {
             type: "bool",
             value: true
         };
-        super(eventId, deviceId, Date.now(), EventType.PRESENCE_HOME, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.PRESENCE_HOME, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

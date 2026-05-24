@@ -18,7 +18,7 @@ export class EventUvIndexLess extends Event {
       type: "num",
       value: uvIndex
     };
-    super(eventId, deviceId, Date.now(), EventType.UV_INDEX_LESS, [eventCondition], [], [resultCondition], false);
+    super(eventId, deviceId, Date.now(), EventType.UV_INDEX_LESS, [eventCondition], [], [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

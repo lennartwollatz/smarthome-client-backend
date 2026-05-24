@@ -23,8 +23,13 @@ export class EventSwitchDoublePressed extends Event {
       type: "str",
       value: buttonId
     };
-    super(eventId, deviceId, Date.now(), EventType.SWITCH_DOUBLE_PRESSED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.SWITCH_DOUBLE_PRESSED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

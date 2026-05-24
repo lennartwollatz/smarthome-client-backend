@@ -18,8 +18,13 @@ export class EventTemperatureGoalReached extends Event{
             type: "num",
             value: temperatureGoal
         };
-        super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_GOAL_REACHED, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.TEMPERATURE_GOAL_REACHED, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

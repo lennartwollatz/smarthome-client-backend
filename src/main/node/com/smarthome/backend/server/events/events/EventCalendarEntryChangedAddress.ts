@@ -13,8 +13,13 @@ export class EventCalendarEntryChangedAddress extends Event{
             type: "obj",
             value: entry
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_ADDRESS_CHANGED, [], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_ADDRESS_CHANGED, [], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

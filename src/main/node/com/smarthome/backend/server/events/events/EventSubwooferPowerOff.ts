@@ -23,8 +23,13 @@ export class EventSubwooferPowerOff extends Event {
       type: "str",
       value: subwooferId
     };
-    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_POWER_OFF, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.SUBWOOFER_POWER_OFF, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

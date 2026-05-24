@@ -18,8 +18,13 @@ export class EventVacuumRoomEntered extends Event {
       type: "str",
       value: roomId
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_ROOM_ENTERED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_ROOM_ENTERED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

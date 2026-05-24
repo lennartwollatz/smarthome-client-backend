@@ -22,7 +22,7 @@ export class EventSwitchPressedLongerThan extends Event {
       { id: 0, name: "buttonId", type: "str", value: buttonId },
       { id: 0, name: "durationMs", type: "num", value: durationMs },
     ];
-    super(eventId, deviceId, Date.now(), EventType.SWITCH_PRESSED_LONGER_THAN, [eventCondition], [], resultConditions, false);
+    super(eventId, deviceId, Date.now(), EventType.SWITCH_PRESSED_LONGER_THAN, [eventCondition], [], resultConditions);
   }
 
   public matchesListener(listener: EventListener): boolean {

@@ -18,8 +18,13 @@ export class EventActiveInactive extends Event {
             type: "bool",
             value: false
         };
-        super(eventId, deviceId, Date.now(), EventType.ACTIVE_INACTIVE, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.ACTIVE_INACTIVE, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

@@ -18,8 +18,13 @@ export class EventVacuumCleaningIntensityChanged extends Event {
       type: "str",
       value: cleaningIntensity
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_INTENSITY_CHANGED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_INTENSITY_CHANGED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

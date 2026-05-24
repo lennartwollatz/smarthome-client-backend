@@ -18,8 +18,13 @@ export class EventColorChanged extends Event{
             type: "obj",
             value: { x: colorX, y: colorY }
         };
-        super(eventId, deviceId, Date.now(), EventType.COLOR_CHANGED, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.COLOR_CHANGED, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

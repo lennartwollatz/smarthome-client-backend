@@ -12,8 +12,13 @@ export class EventVacuumCleaningDone extends Event {
       type: "obj",
       value: deviceBefore
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_DONE, [eventCondition], [], [], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_CLEANING_DONE, [eventCondition], [], []);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

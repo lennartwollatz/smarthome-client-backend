@@ -19,7 +19,7 @@ export class EventCarDoorsChanged extends Event{
             type: "obj",
             value: doors
         };
-        super(eventId, deviceId, Date.now(), EventType.CAR_DOORS_CHANGED, [eventCondition], [], [resultCondition], false);
+        super(eventId, deviceId, Date.now(), EventType.CAR_DOORS_CHANGED, [eventCondition], [], [resultCondition]);
     }
 
     public matchesListener(listener: EventListener): boolean {

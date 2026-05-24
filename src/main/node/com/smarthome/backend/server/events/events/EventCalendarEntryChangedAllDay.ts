@@ -19,8 +19,13 @@ export class EventCalendarEntryChangedAllDay extends Event{
             type: "bool",
             value: allDay
         };
-        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_ALL_DAY, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.CALENDAR_ENTRY_CHANGED_ALL_DAY, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

@@ -19,8 +19,13 @@ export class EventPowerToggled extends Event{
             type: "bool",
             value: powerAfter
         };
-        super(eventId, deviceId, Date.now(), EventType.POWER_TOGGLED, [eventCondition], [], [eventResult], true);
+        super(eventId, deviceId, Date.now(), EventType.POWER_TOGGLED, [eventCondition], [], [eventResult]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return true;

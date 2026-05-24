@@ -12,8 +12,13 @@ export class EventContinue extends Event {
       type: "obj",
       value: deviceBefore,
     };
-    super(eventId, deviceId, Date.now(), EventType.CONTINUE, [eventCondition], [], [], true);
+    super(eventId, deviceId, Date.now(), EventType.CONTINUE, [eventCondition], [], []);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

@@ -18,8 +18,13 @@ export class EventVacuumWiperLevelChanged extends Event {
       type: "str",
       value: wiperLevel
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_WIPER_LEVEL_CHANGED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_WIPER_LEVEL_CHANGED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

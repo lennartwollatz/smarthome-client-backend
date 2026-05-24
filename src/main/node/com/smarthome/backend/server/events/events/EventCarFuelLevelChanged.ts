@@ -18,8 +18,13 @@ export class EventCarFuelLevelChanged extends Event{
             type: "num",
             value: fuelLevelPercent
         };
-        super(eventId, deviceId, Date.now(), EventType.CAR_FUEL_LEVEL_CHANGED, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.CAR_FUEL_LEVEL_CHANGED, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

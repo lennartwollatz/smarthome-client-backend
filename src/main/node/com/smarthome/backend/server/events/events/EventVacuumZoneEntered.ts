@@ -18,8 +18,13 @@ export class EventVacuumZoneEntered extends Event {
       type: "obj",
       value: coordinate
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_ZONE_ENTERED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_ZONE_ENTERED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

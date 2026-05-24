@@ -18,8 +18,13 @@ export class EventThermostatStateHeating extends Event {
       type: "str",
       value: "heating"
     };
-    super(eventId, deviceId, Date.now(), EventType.THERMOSTAT_STATE_HEATING, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.THERMOSTAT_STATE_HEATING, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

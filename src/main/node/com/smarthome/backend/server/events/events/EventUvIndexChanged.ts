@@ -18,8 +18,13 @@ export class EventUvIndexChanged extends Event {
       type: "num",
       value: uvIndex
     };
-    super(eventId, deviceId, Date.now(), EventType.UV_INDEX_CHANGED, [eventCondition], [], [resultCondition], true);
+    super(eventId, deviceId, Date.now(), EventType.UV_INDEX_CHANGED, [eventCondition], [], [resultCondition]);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

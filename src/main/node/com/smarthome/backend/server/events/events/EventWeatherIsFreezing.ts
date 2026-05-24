@@ -18,7 +18,7 @@ export class EventWeatherIsFreezing extends Event {
       type: "obj",
       value: deviceAfter
     };
-    super(eventId, deviceId, Date.now(), EventType.WEATHER_IS_FREEZING, [eventCondition], [], [resultCondition], false);
+    super(eventId, deviceId, Date.now(), EventType.WEATHER_IS_FREEZING, [eventCondition], [], [resultCondition]);
   }
 
   public matchesListener(listener: EventListener): boolean {

@@ -12,8 +12,13 @@ export class EventVacuumDirtyWaterBoxEmpty extends Event {
       type: "obj",
       value: deviceBefore
     };
-    super(eventId, deviceId, Date.now(), EventType.VACUUM_DIRTY_WATER_BOX_EMPTY, [eventCondition], [], [], true);
+    super(eventId, deviceId, Date.now(), EventType.VACUUM_DIRTY_WATER_BOX_EMPTY, [eventCondition], [], []);
   }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
   public matchesListener(listener: EventListener): boolean {
     return listener.deviceId === this.deviceId;

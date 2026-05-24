@@ -18,8 +18,13 @@ export class EventLightTemperatureChanged extends Event{
             type: "num",
             value: temperature
         };
-        super(eventId, deviceId, Date.now(), EventType.LIGHT_TEMPERATURE_CHANGED, [eventCondition], [], [resultCondition], true);
+        super(eventId, deviceId, Date.now(), EventType.LIGHT_TEMPERATURE_CHANGED, [eventCondition], [], [resultCondition]);
     }
+    public mlRelevant(): boolean {
+        return true;
+    }
+
+
 
     public matchesListener(listener: EventListener): boolean {
         return listener.deviceId === this.deviceId;

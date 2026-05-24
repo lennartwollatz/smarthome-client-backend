@@ -18,7 +18,7 @@ export class EventMotionStatusChanged extends Event{
             type: "obj",
             value: deviceAfter
         };
-        super(eventId, deviceId, Date.now(), EventType.MOTION_STATUS_CHANGED, [eventCondition], [], [resultCondition], false);
+        super(eventId, deviceId, Date.now(), EventType.MOTION_STATUS_CHANGED, [eventCondition], [], [resultCondition]);
     }
 
     public matchesListener(listener: EventListener): boolean {
