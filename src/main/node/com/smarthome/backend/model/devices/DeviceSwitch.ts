@@ -28,9 +28,22 @@ export interface Energy {
   yt: number; // Energieverbrauch Jahr bis jetzt
 }
 
+/** Rohtaste aus SQLite (API-toJSON oder alte kompakte @see {DeviceSwitch.toDatabaseJson}-Keys). */
+type RawPersistedSwitchButton = Partial<Button> & {
+  o?: number;
+  b?: number;
+  eu?: number;
+  pc?: number;
+  ip?: number;
+  lp?: number;
+  fp?: number;
+};
+
 export abstract class DeviceSwitch extends Device {
-    private energyBucketAnchorMs: Record<string, number> = {};
-    private static readonly ENERGY_BUCKET_MS = 5 * 60 * 1000;
+  private energyBucketAnchorMs: Record<string, number> = {};
+  private static readonly ENERGY_BUCKET_MS = 5 * 60 * 1000;
+  /** Im Gerät: nur die letzten 48 Stunden als Live-Verlauf; ältere Werte liegen im Archiv. */
+  static readonly ENERGY_USAGE_LIVE_WINDOW_MS = 48 * 60 * 60 * 1000;
 
   public static Button = class Button {
     on: boolean;
@@ -156,6 +169,58 @@ export abstract class DeviceSwitch extends Device {
     this.buttons[buttonId] = new DeviceSwitch.Button();
   }
 
+  private static parseRawPersistedSwitchOn(raw: RawPersistedSwitchButton): boolean {
+    if (typeof raw.on === "boolean") return raw.on;
+    if (raw.o === 1) return true;
+    if (raw.o === 0) return false;
+    return false;
+  }
+
+  private static parseRawPersistedSwitchBrightness(raw: RawPersistedSwitchButton): number {
+    if (typeof raw.brightness === "number" && Number.isFinite(raw.brightness)) {
+      return raw.brightness;
+    }
+    if (typeof raw.b === "number" && Number.isFinite(raw.b)) return raw.b;
+    return DeviceSwitch.parseRawPersistedSwitchOn(raw) ? 100 : 0;
+  }
+
+  private mergeRestoredEnergyFields(
+    target: InstanceType<typeof DeviceSwitch.Button>,
+    raw: RawPersistedSwitchButton
+  ): void {
+    const cutoff = Date.now() - DeviceSwitch.ENERGY_USAGE_LIVE_WINDOW_MS;
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    const euRaw = raw.energyUsage;
+    if (euRaw != null && typeof euRaw === "object") {
+      target.energyUsage = {
+        now: n(euRaw.now),
+        tt: n(euRaw.tt),
+        wt: n(euRaw.wt),
+        mt: n(euRaw.mt),
+        yt: n(euRaw.yt),
+      };
+    }
+    if (typeof raw.eu === "number" && Number.isFinite(raw.eu)) {
+      target.energyUsage.now = raw.eu;
+    }
+    if (Array.isArray(raw.energyUsages)) {
+      target.energyUsages = raw
+        .energyUsages!.filter(
+          u => u != null && typeof u.time === "number" && Number.isFinite(u.time) && typeof u.value === "number" && Number.isFinite(u.value)
+        )
+        .map(u => ({ time: u.time, value: u.value }))
+        .filter(u => u.time >= cutoff)
+        .sort((a, b) => a.time - b.time);
+    }
+  }
+
+  private pruneEnergyUsagesToRetainWindow(buttonId: string): void {
+    const btn = this.buttons[buttonId];
+    if (!btn?.energyUsages?.length) return;
+    const cutoff = Date.now() - DeviceSwitch.ENERGY_USAGE_LIVE_WINDOW_MS;
+    btn.energyUsages = btn.energyUsages.filter(u => u.time >= cutoff);
+  }
+
   public rehydrateButtons() {
     this.buttons ??= {};
     const rehydratedButtons: Record<string, InstanceType<typeof DeviceSwitch.Button>> = {};
@@ -164,17 +229,35 @@ export abstract class DeviceSwitch extends Device {
         rehydratedButtons[buttonId] = rawButton;
         continue;
       }
-      const button = rawButton as Partial<Button> | undefined;
+      const raw = rawButton as RawPersistedSwitchButton;
+      const brightness = DeviceSwitch.parseRawPersistedSwitchBrightness(raw);
       rehydratedButtons[buttonId] = new DeviceSwitch.Button(
-        button?.on ?? false,
-        button?.pressCount ?? 0,
-        button?.initialPressTime ?? 0,
-        button?.lastPressTime ?? 0,
-        button?.firstPressTime ?? 0,
-        button?.name,
-        button?.connectedToLight ?? false,
-        button?.brightness ?? button?.on ? 100 : 0
+        DeviceSwitch.parseRawPersistedSwitchOn(raw),
+        typeof raw.pressCount === "number"
+          ? raw.pressCount
+          : typeof raw.pc === "number" && Number.isFinite(raw.pc)
+            ? raw.pc
+            : 0,
+        typeof raw.initialPressTime === "number"
+          ? raw.initialPressTime
+          : typeof raw.ip === "number" && Number.isFinite(raw.ip)
+            ? raw.ip
+            : 0,
+        typeof raw.lastPressTime === "number"
+          ? raw.lastPressTime
+          : typeof raw.lp === "number" && Number.isFinite(raw.lp)
+            ? raw.lp
+            : 0,
+        typeof raw.firstPressTime === "number"
+          ? raw.firstPressTime
+          : typeof raw.fp === "number" && Number.isFinite(raw.fp)
+            ? raw.fp
+            : 0,
+        typeof raw.name === "string" ? raw.name : undefined,
+        typeof raw.connectedToLight === "boolean" ? raw.connectedToLight : false,
+        brightness
       );
+      this.mergeRestoredEnergyFields(rehydratedButtons[buttonId], raw);
     }
     this.buttons = rehydratedButtons;
   }
@@ -363,6 +446,8 @@ export abstract class DeviceSwitch extends Device {
     if (intervalStartMs < t) {
       this.applyIncrementalEnergyKwh(button, incrementKwh, intervalStartMs, t);
     }
+
+    this.pruneEnergyUsagesToRetainWindow(button);
 
     if (trigger) {
       this.eventManager?.triggerEvent(new EventSwitchEnergyUsageChanged(this.id, deviceBefore, buttonButton.energyUsage!));

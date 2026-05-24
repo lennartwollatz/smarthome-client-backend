@@ -89,6 +89,12 @@ function isLgTvUnreachableOutput(text: string): boolean {
 export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, DeviceTV> {
   private static readonly RECONNECT_DELAY_MS = 10_000;
 
+  /** TV aus / nicht erreichbar – fuer Polling und Statusabfragen. */
+  private markTvUnreachable(tv: LGTV): void {
+    tv.lastPollUnreachable = true;
+    tv.power = false;
+  }
+
   private deviceCallbacks = new Map<string, (event: LGEvent) => void>();
   private processes = new Map<string, ChildProcess | null>();
   private outputBuffers = new Map<string, string>();
@@ -164,12 +170,10 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return null;
     }
     const response = await this.callController(tv.address, tv.clientKey, "media.get_volume", null, tv);
-    if (!response){
-      tv.power = false;
+    if (!response || tv.lastPollUnreachable) {
       return null;
-    } else {
-      tv.power = true;
     }
+    tv.power = true;
     if ((response as Record<string, unknown>)?.status === "error") {
       logger.warn({ response }, "getVolume() fehlgeschlagen");
       return null;
@@ -235,16 +239,14 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return null;
     }
     const response = await this.callController(tv.address, tv.clientKey, "application.get_current", null, tv);
-    if (!response){
-      tv.power = false;
+    if (!response || tv.lastPollUnreachable) {
       return undefined;
-    } else {
-      tv.power = true;
     }
     if ((response as Record<string, unknown>)?.status === "error") {
       logger.warn({ response }, "getSelectedApp() fehlgeschlagen");
       return null;
     }
+    tv.power = true;
     return this.parseForegroundAppId(response?.result);
   }
 
@@ -254,8 +256,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return null;
     }
     const response = await this.callController(tv.address, tv.clientKey, "tv.get_current_channel", null, tv);
-    if (!response){
-      tv.power = false;
+    if (!response || tv.lastPollUnreachable) {
       return null;
     }
     if ((response as Record<string, unknown>)?.status === "error") {
@@ -437,23 +438,28 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
     }
 
     if (code !== 0) {
-      if (unreachable) {
-        if (tv) {
-          tv.lastPollUnreachable = true;
-          tv.power = false;
-        }
-        logger.info({ address, event }, "LG TV nicht erreichbar (vermutlich aus)");
-        return null;
+      if (tv) {
+        this.markTvUnreachable(tv);
       }
-      logger.error(
-        { code, stdout: stdout.trim(), stderr: stderr.trim(), args },
-        "PyWebOSTV-Skript beendet mit Exit-Code für %s",
-        address ?? "?"
-      );
+      if (unreachable) {
+        logger.info({ address, event }, "LG TV nicht erreichbar (vermutlich aus)");
+      } else {
+        logger.error(
+          { code, stdout: stdout.trim(), stderr: stderr.trim(), args },
+          "PyWebOSTV-Skript beendet mit Exit-Code für %s",
+          address ?? "?"
+        );
+      }
+      return null;
     }
 
     const parsed = this.parsePywebosStdoutJson(stdout);
-    if (!parsed) return null;
+    if (!parsed) {
+      if (tv) {
+        this.markTvUnreachable(tv);
+      }
+      return null;
+    }
     try {
       if (
         parsed &&
@@ -462,8 +468,7 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
         isLgTvUnreachableOutput(String((parsed as Record<string, unknown>).message ?? ""))
       ) {
         if (tv) {
-          tv.lastPollUnreachable = true;
-          tv.power = false;
+          this.markTvUnreachable(tv);
         }
         logger.info({ address, event }, "LG TV nicht erreichbar (vermutlich aus)");
         return null;
@@ -471,6 +476,9 @@ export class LGDeviceController extends ModuleDeviceControllerEvent<LGEvent, Dev
       return parsed;
     } catch (err) {
       logger.warn({ err }, "PyWebOSTV-Output ist kein gültiges JSON (stdout): %s", stdout.trim().slice(0, 500));
+      if (tv) {
+        this.markTvUnreachable(tv);
+      }
       return null;
     }
   }

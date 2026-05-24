@@ -4,7 +4,12 @@ import { DeviceCar, type DeviceCarAddress } from "../../../../../model/devices/D
 import { BMWDeviceController } from "../bmwDeviceController.js";
 import { BMWCONFIG, BMWMODULE } from "../bmwModule.js";
 import { DeviceType } from "../../../../../model/devices/helper/DeviceType.js";
-import { mapTelemetrySnapshotToCarFields, type TirePressureQuad } from "../bmwCarDataPayloadMapper.js";
+import {
+  BMW_DEFAULT_DOORS_CLOSED,
+  BMW_DEFAULT_WINDOWS_CLOSED,
+  mapTelemetrySnapshotToCarFields,
+  type TirePressureQuad
+} from "../bmwCarDataPayloadMapper.js";
 import { scheduleCarLocationEnrichment } from "../bmwCarLocationEnricher.js";
 
 export class BMWCar extends DeviceCar {
@@ -27,6 +32,9 @@ export class BMWCar extends DeviceCar {
     (this as Device & { icon?: string }).icon = BMWMODULE.icon;
     this.isConnected = true;
     this.quickAccess = true;
+    this.windows = { ...BMW_DEFAULT_WINDOWS_CLOSED };
+    this.doors = { ...BMW_DEFAULT_DOORS_CLOSED };
+    this.lockedState = true;
   }
 
   setBMWController(controller: BMWDeviceController) {

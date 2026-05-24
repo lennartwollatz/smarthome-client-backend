@@ -32,7 +32,9 @@ export const BMW_TRACKED_TELEMETRY_KEYS: readonly string[] = [
   "vehicle.vehicle.preConditioning.remainingTime",
   "vehicle.cabin.infotainment.navigation.currentLocation.longitude",
   "vehicle.cabin.infotainment.navigation.currentLocation.latitude",
-  "vehicle.body.trunk.door"
+  "vehicle.body.trunk.door",
+  "vehicle.status.car.inUse",
+  "vehicle.status.car.inUseState"
 ] as const;
 
 export const BMW_TRACKED_TELEMETRY_KEY_SET = new Set<string>(BMW_TRACKED_TELEMETRY_KEYS);
@@ -64,7 +66,9 @@ export const BMW_TELEMETRY_KEY_META: BmwTelemetryKeyMeta[] = [
   { key: "vehicle.vehicle.preConditioning.remainingTime", labelDe: "Klima Restzeit" },
   { key: "vehicle.cabin.infotainment.navigation.currentLocation.longitude", labelDe: "Longitude" },
   { key: "vehicle.cabin.infotainment.navigation.currentLocation.latitude", labelDe: "Latitude" },
-  { key: "vehicle.body.trunk.door", labelDe: "Kofferraum" }
+  { key: "vehicle.body.trunk.door", labelDe: "Kofferraum" },
+  { key: "vehicle.status.car.inUse", labelDe: "In Benutzung (Motor)" },
+  { key: "vehicle.status.car.inUseState", labelDe: "In Benutzung (Status)" }
 ];
 
 export function isTrackedTelemetryKey(key: string): boolean {

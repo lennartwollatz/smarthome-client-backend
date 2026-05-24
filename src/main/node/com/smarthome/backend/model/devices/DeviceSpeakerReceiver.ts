@@ -23,7 +23,57 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   constructor(init?: Partial<DeviceSpeakerReceiver>) {
     super();
     this.assignInit(init as any);
+    this.hydrateNestedCollections();
     this.type = DeviceType.SPEAKER_RECEIVER;
+  }
+
+  /**
+   * DB/API liefern Subwoofer/Zonen/Quellen oft als Plain Objects ohne Klassenmethoden.
+   * Workflow und setSubwooferPower* rufen setPower/setDb/setSelected auf den Einträgen auf.
+   */
+  hydrateNestedCollections(): void {
+    if (this.subwoofers?.length) {
+      this.subwoofers = this.subwoofers.map((s) => this.toSubwooferInstance(s));
+    }
+    if (this.zones?.length) {
+      this.zones = this.zones.map((z) => this.toZoneInstance(z));
+    }
+    if (this.sources?.length) {
+      this.sources = this.sources.map((s) => this.toSourceInstance(s));
+    }
+  }
+
+  private ensureNestedCollectionsHydrated(): void {
+    const needsSub =
+      this.subwoofers?.some((s) => typeof (s as Subwoofer).setPower !== "function") ?? false;
+    const needsZone =
+      this.zones?.some((z) => typeof (z as Zone).setPower !== "function") ?? false;
+    const needsSource =
+      this.sources?.some((s) => typeof (s as Source).setSelected !== "function") ?? false;
+    if (needsSub || needsZone || needsSource) {
+      this.hydrateNestedCollections();
+    }
+  }
+
+  private toSubwooferInstance(s: Subwoofer): Subwoofer {
+    if (s instanceof Subwoofer) {
+      return s;
+    }
+    return new Subwoofer(s.id, s.name, s.power, s.db);
+  }
+
+  private toZoneInstance(z: Zone): Zone {
+    if (z instanceof Zone) {
+      return z;
+    }
+    return new Zone(z.name, z.displayName, z.power);
+  }
+
+  private toSourceInstance(s: Source): Source {
+    if (s instanceof Source) {
+      return s;
+    }
+    return new Source(s.index, s.displayName, s.selected);
   }
 
   override toDatabaseJson(): Record<string, unknown> {
@@ -98,6 +148,7 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   }
 
   async setSubwooferLevel(subwooferId: string, level: number, execute: boolean, trigger: boolean = true) {
+    this.ensureNestedCollectionsHydrated();
     const deviceBefore = { ...this };
     this.subwoofers
       ?.find(subwoofer => subwoofer.id === subwooferId)
@@ -123,6 +174,7 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   protected abstract executeSetSubwooferLevel(subwooferId: string, level: number): Promise<void>;
 
   async setSubwooferPower(subwooferId: string, power: boolean, execute: boolean, trigger: boolean = true) {
+    this.ensureNestedCollectionsHydrated();
     const deviceBefore = { ...this };
     this.subwoofers
       ?.find(subwoofer => subwoofer.id === subwooferId)
@@ -142,6 +194,7 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   }
 
   async setSubwooferPowerOn(subwooferId: string, execute: boolean, trigger: boolean = true) {
+    this.ensureNestedCollectionsHydrated();
     const deviceBefore = { ...this };
     this.subwoofers
       ?.find(subwoofer => subwoofer.id === subwooferId)
@@ -157,6 +210,7 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   }
 
   async setSubwooferPowerOff(subwooferId: string, execute: boolean, trigger: boolean = true) {
+    this.ensureNestedCollectionsHydrated();
     const deviceBefore = { ...this };
     this.subwoofers
       ?.find(subwoofer => subwoofer.id === subwooferId)
@@ -212,6 +266,7 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   protected abstract executeSetVolumeMax(volumeMax: number): Promise<void>;
 
   async setZonePower(zoneName: string, power: boolean, execute: boolean, trigger: boolean = true) {
+    this.ensureNestedCollectionsHydrated();
     const deviceBefore = { ...this };
     this.zones?.find(zone => zone.name === zoneName)?.setPower(power);
     this.zones
@@ -232,6 +287,7 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   }
 
   async setZonePowerOn(zoneName: string, execute: boolean, trigger: boolean = true) {
+    this.ensureNestedCollectionsHydrated();
     const deviceBefore = { ...this };
     this.zones?.find(zone => zone.name === zoneName)?.setPower(true);
     this.zones
@@ -248,6 +304,7 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   }
 
   async setZonePowerOff(zoneName: string, execute: boolean, trigger: boolean = true) {
+    this.ensureNestedCollectionsHydrated();
     const deviceBefore = { ...this };
     this.zones?.find(zone => zone.name === zoneName)?.setPower(false);
     this.zones
@@ -266,6 +323,7 @@ export abstract class DeviceSpeakerReceiver extends DeviceSpeaker {
   protected abstract executeSetZonePower(zoneName: string, power: boolean): Promise<void>;
 
   async setSource(sourceIndex: string, selected: boolean, execute: boolean, trigger: boolean = true) {
+    this.ensureNestedCollectionsHydrated();
     const deviceBefore = { ...this };
     this.sources
       ?.find(source => source.index === sourceIndex)

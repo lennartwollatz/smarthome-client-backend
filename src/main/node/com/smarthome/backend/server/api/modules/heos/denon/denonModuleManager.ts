@@ -335,8 +335,9 @@ export class DenonModuleManager extends HeosModuleManager {
     const receiver = await this.getReceiver(deviceId);
     if (!receiver) return false;
     try {
-      await (receiver as any).setSubwooferPower(subwooferId, power, true, true);
+      await receiver.setSubwooferPower(subwooferId, power, true, true);
       // Denon: ein globales Subwoofer-Flag — alle Einträge im Modell gleich halten
+      receiver.hydrateNestedCollections();
       for (const sw of receiver.subwoofers ?? []) {
         sw.setPower(power);
       }
@@ -449,6 +450,7 @@ export class DenonModuleManager extends HeosModuleManager {
       case DeviceType.SPEAKER_RECEIVER:
         const denonReceiver = new DenonReceiver();
         Object.assign(denonReceiver, device);
+        denonReceiver.hydrateNestedCollections();
         denonReceiver.setHeosController(this.deviceController, this.deviceManager);
         await denonReceiver.updateValues();
         convertedDevice = denonReceiver;

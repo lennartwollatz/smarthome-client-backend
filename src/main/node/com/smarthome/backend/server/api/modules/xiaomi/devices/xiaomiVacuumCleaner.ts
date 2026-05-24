@@ -147,7 +147,9 @@ export class XiaomiVacuumCleaner extends DeviceVacuumCleaner {
     if (typeof state === "number") {
       const inCleaning = status.in_cleaning;
       const inReturning = status.in_returning;
-      if( inCleaning === 1 ) {
+      if (state === 8) {
+        this.deviceState.mode = DEVICE_MODE.DOCKED;
+      } else if( inCleaning === 1 ) {
         this.deviceState.mode = DEVICE_MODE.CLEANING;
       } else if( inReturning === 1 || state === 6) {
         this.deviceState.mode = DEVICE_MODE.DOCKING;

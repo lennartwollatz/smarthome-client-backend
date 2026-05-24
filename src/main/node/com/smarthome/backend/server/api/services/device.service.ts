@@ -11,7 +11,34 @@ export function createDeviceRouter(deps: ServerDeps) {
     res.status(200).json(serializeDevicesForApi(devices));
   });
 
-  /** Energieverlauf (kWh pro Mess-Slot), Live 7d + optional Archiv. Query: from, to (ms), buttonId, includeArchive=1 */
+  /**
+   * Sensor-Verlauf (Bewegung, Temperatur, Lichtpegel).
+   * Query: metric=motion|temperature|lightLevel, range=day|week|month (range nur für temperature/lightLevel)
+   */
+  router.get("/:deviceId/sensor-history", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const metric = typeof req.query["metric"] === "string" ? req.query["metric"] : "";
+    const rangeRaw = typeof req.query["range"] === "string" ? req.query["range"] : "day";
+    const range = rangeRaw === "week" || rangeRaw === "month" ? rangeRaw : "day";
+
+    if (metric !== "motion" && metric !== "temperature" && metric !== "lightLevel") {
+      res.status(400).json({ success: false, error: "metric muss motion, temperature oder lightLevel sein" });
+      return;
+    }
+
+    const data = deps.deviceManager.getSensorHistory(
+      deviceId,
+      metric as "motion" | "temperature" | "lightLevel",
+      range
+    );
+    if (data == null) {
+      res.status(404).json({ success: false, error: "Gerät nicht gefunden oder Metrik nicht unterstützt" });
+      return;
+    }
+    res.status(200).json({ success: true, ...data });
+  });
+
+  /** Energieverlauf (kWh pro Mess-Slot), Live 48h + optional Archiv. Query: from, to (ms), buttonId, includeArchive=1 */
   router.get("/:deviceId/energy-history", (req, res) => {
     const deviceId = req.params.deviceId;
     const now = Date.now();

@@ -84,7 +84,7 @@ export abstract class DeviceThermostat extends DeviceTemperature {
   async setTemperature(temperature: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.temperature = temperature;
-    this.addTemperatureToHistory(temperature);
+    this.addTemperatureToHistory(temperature, this.temperatureGoal);
     if (trigger) {
       this.eventManager?.triggerEvent(new EventTemperatureChanged(this.id, deviceBefore, temperature));
       this.eventManager?.triggerEvent(new EventTemperatureEquals(this.id, deviceBefore, temperature));
@@ -100,6 +100,9 @@ export abstract class DeviceThermostat extends DeviceTemperature {
   async setTemperatureGoal(temperatureGoal: number, execute: boolean, trigger: boolean = true) {
     const deviceBefore = { ...this };
     this.temperatureGoal = temperatureGoal;
+    if (this.temperature !== undefined && Number.isFinite(this.temperature)) {
+      this.addTemperatureToHistory(this.temperature, temperatureGoal);
+    }
     if( this.temperatureGoal === -999) {
       this.setState('off', false, trigger);
     } else if( this.temperatureGoal <= (this.temperature ?? 0)) {

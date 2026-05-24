@@ -24,6 +24,7 @@ export class BMWEventStreamManager extends ModuleEventStreamManager<BMWDeviceCon
       void this.applyMqttVinToDevices(vin, callback);
     });
 
+    this.controller.enableMqttAutoReconnect();
     const connected = await this.controller.ensureMqttConnected();
     if (!connected) {
       logger.warn(
@@ -72,8 +73,15 @@ export class BMWEventStreamManager extends ModuleEventStreamManager<BMWDeviceCon
 
       const previousLocation = device.location;
       const partial = mapTelemetrySnapshotToCarFields(snap);
+      const prevInUse = device.inUseState;
       Object.assign(device, partial);
       device.isConnected = true;
+
+      if (partial.inUseState !== undefined && partial.inUseState !== prevInUse && device.id) {
+        this.deviceManager
+          .getBmwTelemetryHistoryStore()
+          .append(device.id, "vehicle.status.car.inUse", partial.inUseState, Date.now());
+      }
 
       if (partial.location) {
         scheduleCarLocationEnrichment(

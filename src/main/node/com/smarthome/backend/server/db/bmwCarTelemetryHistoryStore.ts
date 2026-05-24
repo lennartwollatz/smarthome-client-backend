@@ -3,11 +3,15 @@ import { JsonRepository } from "./jsonRepository.js";
 import { logger } from "../../logger.js";
 import { isTrackedTelemetryKey } from "../api/modules/bmw/bmwCarDataTelemetryKeys.js";
 import {
+  BMW_IN_USE_TELEMETRY_KEYS,
+  BMW_TRIP_METRIC_KEYS,
   detectTripsFromHistorySeries,
   type BmwCarTrip
 } from "../api/modules/bmw/bmwCarTripDetector.js";
+import type { BmwTripMonth } from "../api/modules/bmw/bmwTripMonthBounds.js";
 
 export type { BmwCarTrip, BmwCarTripPoint } from "../api/modules/bmw/bmwCarTripDetector.js";
+export type { BmwCarTripEntry, BmwCarTripSegment } from "../api/modules/bmw/bmwCarTripGrouper.js";
 
 export type BmwTelemetryHistoryPoint = { time: number; value: unknown };
 
@@ -76,11 +80,67 @@ export class BmwCarTelemetryHistoryStore {
     return out;
   }
 
+  /**
+   * Kalendermonate (1–12), in denen Telemetrie für Fahrten vorliegt.
+   */
+  getAvailableTripMonths(deviceId: string): BmwTripMonth[] {
+    const latKey = "vehicle.cabin.infotainment.navigation.currentLocation.latitude";
+    const lngKey = "vehicle.cabin.infotainment.navigation.currentLocation.longitude";
+    const keysToScan = [...BMW_IN_USE_TELEMETRY_KEYS, latKey, lngKey, ...BMW_TRIP_METRIC_KEYS];
+
+    let row: BmwCarTelemetryHistoryData | undefined;
+    try {
+      row = this.repo.findById(deviceId) ?? undefined;
+    } catch (e) {
+      logger.debug({ e, deviceId }, "BmwCarTelemetryHistory: getAvailableTripMonths");
+      return [];
+    }
+    if (!row?.series) return [];
+
+    const monthSet = new Set<string>();
+    for (const key of keysToScan) {
+      for (const p of row.series[key] ?? []) {
+        if (!Number.isFinite(p.time)) continue;
+        const d = new Date(p.time);
+        const y = d.getFullYear();
+        const m = d.getMonth() + 1;
+        monthSet.add(`${y}-${m}`);
+      }
+    }
+
+    const months: BmwTripMonth[] = [...monthSet].map(s => {
+      const [yearStr, monthStr] = s.split("-");
+      return { year: Number(yearStr), month: Number(monthStr) };
+    });
+
+    months.sort((a, b) => (a.year !== b.year ? a.year - b.year : a.month - b.month));
+    return months;
+  }
+
   getTrips(deviceId: string, fromMs: number, toMs: number): BmwCarTrip[] {
     const latKey = "vehicle.cabin.infotainment.navigation.currentLocation.latitude";
     const lngKey = "vehicle.cabin.infotainment.navigation.currentLocation.longitude";
-    const series = this.getSeries(deviceId, [latKey, lngKey], fromMs, toMs);
-    return detectTripsFromHistorySeries(series);
+
+    let row: BmwCarTelemetryHistoryData | undefined;
+    try {
+      row = this.repo.findById(deviceId) ?? undefined;
+    } catch (e) {
+      logger.debug({ e, deviceId }, "BmwCarTelemetryHistory: getTrips findById");
+      return [];
+    }
+    if (!row?.series) return [];
+
+    const series: Record<string, BmwTelemetryHistoryPoint[]> = {};
+    for (const key of [latKey, lngKey]) {
+      const points = (row.series[key] ?? []).filter(p => p.time >= fromMs && p.time <= toMs);
+      if (points.length > 0) series[key] = points;
+    }
+    for (const key of [...BMW_IN_USE_TELEMETRY_KEYS, ...BMW_TRIP_METRIC_KEYS]) {
+      const points = (row.series[key] ?? []).filter(p => p.time <= toMs);
+      if (points.length > 0) series[key] = points;
+    }
+
+    return detectTripsFromHistorySeries(series, fromMs, toMs);
   }
 
   deleteByDeviceId(deviceId: string): void {

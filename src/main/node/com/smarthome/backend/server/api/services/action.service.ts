@@ -78,6 +78,21 @@ export function createActionRouter(deps: ServerDeps) {
     }
   });
 
+  router.post("/executions/:executionId/cancel", (req, res) => {
+    const result = deps.actionManager.cancelExecution(req.params.executionId);
+    if (result.success) {
+      res.status(200).json(result);
+      return;
+    }
+    const status =
+      result.error === "Execution not found"
+        ? 404
+        : result.error === "Execution not running" || result.error === "Execution not active"
+          ? 400
+          : 400;
+    res.status(status).json(result);
+  });
+
   router.get("/", (_req, res) => {
     res.status(200).json(deps.actionManager.getActions());
   });

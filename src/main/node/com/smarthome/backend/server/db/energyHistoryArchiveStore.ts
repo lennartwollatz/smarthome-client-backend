@@ -4,13 +4,13 @@ import type { EnergyUsage } from "../../model/devices/energyTypes.js";
 import { logger } from "../../logger.js";
 
 /**
- * Aus dem Live-Array (7-Tage-Fenster im Gerät) herausfallende Messpunkte.
+ * Langzeit-Archiv für Energie-Messpunkte, die aus dem 48-Stunden-Live-Fenster im Gerät fallen.
  * Maximalalter begrenzen, damit die JSON-Zeile nicht unbegrenzt wächst.
  */
 const ARCHIVE_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
 
 export type DeviceEnergyArchiveData = {
-  /** buttonId -> Historie ausschließlich älter als das 7-Tage-Fenster im Gerät */
+  /** buttonId -> Historie außerhalb des 48-Stunden-Live-Fensters im Gerät */
   buttons: Record<string, EnergyUsage[]>;
 };
 
@@ -61,8 +61,7 @@ export class EnergyHistoryArchiveStore {
   }
 
   getForButtonInRange(deviceId: string, buttonId: string, fromMs: number, toMs: number): EnergyUsage[] {
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-    const effectiveFrom = Math.max(fromMs, Date.now() - sevenDaysMs);
+    const effectiveFrom = Math.max(fromMs, Date.now() - ARCHIVE_MAX_AGE_MS);
     if (effectiveFrom > toMs) return [];
 
     const sql = `

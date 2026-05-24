@@ -8,7 +8,9 @@ import type { BMWCredentialsStore } from "./bmwCredentialsStore.js";
 import {
   BMW_CARDATA_DEFAULT_MQTT_HOST,
   BMW_CARDATA_DEFAULT_MQTT_PORT,
-  BMW_CARDATA_DISCOVERY_TIMEOUT_MS
+  BMW_CARDATA_DISCOVERY_TIMEOUT_MS,
+  BMW_CARDATA_MQTT_FAST_RECONNECT_MAX_ATTEMPTS,
+  BMW_CARDATA_MQTT_RECONNECT_INTERVAL_MS
 } from "./bmwCarDataDefaults.js";
 import {
   generatePkcePair,
@@ -42,11 +44,13 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
 
   private idTokenRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private periodicReconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private reconnecting = false;
+  /** false nach disconnectMqtt – kein automatischer Reconnect. */
+  private mqttAutoReconnectEnabled = true;
 
   private static readonly ID_TOKEN_REFRESH_AHEAD_MS = 5 * 60 * 1000; // ~5 Minuten vor Ablauf
-  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
 
   constructor(
     private readonly tokenStore: BMWTokenStore,
@@ -125,6 +129,8 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
         password: tokens.idToken
       });
       this.reconnectAttempt = 0;
+      this.clearPeriodicReconnect();
+      this.mqttAutoReconnectEnabled = true;
       if (!this.hubDisconnectUnsub) {
         this.hubDisconnectUnsub = this.hub.onDisconnect(reason => {
           void this.onHubMqttDisconnected(reason);
@@ -134,6 +140,9 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
       return true;
     } catch (err) {
       logger.error({ err }, "BMW MQTT connect fehlgeschlagen");
+      if (this.mqttAutoReconnectEnabled) {
+        this.schedulePeriodicReconnect("connect_failed");
+      }
       return false;
     }
   }
@@ -160,6 +169,53 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
+    }
+    this.clearPeriodicReconnect();
+  }
+
+  private clearPeriodicReconnect(): void {
+    if (this.periodicReconnectTimeout) {
+      clearTimeout(this.periodicReconnectTimeout);
+      this.periodicReconnectTimeout = null;
+    }
+  }
+
+  /**
+   * Alle 5 Minuten erneut verbinden, wenn MQTT getrennt ist (z. B. langes Parken am gleichen Standort).
+   */
+  private schedulePeriodicReconnect(trigger: string): void {
+    if (!this.mqttAutoReconnectEnabled) return;
+    if (this.hub.isConnected()) return;
+    if (this.periodicReconnectTimeout) return;
+
+    this.periodicReconnectTimeout = setTimeout(() => {
+      this.periodicReconnectTimeout = null;
+      void this.runPeriodicReconnectAttempt(trigger);
+    }, BMW_CARDATA_MQTT_RECONNECT_INTERVAL_MS);
+
+    logger.info(
+      { trigger, intervalMin: BMW_CARDATA_MQTT_RECONNECT_INTERVAL_MS / 60_000 },
+      "BMW MQTT: periodischer Reconnect geplant"
+    );
+  }
+
+  private async runPeriodicReconnectAttempt(trigger: string): Promise<void> {
+    if (!this.mqttAutoReconnectEnabled) return;
+    if (this.hub.isConnected()) return;
+    if (this.reconnecting) {
+      this.schedulePeriodicReconnect("already_reconnecting");
+      return;
+    }
+
+    this.reconnecting = true;
+    try {
+      logger.info({ trigger }, "BMW MQTT: periodischer Reconnect-Versuch");
+      const ok = await this.ensureMqttConnected();
+      if (!ok && this.mqttAutoReconnectEnabled && !this.hub.isConnected()) {
+        this.schedulePeriodicReconnect("periodic_failed");
+      }
+    } finally {
+      this.reconnecting = false;
     }
   }
 
@@ -193,12 +249,15 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
   }
 
   private async onHubMqttDisconnected(reason: string): Promise<void> {
+    if (!this.mqttAutoReconnectEnabled) return;
     if (this.reconnecting) return;
-    if (this.reconnectAttempt >= BMWDeviceController.MAX_RECONNECT_ATTEMPTS) {
-      logger.error(
+
+    if (this.reconnectAttempt >= BMW_CARDATA_MQTT_FAST_RECONNECT_MAX_ATTEMPTS) {
+      logger.warn(
         { reason, attempts: this.reconnectAttempt },
-        "BMW MQTT: Max. Reconnect-Versuche erreicht – manuelle Anmeldung/Retry erforderlich"
+        "BMW MQTT: Schnelle Reconnect-Versuche ausgeschoepft – alle 5 Minuten erneut"
       );
+      this.schedulePeriodicReconnect(reason);
       return;
     }
 
@@ -212,9 +271,10 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
         this.reconnecting = true;
         this.reconnectTimeout = null;
         const ok = await this.ensureMqttConnected();
-        if (!ok) {
-          // Weitere Versuche werden durch erneute Disconnect-Events getriggert oder über den Timer erneut versucht.
-          logger.warn({ reason: "reconnect_failed" }, "BMW MQTT: Reconnect fehlgeschlagen – weiterer Versuch folgt bei Disconnect");
+        if (!ok && this.mqttAutoReconnectEnabled && !this.hub.isConnected()) {
+          if (this.reconnectAttempt >= BMW_CARDATA_MQTT_FAST_RECONNECT_MAX_ATTEMPTS) {
+            this.schedulePeriodicReconnect("fast_reconnect_failed");
+          }
         }
       } finally {
         this.reconnecting = false;
@@ -358,9 +418,18 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
   }
 
   disconnectMqtt(): void {
+    this.mqttAutoReconnectEnabled = false;
     this.clearStreamVinListener();
     this.clearReconnectTimers();
     this.hub.disconnect();
+  }
+
+  /** Stream soll aktiv bleiben – periodischer Reconnect, falls MQTT fehlt. */
+  enableMqttAutoReconnect(): void {
+    this.mqttAutoReconnectEnabled = true;
+    if (!this.hub.isConnected()) {
+      this.schedulePeriodicReconnect("stream_start");
+    }
   }
 
   getMqttConnected(): boolean {

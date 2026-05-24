@@ -91,6 +91,7 @@ export class DenonReceiver extends DeviceSpeakerReceiver {
       this.isConnected = true;
     } catch (err) {
       this.isConnected = false;
+      this.hydrateNestedCollections();
       logger.error({ err, id: this.id }, "Fehler beim Aktualisieren der Werte - Geraet nicht erreichbar");
     }
   }

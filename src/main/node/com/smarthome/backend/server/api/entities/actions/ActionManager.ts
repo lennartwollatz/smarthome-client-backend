@@ -260,6 +260,38 @@ export class ActionManager implements EntityManager {
     return this.executionService?.getExecution(executionId) ?? null;
   }
 
+  /**
+   * Bricht eine laufende Ausführung ab (inkl. verschachtelter Unterausführungen).
+   */
+  cancelExecution(executionId: string): { success: boolean; error?: string } {
+    const execution = this.executionService?.getExecution(executionId);
+    if (!execution) {
+      return { success: false, error: "Execution not found" };
+    }
+    if (execution.status !== "running") {
+      return { success: false, error: "Execution not running" };
+    }
+
+    const activeExecutions = this.executionService?.getActiveExecutions() ?? [];
+    const childIds = activeExecutions
+      .filter((ex) => ex.parentExecutionId === executionId)
+      .map((ex) => ex.executionId);
+    for (const childId of childIds) {
+      this.cancelExecution(childId);
+    }
+
+    const action = this.actions.get(execution.actionId);
+    if (!action) {
+      return { success: false, error: "Action not found" };
+    }
+    if (!action.isExecutionRunning()) {
+      return { success: false, error: "Execution not active" };
+    }
+
+    action.requestCancel();
+    return { success: true };
+  }
+
   acceptAiSuggestion(actionId: string): Action | null {
     const action = this.actions.get(actionId);
     if (!action || !action.isAiSuggested) return null;

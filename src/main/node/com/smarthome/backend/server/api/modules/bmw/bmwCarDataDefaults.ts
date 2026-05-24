@@ -12,5 +12,11 @@ export const BMW_CARDATA_DEFAULT_MQTT_PORT = 9000;
 /** MQTT Keepalive <= 30s empfohlen (Broker trennt nach ~60s ohne Ping). */
 export const BMW_CARDATA_MQTT_KEEPALIVE = 30;
 
+/** Nach Abbruch der schnellen Reconnects: erneut verbinden, solange Stream gewünscht ist. */
+export const BMW_CARDATA_MQTT_RECONNECT_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Kurze Backoff-Versuche direkt nach Disconnect. */
+export const BMW_CARDATA_MQTT_FAST_RECONNECT_MAX_ATTEMPTS = 5;
+
 /** Discovery: VINs aus MQTT sammeln, max. Wartezeit. */
 export const BMW_CARDATA_DISCOVERY_TIMEOUT_MS = 55_000;

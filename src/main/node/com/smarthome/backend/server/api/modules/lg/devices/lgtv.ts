@@ -41,28 +41,44 @@ export class LGTV extends DeviceTV {
   }
 
   async updateValues(): Promise<void> {
-    if (!this.lg) {
+    if (!this.lg || !this.clientKey) {
       return;
     }
     try {
-      if (this.clientKey) {
-        const selectedApp = await this.lg.getSelectedApp(this);
-        this.selectedApp = selectedApp ?? undefined;
-        if (selectedApp === null) {
-          const selectedChannel = await this.lg.getSelectedChannel(this);
-          this.selectedChannel = selectedChannel ?? undefined;
-        } 
-        if( selectedApp !== undefined ){
-          const vol = await this.lg.getVolume(this);
-          if (vol) {
-            this.volume = vol;
-          }
-        }
-        if( !this.power){
+      this.lastPollUnreachable = false;
+      const selectedApp = await this.lg.getSelectedApp(this);
+      if (this.lastPollUnreachable || selectedApp === undefined) {
+        this.power = false;
+        this.screen = false;
+        return;
+      }
+      this.selectedApp = selectedApp ?? undefined;
+      if (selectedApp === null) {
+        const selectedChannel = await this.lg.getSelectedChannel(this);
+        if (this.lastPollUnreachable) {
+          this.power = false;
           this.screen = false;
+          return;
+        }
+        this.selectedChannel = selectedChannel ?? undefined;
+      }
+      if (selectedApp !== undefined) {
+        const vol = await this.lg.getVolume(this);
+        if (this.lastPollUnreachable) {
+          this.power = false;
+          this.screen = false;
+          return;
+        }
+        if (vol) {
+          this.volume = vol;
         }
       }
+      if (!this.power) {
+        this.screen = false;
+      }
     } catch {
+      this.power = false;
+      this.screen = false;
     }
   }
 

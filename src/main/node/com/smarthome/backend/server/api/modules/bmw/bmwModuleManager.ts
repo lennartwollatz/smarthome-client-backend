@@ -14,6 +14,11 @@ import { Device } from "../../../../model/devices/Device.js";
 import { BMWCredentialsStore } from "./bmwCredentialsStore.js";
 import { BMWTokenStore } from "./bmwTokenStore.js";
 import { BMWVehicleNamesStore, normalizeBmwVin } from "./bmwVehicleNamesStore.js";
+import { BMWCarTripCategoriesStore } from "./bmwCarTripCategoriesStore.js";
+import { isBmwTripCategory, type BmwTripCategory } from "./bmwCarTripCategory.js";
+import { applyTripCategoriesToEntries } from "./bmwCarTripCategoryApplier.js";
+import { buildGroupedTripEntriesFast } from "./bmwCarTripEnricher.js";
+import { computeTripYearSummary, yearBoundsMs } from "./bmwCarTripYearSummary.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { BMW_TRACKED_TELEMETRY_KEYS, BMW_TELEMETRY_KEY_META } from "./bmwCarDataTelemetryKeys.js";
 
@@ -29,12 +34,14 @@ export class BMWModuleManager extends ModuleManager<
   private credentialsStore: BMWCredentialsStore;
   private tokenStore: BMWTokenStore;
   private vehicleNamesStore: BMWVehicleNamesStore;
+  private tripCategoriesStore: BMWCarTripCategoriesStore;
   private readonly registeredVins = new Set<string>();
 
   constructor(databaseManager: DatabaseManager, deviceManager: DeviceManager, eventManager: EventManager) {
     const tokenStore = new BMWTokenStore(databaseManager);
     const credentialsStore = new BMWCredentialsStore(databaseManager);
     const vehicleNamesStore = new BMWVehicleNamesStore(databaseManager);
+    const tripCategoriesStore = new BMWCarTripCategoriesStore(databaseManager);
     const telemetryHistory = deviceManager.getBmwTelemetryHistoryStore();
     const deviceController = new BMWDeviceController(tokenStore, credentialsStore, telemetryHistory);
     const deviceDiscover = new BMWDeviceDiscover(databaseManager, deviceController);
@@ -43,6 +50,7 @@ export class BMWModuleManager extends ModuleManager<
     this.credentialsStore = credentialsStore;
     this.tokenStore = tokenStore;
     this.vehicleNamesStore = vehicleNamesStore;
+    this.tripCategoriesStore = tripCategoriesStore;
 
     deviceController.setVinDeviceResolver(vin => {
       const ids: string[] = [];
@@ -312,13 +320,61 @@ export class BMWModuleManager extends ModuleManager<
     return { keys: BMW_TELEMETRY_KEY_META };
   }
 
-  getTrips(deviceId: string, opts: { fromMs: number; toMs: number }) {
+  getAvailableTripMonths(deviceId: string): { months: { year: number; month: number }[] } | null {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return null;
+    const months = this.deviceManager.getBmwTelemetryHistoryStore().getAvailableTripMonths(deviceId);
+    return { months };
+  }
+
+  async getTrips(deviceId: string, opts: { fromMs: number; toMs: number }) {
     const car = this.deviceManager.getDevice(deviceId);
     if (!car || !(car instanceof BMWCar)) return null;
     const trips = this.deviceManager
       .getBmwTelemetryHistoryStore()
       .getTrips(deviceId, opts.fromMs, opts.toMs);
-    return { trips };
+    const { buildGroupedTripEntries } = await import("./bmwCarTripEnricher.js");
+    const entries = await buildGroupedTripEntries(trips);
+    const categories = this.tripCategoriesStore.getAllForDevice(deviceId);
+    return { entries: applyTripCategoriesToEntries(entries, categories) };
+  }
+
+  setTripCategory(
+    deviceId: string,
+    entryId: string,
+    category: BmwTripCategory | null
+  ): { success: boolean; category?: BmwTripCategory } | null {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return null;
+    if (!entryId.trim()) return { success: false };
+    if (category != null && !isBmwTripCategory(category)) {
+      return { success: false };
+    }
+    this.tripCategoriesStore.setCategory(deviceId, entryId.trim(), category);
+    return { success: true, category: category ?? undefined };
+  }
+
+  getTripCategories(deviceId: string): Record<string, BmwTripCategory> | null {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return null;
+    return this.tripCategoriesStore.getAllForDevice(deviceId);
+  }
+
+  getTripYearSummary(deviceId: string, year?: number) {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return null;
+
+    const y = year != null && Number.isFinite(year) ? Math.floor(year) : new Date().getFullYear();
+    const { fromMs, toMs } = yearBoundsMs(y);
+
+    const rawTrips = this.deviceManager
+      .getBmwTelemetryHistoryStore()
+      .getTrips(deviceId, fromMs, toMs);
+    const entries = buildGroupedTripEntriesFast(rawTrips);
+    const categories = this.tripCategoriesStore.getAllForDevice(deviceId);
+    const withCategories = applyTripCategoriesToEntries(entries, categories);
+
+    return computeTripYearSummary(withCategories, y);
   }
 
   getTelemetryHistory(

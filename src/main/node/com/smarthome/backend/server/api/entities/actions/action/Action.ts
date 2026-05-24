@@ -94,8 +94,13 @@ export type TriggerType = "manual" | "device" | "time" | "voice_assistant";
 
 type NodeExecContext = { parallelGroupId?: string; executionMode?: "sequential" | "parallel" };
 
+const EXECUTION_CANCELLED_MESSAGE = "Ausführung abgebrochen";
+
 export class Action {
   private isExecuting = false;
+  private cancelRequested = false;
+  private pendingWaitAbort: (() => void) | null = null;
+  private cancelAbortHandlers: Array<() => void> = [];
   private executionService?: ActionExecutionService;
   private actionNameResolver?: (actionId: string) => string | undefined;
 
@@ -131,6 +136,61 @@ export class Action {
 
   setActionNameResolver(resolver: ((actionId: string) => string | undefined) | undefined): void {
     this.actionNameResolver = resolver;
+  }
+
+  /** Bricht eine laufende Ausführung ab (Wait-Timer, Trigger-Warte und Workflow-Schleifen). */
+  requestCancel(): void {
+    this.cancelRequested = true;
+    this.pendingWaitAbort?.();
+    this.pendingWaitAbort = null;
+    for (const handler of this.cancelAbortHandlers) {
+      handler();
+    }
+    this.cancelAbortHandlers = [];
+  }
+
+  isExecutionRunning(): boolean {
+    return this.isExecuting;
+  }
+
+  private registerCancelAbort(handler: () => void): void {
+    this.cancelAbortHandlers.push(handler);
+  }
+
+  private resetCancelState(): void {
+    this.cancelRequested = false;
+    this.pendingWaitAbort = null;
+    this.cancelAbortHandlers = [];
+  }
+
+  private cancelledResponse(environment: ActionRunnableEnvironment): ActionRunnableResponse {
+    return {
+      success: false,
+      error: EXECUTION_CANCELLED_MESSAGE,
+      environment,
+    };
+  }
+
+  private checkCancelled(environment: ActionRunnableEnvironment): ActionRunnableResponse | null {
+    if (!this.cancelRequested) return null;
+    return this.cancelledResponse(environment);
+  }
+
+  private async cancellableDelay(ms: number): Promise<boolean> {
+    if (this.cancelRequested || ms <= 0) {
+      return !this.cancelRequested;
+    }
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingWaitAbort = null;
+        resolve(true);
+      }, ms);
+      this.pendingWaitAbort = () => {
+        clearTimeout(timer);
+        this.pendingWaitAbort = null;
+        resolve(false);
+      };
+    });
   }
 
   private resolveActionDisplayName(actionId: string): string {
@@ -376,6 +436,7 @@ export class Action {
       });
     } finally {
       this.isExecuting = false;
+      this.resetCancelState();
     }
   }
 
@@ -392,6 +453,8 @@ export class Action {
       error: "Node ist leer",
       environment: environment
     };
+    const cancelled = this.checkCancelled(environment);
+    if (cancelled) return cancelled;
     const nodeType = node.type;
     if (!nodeType) {
       return {
@@ -547,6 +610,9 @@ export class Action {
               actionName: nestedName,
             },
           });
+          if (!result.success) {
+            return result;
+          }
         } else {
           result = {
             success: result.success,
@@ -690,7 +756,24 @@ export class Action {
       };
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     }
-    const value = String(variableConfig.value ?? "");
+    let value: string;
+    const valueSource = variableConfig.valueSource ?? "manual";
+    if (valueSource === "device") {
+      const deviceEval = this.evaluateConditionWithDetails(
+        new ConditionConfig({
+          source: "device",
+          deviceId: variableConfig.deviceId,
+          moduleId: variableConfig.moduleId,
+          property: variableConfig.property,
+          values: variableConfig.values,
+        }),
+        devices,
+        environment
+      );
+      value = deviceEval.result ? "true" : "false";
+    } else {
+      value = String(variableConfig.value ?? "");
+    }
     result.environment.environment.set(`var:${name}`, value);
     this.recordInvocation({
       kind: "variable",
@@ -853,7 +936,10 @@ export class Action {
       const waitTime = waitConfig.waitTime ?? 0;
       this.recordInvocation({ kind: "wait", label: "time", args: [waitTime] });
       if (waitTime > 0) {
-        await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+        const completed = await this.cancellableDelay(waitTime * 1000);
+        if (!completed) {
+          return this.cancelledResponse(result.environment);
+        }
       }
       return await this.executeNextNodes(node, devices, scenes, eventManager, result.environment);
     }
@@ -866,7 +952,10 @@ export class Action {
         waitConfig.waitUntilTime != null ? String(waitConfig.waitUntilTime) : undefined
       );
       if (ms !== null && ms > 0) {
-        await new Promise((resolve) => setTimeout(resolve, ms));
+        const completed = await this.cancellableDelay(ms);
+        if (!completed) {
+          return this.cancelledResponse(result.environment);
+        }
       } else if (ms === null) {
         result = {
           success: result.success,
@@ -922,6 +1011,11 @@ export class Action {
         const actionRunnable = new ActionRunnableEventBased(subActionId, this.actionId, runnable, eventTrigger);
         eventManager.addRunnable(actionRunnable);
 
+        this.registerCancelAbort(() => {
+          if (completed) return;
+          complete(Promise.resolve(this.cancelledResponse(result.environment)));
+        });
+
         if (waitConfig.timeout && waitConfig.timeout > 0) {
           timeout = setTimeout(async () => {
             if (!completed) {
@@ -958,6 +1052,8 @@ export class Action {
     if (loopConfig.type === "for") {
       const count = loopConfig.count ?? 0;
       for (let i = 0; i < count; i += 1) {
+        const cancelled = this.checkCancelled(result.environment);
+        if (cancelled) return cancelled;
         const groupId = `loop:${node.nodeId ?? node.name}:iter:${i}`;
         for (const loopNodeId of loopNodes) {
           const loopNode = this.findNodeById(this.workflow?.nodes, loopNodeId);
@@ -985,6 +1081,8 @@ export class Action {
       let iteration = 0;
       while (true) {
         iteration += 1;
+        const cancelled = this.checkCancelled(result.environment);
+        if (cancelled) return cancelled;
         if (maxIterations > 0 && iteration > maxIterations) {
           break;
         }
@@ -1024,6 +1122,8 @@ export class Action {
     let result: ActionRunnableResponse = {success: true, environment: environment};
     const nextNodes = node.nextNodes ?? [];
     for (const nextNodeId of nextNodes) {
+      const cancelled = this.checkCancelled(result.environment);
+      if (cancelled) return cancelled;
       const nextNode = this.findNodeById(this.workflow?.nodes, nextNodeId);
       if (nextNode) {
         result = await this.executeNode(nextNode, devices, scenes, eventManager, result.environment);

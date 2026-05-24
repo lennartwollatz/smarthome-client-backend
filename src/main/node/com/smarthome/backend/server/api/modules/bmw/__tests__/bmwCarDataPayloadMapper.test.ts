@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mapTelemetrySnapshotToCarFields, pickTrackedTelemetry } from "../bmwCarDataPayloadMapper.js";
+import {
+  BMW_DEFAULT_DOORS_CLOSED,
+  BMW_DEFAULT_WINDOWS_CLOSED,
+  mapTelemetrySnapshotToCarFields,
+  pickTrackedTelemetry
+} from "../bmwCarDataPayloadMapper.js";
 
 function flatData(data: Record<string, { value: unknown }>): Record<string, unknown> {
   const snap: Record<string, unknown> = {};
@@ -45,5 +50,36 @@ describe("bmwCarDataPayloadMapper", () => {
     const tracked = pickTrackedTelemetry(snap);
     expect(tracked["vehicle.cabin.door.status"]).toBe("SECURED");
     expect(tracked["vehicle.drivetrain.fuelSystem.level"]).toBe(72);
+  });
+
+  it("liefert bei leerem Snapshot geschlossene Standard-Türen und Fenster", () => {
+    const mapped = mapTelemetrySnapshotToCarFields({});
+    expect(mapped.doors).toEqual(BMW_DEFAULT_DOORS_CLOSED);
+    expect(mapped.windows).toEqual(BMW_DEFAULT_WINDOWS_CLOSED);
+  });
+
+  it("behandelt fehlende Einzeltüren als geschlossen (nicht offen)", () => {
+    const snap = flatData({
+      "vehicle.cabin.door.row1.driver.isOpen": { value: false },
+      "vehicle.cabin.door.row1.passenger.isOpen": { value: false }
+    });
+    const mapped = mapTelemetrySnapshotToCarFields(snap);
+
+    expect(mapped.doors?.leftFront).toBe(true);
+    expect(mapped.doors?.rightFront).toBe(true);
+    expect(mapped.doors?.rightRear).toBe(true);
+    expect(mapped.doors?.hood).toBe(true);
+    expect(mapped.doors?.combinedState).toBe(true);
+  });
+
+  it("markiert nur explizit geöffnete Türen als offen", () => {
+    const snap = flatData({
+      "vehicle.cabin.door.row1.passenger.isOpen": { value: true }
+    });
+    const mapped = mapTelemetrySnapshotToCarFields(snap);
+
+    expect(mapped.doors?.rightFront).toBe(false);
+    expect(mapped.doors?.leftFront).toBe(true);
+    expect(mapped.doors?.combinedState).toBe(false);
   });
 });

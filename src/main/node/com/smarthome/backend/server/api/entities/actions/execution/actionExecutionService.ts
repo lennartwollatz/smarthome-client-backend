@@ -75,6 +75,19 @@ export class ActionExecutionService {
     return this.activeByActionId.get(actionId)?.execution.executionId ?? null;
   }
 
+  getActiveExecutions(): ActionExecution[] {
+    return Array.from(this.activeByActionId.values()).map((active) => active.execution);
+  }
+
+  findActiveActionIdByExecutionId(executionId: string): string | null {
+    for (const [actionId, active] of this.activeByActionId) {
+      if (active.execution.executionId === executionId) {
+        return actionId;
+      }
+    }
+    return null;
+  }
+
   recordNodeStart(
     actionId: string,
     node: Node,
@@ -184,6 +197,10 @@ export class ActionExecutionService {
 
   cancelActive(actionId: string): void {
     this.activeByActionId.delete(actionId);
+  }
+
+  isExecutionActive(executionId: string): boolean {
+    return this.findActiveActionIdByExecutionId(executionId) != null;
   }
 
   private persistAndEmit(execution: ActionExecution): void {

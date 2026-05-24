@@ -93,7 +93,17 @@ export function createBMWModuleRouter(deps: ServerDeps) {
     res.status(200).json(bmwModule.getTelemetryKeys());
   });
 
-  router.get("/devices/:deviceId/trips", (req, res) => {
+  router.get("/devices/:deviceId/trips/available-months", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const result = bmwModule.getAvailableTripMonths(deviceId);
+    if (!result) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json(result);
+  });
+
+  router.get("/devices/:deviceId/trips", async (req, res) => {
     const deviceId = req.params.deviceId;
     const fromRaw = req.query.from;
     const toRaw = req.query.to;
@@ -103,12 +113,17 @@ export function createBMWModuleRouter(deps: ServerDeps) {
       res.status(400).json({ error: "from und to (Unix-ms) sind erforderlich" });
       return;
     }
-    const result = bmwModule.getTrips(deviceId, { fromMs, toMs });
-    if (!result) {
-      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
-      return;
+    try {
+      const result = await bmwModule.getTrips(deviceId, { fromMs, toMs });
+      if (!result) {
+        res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+        return;
+      }
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error({ err, deviceId }, "BMW getTrips fehlgeschlagen");
+      res.status(500).json({ error: "Fahrten konnten nicht geladen werden" });
     }
-    res.status(200).json(result);
   });
 
   router.get("/devices/:deviceId/telemetry/history", (req, res) => {
@@ -152,6 +167,59 @@ export function createBMWModuleRouter(deps: ServerDeps) {
       return;
     }
     res.status(200).json({ success: true, device: serializeDevicesForApi([car])[0] });
+  });
+
+  router.put("/devices/:deviceId/trips/:entryId/category", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const entryId = req.params.entryId;
+    const categoryRaw = req.body?.category;
+    const category =
+      categoryRaw === null || categoryRaw === ""
+        ? null
+        : typeof categoryRaw === "string"
+          ? categoryRaw
+          : undefined;
+    if (category !== null && category !== "private" && category !== "business") {
+      res.status(400).json({ error: "category muss 'private', 'business' oder null sein" });
+      return;
+    }
+    const result = bmwModule.setTripCategory(deviceId, entryId, category);
+    if (!result) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    if (!result.success) {
+      res.status(400).json({ error: "Kategorie konnte nicht gespeichert werden" });
+      return;
+    }
+    res.status(200).json(result);
+  });
+
+  router.get("/devices/:deviceId/trips/year-summary", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const yearRaw = req.query.year;
+    const year =
+      typeof yearRaw === "string" && yearRaw.trim() !== "" ? Number(yearRaw) : undefined;
+    if (year != null && !Number.isFinite(year)) {
+      res.status(400).json({ error: "year muss eine Zahl sein" });
+      return;
+    }
+    const summary = bmwModule.getTripYearSummary(deviceId, year);
+    if (!summary) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json(summary);
+  });
+
+  router.get("/devices/:deviceId/trip-categories", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const categories = bmwModule.getTripCategories(deviceId);
+    if (!categories) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json({ categories });
   });
 
   router.post("/devices/:deviceId/refresh", async (req, res) => {

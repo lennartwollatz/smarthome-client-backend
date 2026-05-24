@@ -5,6 +5,10 @@ import type { EnergyUsage } from "../../../../model/devices/energyTypes.js";
 import { DeviceSpeaker } from "../../../../model/devices/DeviceSpeaker.js";
 import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { DeviceThermostat } from "../../../../model/devices/DeviceThermostat.js";
+import { DeviceMotion } from "../../../../model/devices/DeviceMotion.js";
+import { DeviceLightLevel } from "../../../../model/devices/DeviceLightLevel.js";
+import { DeviceTemperature } from "../../../../model/devices/DeviceTemperature.js";
+import { DeviceLightLevelMotionTemperature } from "../../../../model/devices/DeviceLightLevelMotionTemperature.js";
 import { DeviceVacuumCleaner } from "../../../../model/devices/DeviceVacuumCleaner.js";
 import type { DatabaseManager } from "../../../db/database.js";
 import { JsonRepository } from "../../../db/jsonRepository.js";
@@ -14,12 +18,21 @@ import type { ModuleManager } from "../../modules/moduleManager.js";
 import { EntityManager } from "../EntityManager.js";
 import { EnergyHistoryArchiveStore } from "../../../db/energyHistoryArchiveStore.js";
 import { BmwCarTelemetryHistoryStore } from "../../../db/bmwCarTelemetryHistoryStore.js";
+import {
+  SensorHistoryStore,
+  type SensorHistoryMetric,
+  type SensorHistoryRange,
+  type MotionHistoryEntry,
+  type TemperatureHistoryPoint,
+  type LightLevelHistoryPoint
+} from "../../../db/sensorHistoryStore.js";
 import { serializeDeviceForApi } from "./deviceSerialize.js";
 
 export class DeviceManager implements EntityManager {
   private deviceRepository: JsonRepository<Device>;
   private energyHistoryArchive: EnergyHistoryArchiveStore;
   private bmwTelemetryHistory: BmwCarTelemetryHistoryStore;
+  private sensorHistory: SensorHistoryStore;
   private moduleManagers = new Map<string, ModuleManager<any, any, any, any, any, any, any>>();
   private liveUpdateService?: LiveUpdateService;
   private devices = new Map<string, Device>();
@@ -28,6 +41,7 @@ export class DeviceManager implements EntityManager {
     this.deviceRepository = new JsonRepository<Device>(databaseManager, "Device");
     this.energyHistoryArchive = new EnergyHistoryArchiveStore(databaseManager);
     this.bmwTelemetryHistory = new BmwCarTelemetryHistoryStore(databaseManager);
+    this.sensorHistory = new SensorHistoryStore(databaseManager);
     this.initialize();
   }
 
@@ -56,6 +70,11 @@ export class DeviceManager implements EntityManager {
     devices.forEach(device => {
       if (device?.id) {
         this.wireEventManager(device);
+        if (device instanceof DeviceSwitch) {
+          if (this.trimAndArchiveSwitchEnergyHistory(device)) {
+            this.deviceRepository.save(device.id, serializeDeviceForApi(device) as unknown as Device);
+          }
+        }
         this.devices.set(device.id, device);
       }
     });
@@ -124,6 +143,7 @@ export class DeviceManager implements EntityManager {
     this.deviceRepository.deleteById(deviceId);
     this.energyHistoryArchive.deleteByDeviceId(deviceId);
     this.bmwTelemetryHistory.deleteByDeviceId(deviceId);
+    this.sensorHistory.deleteByDeviceId(deviceId);
     device?.delete();
     // Event-basierte Trigger dieses Geräts sind entfernt; gespeicherte Workflows/Scenes können verwaiste deviceIds enthalten.
     if (!isVoiceAssistant) {
@@ -138,13 +158,44 @@ export class DeviceManager implements EntityManager {
 
   saveDevice(device: Device): boolean {
     if (!device?.id) return false;
+    const prev = this.devices.get(device.id);
     this.wireEventManager(device);
+    if (device instanceof DeviceSwitch) {
+      this.trimAndArchiveSwitchEnergyHistory(device);
+    }
+    this.recordSensorHistoryIfChanged(prev, device);
     this.devices.set(device.id, device);
     this.deviceRepository.save(device.id, serializeDeviceForApi(device) as unknown as Device);
     if (device.moduleId !== "voice-assistant") {
       this.liveUpdateService?.emit("device:updated", device);
     }
     return true;
+  }
+
+  /**
+   * Verschiebt Messpunkte älter als 48 Stunden ins Archiv und behält nur das Live-Fenster im Gerät.
+   * @returns true, wenn Live-Daten gekürzt oder archiviert wurden
+   */
+  private trimAndArchiveSwitchEnergyHistory(device: DeviceSwitch): boolean {
+    if (!device.id) return false;
+    const cutoff = Date.now() - DeviceSwitch.ENERGY_USAGE_LIVE_WINDOW_MS;
+    let changed = false;
+
+    for (const [buttonId, btn] of Object.entries(device.buttons ?? {})) {
+      if (!btn?.energyUsages?.length) continue;
+      const beforeLen = btn.energyUsages.length;
+      const toArchive = btn.energyUsages.filter(u => u.time < cutoff);
+      if (toArchive.length > 0) {
+        this.energyHistoryArchive.appendPruned(device.id, buttonId, toArchive);
+        changed = true;
+      }
+      const trimmed = btn.energyUsages.filter(u => u.time >= cutoff);
+      if (trimmed.length !== beforeLen) {
+        btn.energyUsages = trimmed;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   private parseCleanSequenceFromPatch(raw: unknown): string[] | undefined {
@@ -379,8 +430,8 @@ export class DeviceManager implements EntityManager {
   }
 
   /**
-   * Verlauf kWh pro Slot (5-Min-Takt) für switch-energy o. ä.: Live-Daten (letzte 7 Tage im Gerät)
-   * plus optionales Archiv (älter als 7 Tage, begrenzt auf ca. 400 Tage pro Slot).
+   * Verlauf kWh pro Slot (5-Min-Takt) für switch-energy o. ä.:
+   * Live-Daten (letzte 48 Stunden im Gerät) plus optionales Archiv (älter, begrenzt auf ca. 400 Tage).
    */
   getSwitchEnergyHistory(
     deviceId: string,
@@ -413,5 +464,111 @@ export class DeviceManager implements EntityManager {
       out[bid] = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
     }
     return { buttons: out };
+  }
+
+  private recordSensorHistoryIfChanged(prev: Device | undefined, next: Device): void {
+    if (!next.id) return;
+    const now = Date.now();
+    const id = next.id;
+
+    const prevMotion = this.readMotion(prev);
+    const nextMotion = this.readMotion(next);
+    if (nextMotion !== undefined && prevMotion !== nextMotion) {
+      this.sensorHistory.appendMotion(id, nextMotion, now);
+    }
+
+    const prevTemp = this.readTemperature(prev);
+    const nextTemp = this.readTemperature(next);
+    const prevGoal = this.readTemperatureGoal(prev);
+    const nextGoal = this.readTemperatureGoal(next);
+    if (nextTemp !== undefined && (prevTemp !== nextTemp || prevGoal !== nextGoal)) {
+      this.sensorHistory.appendTemperature(id, nextTemp, nextGoal, now);
+    }
+
+    const prevLl = this.readLightLevel(prev);
+    const nextLl = this.readLightLevel(next);
+    if (nextLl !== undefined && prevLl !== nextLl) {
+      this.sensorHistory.appendLightLevel(id, nextLl, now);
+    }
+  }
+
+  private readMotion(device: Device | undefined): boolean | undefined {
+    if (!device) return undefined;
+    if (device instanceof DeviceMotion || device instanceof DeviceLightLevelMotionTemperature) {
+      return device.motion === true;
+    }
+    return undefined;
+  }
+
+  private readTemperature(device: Device | undefined): number | undefined {
+    if (!device) return undefined;
+    if (device instanceof DeviceTemperature || device instanceof DeviceLightLevelMotionTemperature) {
+      const t = device.temperature;
+      return t !== undefined && Number.isFinite(t) ? t : undefined;
+    }
+    return undefined;
+  }
+
+  private readTemperatureGoal(device: Device | undefined): number | undefined {
+    if (!device || !(device instanceof DeviceThermostat)) return undefined;
+    const g = device.temperatureGoal;
+    if (g === undefined || !Number.isFinite(g) || g === -999) return undefined;
+    return g;
+  }
+
+  private readLightLevel(device: Device | undefined): number | undefined {
+    if (!device) return undefined;
+    if (device instanceof DeviceLightLevel || device instanceof DeviceLightLevelMotionTemperature) {
+      const ll = device.lightLevel;
+      return ll !== undefined && Number.isFinite(ll) ? ll : undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * Sensor-Verlauf für motion, temperature (inkl. Thermostat-Sollwert) und lightLevel.
+   */
+  getSensorHistory(
+    deviceId: string,
+    metric: SensorHistoryMetric,
+    range: SensorHistoryRange
+  ):
+    | { metric: "motion"; entries: MotionHistoryEntry[] }
+    | { metric: "temperature"; range: SensorHistoryRange; points: TemperatureHistoryPoint[] }
+    | { metric: "lightLevel"; range: SensorHistoryRange; points: LightLevelHistoryPoint[] }
+    | null {
+    const device = this.devices.get(deviceId);
+    if (!device) return null;
+
+    if (metric === "motion") {
+      if (!(device instanceof DeviceMotion || device instanceof DeviceLightLevelMotionTemperature)) {
+        return null;
+      }
+      return { metric: "motion", entries: this.sensorHistory.getMotion(deviceId) };
+    }
+
+    if (metric === "temperature") {
+      if (!(device instanceof DeviceTemperature || device instanceof DeviceLightLevelMotionTemperature)) {
+        return null;
+      }
+      return {
+        metric: "temperature",
+        range,
+        points: this.sensorHistory.getTemperature(deviceId, range)
+      };
+    }
+
+    if (metric === "lightLevel") {
+      if (!(device instanceof DeviceLightLevel || device instanceof DeviceLightLevelMotionTemperature)) {
+        return null;
+      }
+      return {
+        metric: "lightLevel",
+        range,
+        points: this.sensorHistory.getLightLevel(deviceId, range)
+      };
+    }
+
+    return null;
   }
 }

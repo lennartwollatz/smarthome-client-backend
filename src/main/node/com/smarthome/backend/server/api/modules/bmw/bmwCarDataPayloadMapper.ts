@@ -14,6 +14,37 @@ export type TirePressureQuad = {
   rearRight?: number;
 };
 
+/** Standard-Fahrzeugstatus: alle Türen/Klappen geschlossen, gesichert. */
+export const BMW_DEFAULT_DOORS_CLOSED: DeviceCarDoors = {
+  combinedSecurityState: true,
+  leftFront: true,
+  leftRear: true,
+  rightFront: true,
+  rightRear: true,
+  combinedState: true,
+  hood: true,
+  trunk: true
+};
+
+/** Standard-Fahrzeugstatus: alle Fenster geschlossen. */
+export const BMW_DEFAULT_WINDOWS_CLOSED: DeviceCarWindows = {
+  leftFront: true,
+  leftRear: true,
+  rightFront: true,
+  rightRear: true,
+  combinedState: true
+};
+
+/** true = geschlossen; fehlendes isOpen gilt als geschlossen. */
+function doorIsClosed(isOpen: boolean | undefined): boolean {
+  return isOpen !== true;
+}
+
+/** true = geschlossen; fehlender/offener Status gilt nur bei explizit OPEN/isOpen. */
+function windowIsClosed(closed: boolean | undefined): boolean {
+  return closed !== false;
+}
+
 /**
  * Mappt gesammelte CarData-Streaming-Keys (flache Werte) auf DeviceCar-/BMWCar-Felder.
  */
@@ -128,45 +159,32 @@ export function mapTelemetrySnapshotToCarFields(snapshot: Record<string, unknown
     windowClosedFromStatus("vehicle.cabin.window.row2.passenger.status") ??
     getBool("vehicle.cabin.window.row2.passengerSide.isClosed");
 
-  let doors: DeviceCarDoors | undefined;
-  if (
-    leftFrontDoor != null ||
-    rightFrontDoor != null ||
-    leftRearDoor != null ||
-    rightRearDoor != null ||
-    hood != null ||
-    trunk != null
-  ) {
-    const doorVals = [leftFrontDoor, leftRearDoor, rightFrontDoor, rightRearDoor, hood, trunk].filter(
-      (x): x is boolean => typeof x === "boolean"
-    );
-    const combinedState = doorVals.length > 0 ? doorVals.every(d => !d) : undefined;
-    doors = {
-      combinedSecurityState: combinedState === true,
-      leftFront: leftFrontDoor === false,
-      leftRear: leftRearDoor === false,
-      rightFront: rightFrontDoor === false,
-      rightRear: rightRearDoor === false,
-      combinedState: combinedState === true,
-      hood: hood === false,
-      trunk: trunk === false
-    };
-  }
+  const doorClosed = {
+    leftFront: doorIsClosed(leftFrontDoor),
+    leftRear: doorIsClosed(leftRearDoor),
+    rightFront: doorIsClosed(rightFrontDoor),
+    rightRear: doorIsClosed(rightRearDoor),
+    hood: doorIsClosed(hood),
+    trunk: doorIsClosed(trunk)
+  };
+  const allDoorsClosed = Object.values(doorClosed).every(Boolean);
+  const doors: DeviceCarDoors = {
+    ...doorClosed,
+    combinedState: allDoorsClosed,
+    combinedSecurityState: lockedFromStatus ?? allDoorsClosed
+  };
 
-  let windows: DeviceCarWindows | undefined;
-  if (leftFrontWin != null || rightFrontWin != null || leftRearWin != null || rightRearWin != null) {
-    const wins = [leftFrontWin, leftRearWin, rightFrontWin, rightRearWin].filter(
-      (x): x is boolean => typeof x === "boolean"
-    );
-    const combined = wins.length > 0 ? wins.every(Boolean) : undefined;
-    windows = {
-      leftFront: leftFrontWin === true,
-      leftRear: leftRearWin === true,
-      rightFront: rightFrontWin === true,
-      rightRear: rightRearWin === true,
-      combinedState: combined === true
-    };
-  }
+  const windowClosed = {
+    leftFront: windowIsClosed(leftFrontWin),
+    leftRear: windowIsClosed(leftRearWin),
+    rightFront: windowIsClosed(rightFrontWin),
+    rightRear: windowIsClosed(rightRearWin)
+  };
+  const allWindowsClosed = Object.values(windowClosed).every(Boolean);
+  const windows: DeviceCarWindows = {
+    ...windowClosed,
+    combinedState: allWindowsClosed
+  };
 
   const preCondActivity = getString("vehicle.vehicle.preConditioning.activity")?.toUpperCase();
   const climateFromActivity =
@@ -183,9 +201,7 @@ export function mapTelemetrySnapshotToCarFields(snapshot: Record<string, unknown
     getBool("vehicle.body.centralLocking.isLocked");
 
   const inUseCandidate =
-    getBool("vehicle.status.car.inUse") ??
-    getBool("vehicle.status.car.inUseState") ??
-    climate;
+    getBool("vehicle.status.car.inUse") ?? getBool("vehicle.status.car.inUseState");
 
   const tirePressuresKpa: TirePressureQuad = {
     frontLeft:
@@ -230,7 +246,7 @@ export function mapTelemetrySnapshotToCarFields(snapshot: Record<string, unknown
     fuelLevelPercent: fuelPct ?? soc,
     rangeKm,
     mileageKm,
-    lockedState: locked,
+    lockedState: locked ?? true,
     inUseState: inUseCandidate,
     climateControlState: climate,
     location,
