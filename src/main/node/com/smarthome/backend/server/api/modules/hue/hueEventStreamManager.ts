@@ -54,6 +54,7 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
 
   protected async handleEvent(event: HueEvent): Promise<void> {
     logger.debug({ bridgeId: event.bridgeId, data: event.data }, "Hue Eventstream");
+    console.log("handleEvent: " + JSON.stringify(event));
     const eventData = event.data;
 
     try {
