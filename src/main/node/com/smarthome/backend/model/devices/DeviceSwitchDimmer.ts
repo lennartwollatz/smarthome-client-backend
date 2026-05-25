@@ -19,11 +19,27 @@ const MIN_FADE_INTERVAL_MS = 500;
  */
 const FADE_TIMERS = new WeakMap<DeviceSwitchDimmer, Map<string, NodeJS.Timeout>>();
 
+/**
+ * Resolver der Fade-Promises pro Geraet+Button. Wird beim Abschluss oder
+ * vorzeitigem Abbruch aufgerufen, damit das `await fadeBrightness(...)` im
+ * Workflow zuverlaessig zurueckkehrt.
+ */
+const FADE_RESOLVERS = new WeakMap<DeviceSwitchDimmer, Map<string, () => void>>();
+
 function getFadeTimers(device: DeviceSwitchDimmer): Map<string, NodeJS.Timeout> {
   let map = FADE_TIMERS.get(device);
   if (!map) {
     map = new Map<string, NodeJS.Timeout>();
     FADE_TIMERS.set(device, map);
+  }
+  return map;
+}
+
+function getFadeResolvers(device: DeviceSwitchDimmer): Map<string, () => void> {
+  let map = FADE_RESOLVERS.get(device);
+  if (!map) {
+    map = new Map<string, () => void>();
+    FADE_RESOLVERS.set(device, map);
   }
   return map;
 }
@@ -125,9 +141,9 @@ export abstract class DeviceSwitchDimmer extends DeviceSwitch {
    * vorher abgebrochen; ein direkter `setBrightness`-Aufruf auf demselben Button
    * bricht den Fade ebenfalls ab.
    *
-   * Wichtig: Der Aufruf kehrt sofort nach dem ersten Setzen zurueck. Der Workflow
-   * laeuft also waehrend des Fades weiter; bewusst, damit lange Faden (z. B. 1 h)
-   * den Workflow nicht blockieren.
+   * Wichtig: Der Aufruf wartet, bis der Fade abgeschlossen ist oder durch einen
+   * anderen `setBrightness`/`fadeBrightness`-Aufruf abgebrochen wurde. Der
+   * Workflow geht erst danach zum naechsten Schritt/Node ueber.
    */
   async fadeBrightness(
     buttonId: string,
@@ -155,36 +171,67 @@ export abstract class DeviceSwitchDimmer extends DeviceSwitch {
     const delta = end - start;
     const { steps, intervalMs } = computeFadeSchedule(duration, delta);
 
-    let stepIndex = 1;
-    const timers = getFadeTimers(this);
-    const tick = async () => {
-      try {
-        const progress = stepIndex / steps;
-        const isLast = stepIndex >= steps;
-        const next = isLast ? end : clampBrightness(Math.round(start + delta * progress));
-        await this.setBrightnessFromFade(buttonId, next, execute, trigger);
-        if (isLast) {
-          timers.delete(buttonId);
+    return new Promise<void>((resolve) => {
+      const timers = getFadeTimers(this);
+      const resolvers = getFadeResolvers(this);
+      const finish = () => {
+        timers.delete(buttonId);
+        if (resolvers.get(buttonId) === finish) {
+          resolvers.delete(buttonId);
+        }
+        resolve();
+      };
+      resolvers.set(buttonId, finish);
+
+      let stepIndex = 1;
+      const tick = async () => {
+        if (resolvers.get(buttonId) !== finish) {
           return;
         }
-        stepIndex += 1;
-        timers.set(buttonId, setTimeout(tick, intervalMs));
-      } catch {
-        timers.delete(buttonId);
-      }
-    };
+        try {
+          const progress = stepIndex / steps;
+          const isLast = stepIndex >= steps;
+          const next = isLast ? end : clampBrightness(Math.round(start + delta * progress));
+          await this.setBrightnessFromFade(buttonId, next, execute, trigger);
+          if (resolvers.get(buttonId) !== finish) {
+            return;
+          }
+          if (isLast) {
+            finish();
+            return;
+          }
+          stepIndex += 1;
+          timers.set(buttonId, setTimeout(tick, intervalMs));
+        } catch {
+          finish();
+        }
+      };
 
-    timers.set(buttonId, setTimeout(tick, intervalMs));
+      timers.set(buttonId, setTimeout(tick, intervalMs));
+    });
   }
 
-  /** Bricht einen ggf. laufenden Fade fuer den angegebenen Button ab. */
+  /**
+   * Bricht einen ggf. laufenden Fade fuer den angegebenen Button ab.
+   * Loest gleichzeitig das wartende `fadeBrightness`-Promise auf, damit der
+   * aufrufende Workflow nicht haengen bleibt.
+   */
   cancelBrightnessFade(buttonId: string): void {
     const timers = FADE_TIMERS.get(this);
-    if (!timers) return;
-    const timer = timers.get(buttonId);
-    if (timer) {
-      clearTimeout(timer);
-      timers.delete(buttonId);
+    if (timers) {
+      const timer = timers.get(buttonId);
+      if (timer) {
+        clearTimeout(timer);
+        timers.delete(buttonId);
+      }
+    }
+    const resolvers = FADE_RESOLVERS.get(this);
+    if (resolvers) {
+      const resolver = resolvers.get(buttonId);
+      if (resolver) {
+        resolvers.delete(buttonId);
+        resolver();
+      }
     }
   }
 

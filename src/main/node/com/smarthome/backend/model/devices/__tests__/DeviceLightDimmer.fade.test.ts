@@ -23,25 +23,33 @@ describe("DeviceLightDimmer.fadeBrightness", () => {
     vi.useRealTimers();
   });
 
-  it("setzt sofort den Startwert und endet exakt bei endBrightness", async () => {
+  it("wartet, bis alle Fade-Schritte abgeschlossen sind", async () => {
     const device = new TestLightDimmer();
-    const fadePromise = device.fadeBrightness(10, 100, 2);
-    await fadePromise;
+    let resolved = false;
+    const fadePromise = device.fadeBrightness(10, 100, 2).then(() => {
+      resolved = true;
+    });
 
-    expect(device.executed[0]).toBe(10);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
     expect(device.brightness).toBe(10);
 
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(resolved).toBe(false);
 
+    await vi.advanceTimersByTimeAsync(1_500);
+    await fadePromise;
+    expect(resolved).toBe(true);
     expect(device.brightness).toBe(100);
     expect(device.executed[device.executed.length - 1]).toBe(100);
   });
 
   it("erzeugt monoton steigende Helligkeitsschritte", async () => {
     const device = new TestLightDimmer();
-    await device.fadeBrightness(10, 100, 5);
+    const fadePromise = device.fadeBrightness(10, 100, 5);
 
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(5_500);
+    await fadePromise;
 
     for (let i = 1; i < device.executed.length; i++) {
       expect(device.executed[i]).toBeGreaterThanOrEqual(device.executed[i - 1]);
@@ -50,7 +58,7 @@ describe("DeviceLightDimmer.fadeBrightness", () => {
     expect(device.executed[device.executed.length - 1]).toBe(100);
   });
 
-  it("setzt bei duration <= 0 sofort den Endwert", async () => {
+  it("setzt bei duration <= 0 sofort den Endwert und kehrt sofort zurueck", async () => {
     const device = new TestLightDimmer();
     await device.fadeBrightness(0, 80, 0);
 
@@ -58,25 +66,51 @@ describe("DeviceLightDimmer.fadeBrightness", () => {
     expect(device.brightness).toBe(80);
   });
 
-  it("bricht einen laufenden Fade ab, wenn setBrightness aufgerufen wird", async () => {
+  it("bricht den Fade ab, wenn setBrightness aufgerufen wird und loest das Promise auf", async () => {
     const device = new TestLightDimmer();
-    await device.fadeBrightness(10, 100, 10);
+    let resolved = false;
+    const fadePromise = device.fadeBrightness(10, 100, 30).then(() => {
+      resolved = true;
+    });
 
     await vi.advanceTimersByTimeAsync(2_000);
-    const stepsBefore = device.executed.length;
+    expect(resolved).toBe(false);
+
     await device.setBrightness(50, true, true);
+    await Promise.resolve();
+    await fadePromise;
 
-    await vi.advanceTimersByTimeAsync(20_000);
-
+    expect(resolved).toBe(true);
     expect(device.brightness).toBe(50);
-    expect(device.executed[device.executed.length - 1]).toBe(50);
-    expect(device.executed.length).toBeLessThan(stepsBefore + 50);
+
+    const lengthAfterCancel = device.executed.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(device.executed.length).toBe(lengthAfterCancel);
+  });
+
+  it("ein zweiter fadeBrightness-Aufruf bricht den ersten ab", async () => {
+    const device = new TestLightDimmer();
+    let firstResolved = false;
+    const firstFade = device.fadeBrightness(0, 100, 30).then(() => {
+      firstResolved = true;
+    });
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(firstResolved).toBe(false);
+
+    const secondFade = device.fadeBrightness(60, 80, 2);
+    await firstFade;
+    expect(firstResolved).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(2_500);
+    await secondFade;
+    expect(device.brightness).toBe(80);
   });
 
   it("clampt Eingaben auf 0-100", async () => {
     const device = new TestLightDimmer();
-    await device.fadeBrightness(-50, 200, 1);
+    const fadePromise = device.fadeBrightness(-50, 200, 1);
     await vi.advanceTimersByTimeAsync(2_000);
+    await fadePromise;
 
     expect(device.executed[0]).toBe(0);
     expect(device.executed[device.executed.length - 1]).toBe(100);

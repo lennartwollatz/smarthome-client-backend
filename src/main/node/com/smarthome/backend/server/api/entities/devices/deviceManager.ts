@@ -903,7 +903,6 @@ export class DeviceManager implements EntityManager {
     let thermostat: DeviceThermostat | undefined;
     this.devices.forEach(d => {
       if (thermostat) return;
-      if (d === device) return;
       if (d.room === roomId && d instanceof DeviceThermostat) {
         thermostat = d;
       }

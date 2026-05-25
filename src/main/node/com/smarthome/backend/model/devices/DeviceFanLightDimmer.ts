@@ -16,6 +16,12 @@ const MIN_FADE_INTERVAL_MS = 500;
  */
 const FADE_TIMERS = new WeakMap<DeviceFanLightDimmer, NodeJS.Timeout>();
 
+/**
+ * Resolver des Fade-Promises pro Geraet. Wird beim Abschluss oder vorzeitigem
+ * Abbruch aufgerufen, damit `await fadeLightBrightness(...)` zurueckkehrt.
+ */
+const FADE_RESOLVERS = new WeakMap<DeviceFanLightDimmer, () => void>();
+
 function clampBrightness(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -82,8 +88,9 @@ export abstract class DeviceFanLightDimmer extends DeviceFanLight {
    * Schritten. Ein laufender Fade oder ein direkter `setLightBrightness`-Aufruf
    * bricht den Fade ab.
    *
-   * Wichtig: Der Aufruf kehrt sofort nach dem ersten Setzen zurueck. Der Workflow
-   * laeuft also waehrend des Fades weiter.
+   * Wichtig: Der Aufruf wartet, bis der Fade abgeschlossen ist oder durch einen
+   * anderen `setLightBrightness`/`fadeLightBrightness`-Aufruf abgebrochen wurde.
+   * Der Workflow geht erst danach zum naechsten Schritt/Node ueber.
    */
   async fadeLightBrightness(
     startBrightness: number,
@@ -109,33 +116,56 @@ export abstract class DeviceFanLightDimmer extends DeviceFanLight {
     const delta = end - start;
     const { steps, intervalMs } = computeFadeSchedule(duration, delta);
 
-    let stepIndex = 1;
-    const tick = async () => {
-      try {
-        const progress = stepIndex / steps;
-        const isLast = stepIndex >= steps;
-        const next = isLast ? end : clampBrightness(Math.round(start + delta * progress));
-        await this.setLightBrightnessFromFade(next, execute, trigger);
-        if (isLast) {
-          FADE_TIMERS.delete(this);
+    return new Promise<void>((resolve) => {
+      const finish = () => {
+        FADE_TIMERS.delete(this);
+        FADE_RESOLVERS.delete(this);
+        resolve();
+      };
+      FADE_RESOLVERS.set(this, finish);
+
+      let stepIndex = 1;
+      const tick = async () => {
+        if (FADE_RESOLVERS.get(this) !== finish) {
           return;
         }
-        stepIndex += 1;
-        FADE_TIMERS.set(this, setTimeout(tick, intervalMs));
-      } catch {
-        FADE_TIMERS.delete(this);
-      }
-    };
+        try {
+          const progress = stepIndex / steps;
+          const isLast = stepIndex >= steps;
+          const next = isLast ? end : clampBrightness(Math.round(start + delta * progress));
+          await this.setLightBrightnessFromFade(next, execute, trigger);
+          if (FADE_RESOLVERS.get(this) !== finish) {
+            return;
+          }
+          if (isLast) {
+            finish();
+            return;
+          }
+          stepIndex += 1;
+          FADE_TIMERS.set(this, setTimeout(tick, intervalMs));
+        } catch {
+          finish();
+        }
+      };
 
-    FADE_TIMERS.set(this, setTimeout(tick, intervalMs));
+      FADE_TIMERS.set(this, setTimeout(tick, intervalMs));
+    });
   }
 
-  /** Bricht einen ggf. laufenden Fade ab. */
+  /**
+   * Bricht einen ggf. laufenden Fade ab. Loest gleichzeitig das wartende
+   * `fadeLightBrightness`-Promise auf, damit der Workflow nicht haengen bleibt.
+   */
   cancelLightBrightnessFade(): void {
     const timer = FADE_TIMERS.get(this);
     if (timer) {
       clearTimeout(timer);
       FADE_TIMERS.delete(this);
+    }
+    const resolver = FADE_RESOLVERS.get(this);
+    if (resolver) {
+      FADE_RESOLVERS.delete(this);
+      resolver();
     }
   }
 
