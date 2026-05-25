@@ -28,15 +28,19 @@ export class HueTemperatureSensor extends DeviceTemperature {
   }
 
   async updateValues(): Promise<void> {
-    logger.info("Update die Werte fuer {} ", this.id);
-    if (!this.hueDeviceController) {
-      logger.warn(
-        "HueDeviceController ist null - kann Temperaturwert nicht initialisieren fuer {}",
-        this.id
+    if (!this.hueDeviceController || !this.bridgeId || !this.hueResourceId) {
+      logger.debug(
+        { deviceId: this.id, hasController: !!this.hueDeviceController, bridgeId: this.bridgeId, hueResourceId: this.hueResourceId },
+        "HueTemperatureSensor.updateValues uebersprungen"
       );
       return;
     }
-    // HueDeviceController in Node ist aktuell stubbed.
+    const status = await this.hueDeviceController.getTemperature(this.bridgeId, this.hueResourceId);
+    if (!status || typeof status.temperature !== "number") return;
+    const rounded = Math.round(status.temperature);
+    if (this.temperature !== rounded) {
+      await this.setTemperature(rounded, false);
+    }
   }
 
   protected async executeSetTemperature(temperature: number): Promise<void> {

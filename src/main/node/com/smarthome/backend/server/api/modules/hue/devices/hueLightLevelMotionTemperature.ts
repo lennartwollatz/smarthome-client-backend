@@ -34,19 +34,45 @@ export class HueLightLevelMotionTemperature extends DeviceLightLevelMotionTemper
   }
 
   async updateValues(): Promise<void> {
-    if (!this.hueDeviceController || !this.bridgeId || !this.motionRid) {
-      logger.warn("HueDeviceController ist null - kann Werte nicht initialisieren fuer {}", this.id);
+    if (!this.hueDeviceController || !this.bridgeId) {
+      logger.debug(
+        { deviceId: this.id, hasController: !!this.hueDeviceController, bridgeId: this.bridgeId },
+        "HueLightLevelMotionTemperature.updateValues uebersprungen"
+      );
       return;
     }
-    const status = await this.hueDeviceController.getMotion(this.bridgeId, this.motionRid);
-    if (!status) return;
-    if (status.sensitivity_max > 0) {
-      this.max_sensitivity = status.sensitivity_max;
+
+    if (this.motionRid) {
+      const status = await this.hueDeviceController.getMotion(this.bridgeId, this.motionRid);
+      if (status) {
+        if (status.sensitivity_max > 0) {
+          this.max_sensitivity = status.sensitivity_max;
+        }
+        await this.setSensibility(
+          rawSensitivityToPercent(status.sensitivity, status.sensitivity_max),
+          false
+        );
+      }
     }
-    await this.setSensibility(
-      rawSensitivityToPercent(status.sensitivity, status.sensitivity_max),
-      false
-    );
+
+    if (this.temperatureRid) {
+      const status = await this.hueDeviceController.getTemperature(this.bridgeId, this.temperatureRid);
+      if (status && typeof status.temperature === "number") {
+        const rounded = Math.round(status.temperature);
+        if (this.temperature !== rounded) {
+          await this.setTemperature(rounded, false);
+        }
+      }
+    }
+
+    if (this.lightLevelRid) {
+      const status = await this.hueDeviceController.getLightLevel(this.bridgeId, this.lightLevelRid);
+      if (status && typeof status.lightLevel === "number") {
+        if (this.lightLevel !== status.lightLevel) {
+          await this.setLightLevel(status.lightLevel, false);
+        }
+      }
+    }
   }
 
   protected async executeSetSensibility(sensitivity: number): Promise<void> {

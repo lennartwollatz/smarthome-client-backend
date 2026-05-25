@@ -28,8 +28,30 @@ type HueDeviceWithResources = Device & {
   temperatureRid?: string;
 };
 
+type StaleSensorMetric = "temperature" | "lightLevel";
+
+/**
+ * Schwelle (ms), nach der ein Sensor (Temperatur/Lichtintensität) ohne
+ * eingehende Hue-Events als "stale" gilt und aktiv per HTTP nachgefragt wird.
+ */
+const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+
+/**
+ * Wie oft der Watchdog die letzten Eventzeiten prüft.
+ */
+const STALE_CHECK_INTERVAL_MS = 60 * 1000;
+
 export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeController, HueEvent> {
   private repository: JsonRepository<HueBridgeDiscovered>;
+  /**
+   * Letzter Zeitpunkt (ms), zu dem ein Event für ein Device + Metrik
+   * verarbeitet wurde. Wird im Watchdog gegen `STALE_THRESHOLD_MS` geprüft.
+   * Key: `deviceId`, innerer Key: Metrik ("temperature" | "lightLevel").
+   */
+  private lastEventTime: Map<string, Map<StaleSensorMetric, number>> = new Map();
+  private staleWatchdogTimer?: NodeJS.Timeout;
+  /** Verhindert, dass für dasselbe Sensor-Device mehrere Pollings parallel laufen. */
+  private inflightPolls: Set<string> = new Set();
 
   constructor(managerId:string, controller: HueBridgeController, deviceManager: DeviceManager, databaseManager: DatabaseManager) {
     super(managerId, HUECONFIG.id, controller, deviceManager);
@@ -43,18 +65,128 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
         this.controller.startEventStream(bridge, callback);
       }
     }
+    this.initialiseLastEventTimes();
+    this.startStaleWatchdog();
   }
 
   protected async stopEventStream(): Promise<void> {
+    this.stopStaleWatchdog();
     const bridges = this.repository.findAll();
     for (const bridge of bridges) {
       this.controller.stopEventStream(bridge);
     }
   }
 
+  /**
+   * Setzt für alle bekannten Hue-Sensoren mit Temperatur/Lichtintensität die
+   * `lastEventTime` initial auf "jetzt". Dadurch beginnt die 5-Min-Frist
+   * erst ab Start des EventStream-Managers; ein sofortiges Polling wird
+   * vermieden, falls die Bridge gerade keine Events schickt.
+   */
+  private initialiseLastEventTimes(): void {
+    const now = Date.now();
+    for (const device of this.deviceManager.getDevicesForModule(HUECONFIG.id)) {
+      const d = device as HueDeviceWithResources;
+      if (!d.id) continue;
+      const metrics = new Map<StaleSensorMetric, number>();
+      if (d.temperatureRid || (d.hueResourceId && this.isTemperatureSensor(d))) {
+        metrics.set("temperature", now);
+      }
+      if (d.lightLevelRid || (d.hueResourceId && this.isLightLevelSensor(d))) {
+        metrics.set("lightLevel", now);
+      }
+      if (metrics.size > 0) {
+        this.lastEventTime.set(d.id, metrics);
+      }
+    }
+  }
+
+  private isTemperatureSensor(device: HueDeviceWithResources): boolean {
+    return (device as { temperature?: number }).temperature !== undefined;
+  }
+
+  private isLightLevelSensor(device: HueDeviceWithResources): boolean {
+    return (device as { lightLevel?: number }).lightLevel !== undefined;
+  }
+
+  private startStaleWatchdog(): void {
+    if (this.staleWatchdogTimer) return;
+    this.staleWatchdogTimer = setInterval(() => {
+      void this.checkStaleSensors();
+    }, STALE_CHECK_INTERVAL_MS);
+  }
+
+  private stopStaleWatchdog(): void {
+    if (this.staleWatchdogTimer) {
+      clearInterval(this.staleWatchdogTimer);
+      this.staleWatchdogTimer = undefined;
+    }
+    this.inflightPolls.clear();
+  }
+
+  private markEventReceived(deviceId: string, metric: StaleSensorMetric): void {
+    let metrics = this.lastEventTime.get(deviceId);
+    if (!metrics) {
+      metrics = new Map<StaleSensorMetric, number>();
+      this.lastEventTime.set(deviceId, metrics);
+    }
+    metrics.set(metric, Date.now());
+  }
+
+  /**
+   * Iteriert über alle bekannten Sensor-Devices und löst für jene ein
+   * Polling über {@link Device.updateValues} aus, deren letztes Event für
+   * Temperatur bzw. Lichtintensität älter als {@link STALE_THRESHOLD_MS} ist.
+   */
+  private async checkStaleSensors(): Promise<void> {
+    const now = Date.now();
+    for (const [deviceId, metrics] of this.lastEventTime.entries()) {
+      let stale = false;
+      for (const [, lastTime] of metrics.entries()) {
+        if (now - lastTime > STALE_THRESHOLD_MS) {
+          stale = true;
+          break;
+        }
+      }
+      if (!stale) continue;
+      if (this.inflightPolls.has(deviceId)) continue;
+      this.inflightPolls.add(deviceId);
+      void this.pollSensor(deviceId, metrics).finally(() => {
+        this.inflightPolls.delete(deviceId);
+      });
+    }
+  }
+
+  private async pollSensor(deviceId: string, metrics: Map<StaleSensorMetric, number>): Promise<void> {
+    const device = this.deviceManager.getDevice(deviceId);
+    if (!device) {
+      this.lastEventTime.delete(deviceId);
+      return;
+    }
+    const updatable = device as Device & { updateValues?: () => Promise<void> };
+    if (typeof updatable.updateValues !== "function") return;
+
+    try {
+      logger.info(
+        { deviceId, metrics: Array.from(metrics.keys()) },
+        "Hue Sensor stale (>5 min ohne Event), erzwinge Refresh"
+      );
+      await updatable.updateValues();
+      // saveDevice triggert recordSensorHistoryIfChanged und sensorHistory:updated Live-Events.
+      this.deviceManager.saveDevice(device);
+    } catch (err) {
+      logger.warn({ err, deviceId }, "Hue Sensor-Refresh fehlgeschlagen");
+    } finally {
+      // Timer zurücksetzen, damit nicht im nächsten Intervall sofort erneut gepollt wird.
+      const now = Date.now();
+      for (const key of metrics.keys()) {
+        metrics.set(key, now);
+      }
+    }
+  }
+
   protected async handleEvent(event: HueEvent): Promise<void> {
     logger.debug({ bridgeId: event.bridgeId, data: event.data }, "Hue Eventstream");
-    console.log("handleEvent: " + JSON.stringify(event));
     const eventData = event.data;
 
     try {
@@ -218,6 +350,10 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
     const device = this.findHueDevice(bridgeId, resourceId);
     if (!device) return;
 
+    if (device.id) {
+      this.markEventReceived(device.id, "temperature");
+    }
+
     const tempObj = (eventData as any).temperature as { temperature?: number } | undefined;
     if (tempObj && typeof tempObj.temperature === "number") {
       const temperature = Math.round(tempObj.temperature);
@@ -231,6 +367,10 @@ export class HueEventStreamManager extends ModuleEventStreamManager<HueBridgeCon
   private updateLightLevelSensorFromEvent(bridgeId: string, resourceId: string, eventData: Record<string, unknown>) {
     const device = this.findHueDevice(bridgeId, resourceId);
     if (!device) return;
+
+    if (device.id) {
+      this.markEventReceived(device.id, "lightLevel");
+    }
 
     const lightObj = (eventData as any).light as { light_level?: number } | undefined;
     if (lightObj && typeof lightObj.light_level === "number") {

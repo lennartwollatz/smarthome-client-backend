@@ -11,6 +11,7 @@ export type LiveUpdateEvent =
   | "action:removed"
   | "actionExecution:updated"
   | "user:updated"
+  | "sensorHistory:updated"
   | "toast";
 
 export type ToastType = "success" | "error" | "info" | "warning";
@@ -19,6 +20,18 @@ export interface ToastPayload {
   message: string;
   type: ToastType;
   duration?: number;
+}
+
+/**
+ * Wird emittiert, sobald ein neuer Datenpunkt in einer Geräte-History
+ * (Sensor- oder Energie-Historie) persistiert wurde. Das Frontend lädt
+ * daraufhin die zugehörigen Charts neu.
+ */
+export type SensorHistoryMetric = "motion" | "temperature" | "lightLevel" | "energy";
+
+export interface SensorHistoryUpdatedPayload {
+  deviceId: string;
+  metric: SensorHistoryMetric;
 }
 
 export class LiveUpdateService {

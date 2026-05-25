@@ -24,6 +24,32 @@ import { ThermostatClient } from "@matter/main/behaviors/thermostat";
 const logger = Logger.get("MatterDeviceController");
 /** Matter.js-Stack (CommissioningController, Protokoll, …): INFO/DEBUG sonst sehr gesprächig */
 Logger.level = LogLevel.NOTICE;
+
+/**
+ * Filter fuer transiente `NoResponseTimeoutError` aus dem matter.js `ExchangeManager`:
+ * Tritt auf, wenn ein gepairtes Matter-Geraet einen Subscription-Report nicht innerhalb
+ * des Default-Timeouts (~11.5s) fertig liefert (typisch bei batteriebetriebenen Sensoren,
+ * kurzen Netz-/Mesh-Aussetzern). matter.js baut die Subscription intern selbststaendig wieder
+ * auf, daher ist die Meldung nur Log-Rauschen und wird hier auf Logger-Ebene unterdrueckt.
+ */
+type MatterLogMessage = { facility?: string; values?: unknown[] };
+const matterDefaultDestination = Logger.destinations["default"] as unknown as {
+  add: (message: MatterLogMessage) => void;
+};
+const matterOriginalAdd = matterDefaultDestination.add.bind(matterDefaultDestination);
+matterDefaultDestination.add = (message: MatterLogMessage): void => {
+  if (message?.facility === "ExchangeManager" && Array.isArray(message.values)) {
+    const isNoResponseTimeout = message.values.some((value) => {
+      if (!(value instanceof Error)) return false;
+      if (value.constructor?.name === "NoResponseTimeoutError") return true;
+      const id = (value as { id?: unknown }).id;
+      return typeof id === "string" && id === "no-response-timeout";
+    });
+    if (isNoResponseTimeout) return;
+  }
+  matterOriginalAdd(message);
+};
+
 const environment = Environment.default;
 const storageService = environment.get(StorageService);
 const environmentId = "1668012345678";

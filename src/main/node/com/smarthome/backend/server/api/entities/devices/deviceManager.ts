@@ -198,6 +198,7 @@ export class DeviceManager implements EntityManager {
     this.wireVacuumCleaningHistory(device);
     if (device instanceof DeviceSwitch) {
       this.trimAndArchiveSwitchEnergyHistory(device);
+      this.emitEnergyHistoryIfChanged(prev, device);
     }
     this.recordSensorHistoryIfChanged(prev, device);
     this.recordVacuumCleaningHistoryIfCompleted(prev, device);
@@ -208,6 +209,39 @@ export class DeviceManager implements EntityManager {
       this.liveUpdateService?.emit("device:updated", device);
     }
     return true;
+  }
+
+  /**
+   * Sendet das Live-Update-Event für Energie-History, falls sich die Anzahl
+   * der Messpunkte in einem der Buttons geändert hat. Liefert Frontends den
+   * Trigger, um Energie-Charts (auch Wochen-/Monatsansicht) nachzuladen.
+   */
+  private emitEnergyHistoryIfChanged(prev: Device | undefined, next: DeviceSwitch): void {
+    if (!this.liveUpdateService || !next.id) return;
+    const prevSwitch = prev instanceof DeviceSwitch ? prev : undefined;
+    let changed = !prevSwitch;
+    if (prevSwitch) {
+      const nextButtons = next.buttons ?? {};
+      const prevButtons = prevSwitch.buttons ?? {};
+      const ids = new Set([...Object.keys(nextButtons), ...Object.keys(prevButtons)]);
+      for (const bid of ids) {
+        const nextLen = nextButtons[bid]?.energyUsages?.length ?? 0;
+        const prevLen = prevButtons[bid]?.energyUsages?.length ?? 0;
+        if (nextLen !== prevLen) {
+          changed = true;
+          break;
+        }
+        const nextLast = nextButtons[bid]?.energyUsages?.[nextLen - 1];
+        const prevLast = prevButtons[bid]?.energyUsages?.[prevLen - 1];
+        if ((nextLast?.time ?? 0) !== (prevLast?.time ?? 0) || (nextLast?.value ?? 0) !== (prevLast?.value ?? 0)) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (changed) {
+      this.liveUpdateService.emit("sensorHistory:updated", { deviceId: next.id, metric: "energy" });
+    }
   }
 
   private recordDeviceChangesIfAny(prev: Device | undefined, device: Device): void {
@@ -593,17 +627,20 @@ export class DeviceManager implements EntityManager {
     const nextMotion = this.readMotion(next);
     if (nextMotion !== undefined && snap.motion !== nextMotion) {
       this.sensorHistory.appendMotion(id, nextMotion, now);
+      this.liveUpdateService?.emit("sensorHistory:updated", { deviceId: id, metric: "motion" });
     }
 
     const nextTemp = this.readTemperature(next);
     const nextGoal = this.readTemperatureGoal(next);
     if (nextTemp !== undefined && (snap.temperature !== nextTemp || snap.temperatureGoal !== nextGoal)) {
       this.sensorHistory.appendTemperature(id, nextTemp, nextGoal, now);
+      this.liveUpdateService?.emit("sensorHistory:updated", { deviceId: id, metric: "temperature" });
     }
 
     const nextLl = this.readLightLevel(next);
     if (nextLl !== undefined && snap.lightLevel !== nextLl) {
       this.sensorHistory.appendLightLevel(id, nextLl, now);
+      this.liveUpdateService?.emit("sensorHistory:updated", { deviceId: id, metric: "lightLevel" });
     }
 
     this.sensorValueSnapshots.set(id, this.readSensorValueSnapshot(next));

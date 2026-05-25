@@ -28,12 +28,18 @@ export class HueLightLevelSensor extends DeviceLightLevel {
   }
 
   async updateValues(): Promise<void> {
-    logger.info("Update die Werte fuer {}", this.id);
-    if (!this.hueDeviceController || !this.id) {
-      logger.warn("HueDeviceController ist null - kann Helligkeitswert nicht initialisieren fuer {}", this.id);
+    if (!this.hueDeviceController || !this.bridgeId || !this.hueResourceId) {
+      logger.debug(
+        { deviceId: this.id, hasController: !!this.hueDeviceController, bridgeId: this.bridgeId, hueResourceId: this.hueResourceId },
+        "HueLightLevelSensor.updateValues uebersprungen"
+      );
       return;
     }
-    // HueDeviceController in Node ist aktuell stubbed.
+    const status = await this.hueDeviceController.getLightLevel(this.bridgeId, this.hueResourceId);
+    if (!status || typeof status.lightLevel !== "number") return;
+    if (this.lightLevel !== status.lightLevel) {
+      await this.setLightLevel(status.lightLevel, false);
+    }
   }
 
   getBridgeId() {
