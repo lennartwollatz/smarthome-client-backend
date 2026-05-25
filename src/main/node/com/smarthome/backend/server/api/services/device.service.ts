@@ -38,6 +38,38 @@ export function createDeviceRouter(deps: ServerDeps) {
     res.status(200).json({ success: true, ...data });
   });
 
+  /**
+   * Zeit-Intervalle, in denen mindestens ein Licht im selben Raum wie das angegebene Sensor-Gerät an war.
+   * Query: range=day|week|month
+   */
+  router.get("/:deviceId/room-light-history", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const rangeRaw = typeof req.query["range"] === "string" ? req.query["range"] : "day";
+    const range = rangeRaw === "week" || rangeRaw === "month" ? rangeRaw : "day";
+    const data = deps.deviceManager.getRoomLightHistory(deviceId, range);
+    if (data == null) {
+      res.status(404).json({ success: false, error: "Gerät nicht gefunden" });
+      return;
+    }
+    res.status(200).json({ success: true, range, ...data });
+  });
+
+  /**
+   * Sollwert-Verlauf des Thermostats im gleichen Raum wie das angegebene Gerät.
+   * Query: range=day|week|month
+   */
+  router.get("/:deviceId/room-thermostat-goal-history", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const rangeRaw = typeof req.query["range"] === "string" ? req.query["range"] : "day";
+    const range = rangeRaw === "week" || rangeRaw === "month" ? rangeRaw : "day";
+    const data = deps.deviceManager.getRoomThermostatGoalHistory(deviceId, range);
+    if (data == null) {
+      res.status(404).json({ success: false, error: "Gerät nicht gefunden" });
+      return;
+    }
+    res.status(200).json({ success: true, range, ...data });
+  });
+
   /** Energieverlauf (kWh pro Mess-Slot), Live 48h + optional Archiv. Query: from, to (ms), buttonId, includeArchive=1 */
   router.get("/:deviceId/energy-history", (req, res) => {
     const deviceId = req.params.deviceId;

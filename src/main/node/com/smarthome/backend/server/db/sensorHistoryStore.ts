@@ -19,7 +19,7 @@ export type DeviceSensorHistoryData = {
 export type SensorHistoryMetric = "motion" | "temperature" | "lightLevel";
 export type SensorHistoryRange = "day" | "week" | "month";
 
-function rangeBounds(range: SensorHistoryRange, now = Date.now()): { fromMs: number; toMs: number } {
+export function rangeBounds(range: SensorHistoryRange, now = Date.now()): { fromMs: number; toMs: number } {
   const toMs = now;
   const start = new Date(now);
   if (range === "day") {

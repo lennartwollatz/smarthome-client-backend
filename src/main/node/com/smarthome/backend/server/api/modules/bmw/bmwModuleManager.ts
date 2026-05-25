@@ -19,8 +19,26 @@ import { isBmwTripCategory, type BmwTripCategory } from "./bmwCarTripCategory.js
 import { applyTripCategoriesToEntries } from "./bmwCarTripCategoryApplier.js";
 import { buildGroupedTripEntriesFast } from "./bmwCarTripEnricher.js";
 import { computeTripYearSummary, yearBoundsMs } from "./bmwCarTripYearSummary.js";
+import { BMWCarHomeStore, type BmwCarHome } from "./bmwCarHomeStore.js";
+import {
+  BMWCarLearnedPlacesStore,
+  type BmwLearnedPlace
+} from "./bmwCarLearnedPlacesStore.js";
+import {
+  autoCategorizeTripEntries,
+  observationsFromCategorizedEntry
+} from "./bmwCarTripAutoCategorizer.js";
+import type { BmwCarTripEntry } from "./bmwCarTripGrouper.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { BMW_TRACKED_TELEMETRY_KEYS, BMW_TELEMETRY_KEY_META } from "./bmwCarDataTelemetryKeys.js";
+
+/** Extrahiert die Start-ms aus einer entry-/group-id (`trip-<ms>` oder `group-trip-<ms>`). */
+function parseEntryStartMs(entryId: string): number | null {
+  const match = entryId.match(/trip-(\d+)$/);
+  if (!match) return null;
+  const ms = Number(match[1]);
+  return Number.isFinite(ms) ? ms : null;
+}
 
 export class BMWModuleManager extends ModuleManager<
   BMWEventStreamManager,
@@ -35,6 +53,8 @@ export class BMWModuleManager extends ModuleManager<
   private tokenStore: BMWTokenStore;
   private vehicleNamesStore: BMWVehicleNamesStore;
   private tripCategoriesStore: BMWCarTripCategoriesStore;
+  private homeStore: BMWCarHomeStore;
+  private learnedPlacesStore: BMWCarLearnedPlacesStore;
   private readonly registeredVins = new Set<string>();
 
   constructor(databaseManager: DatabaseManager, deviceManager: DeviceManager, eventManager: EventManager) {
@@ -42,6 +62,8 @@ export class BMWModuleManager extends ModuleManager<
     const credentialsStore = new BMWCredentialsStore(databaseManager);
     const vehicleNamesStore = new BMWVehicleNamesStore(databaseManager);
     const tripCategoriesStore = new BMWCarTripCategoriesStore(databaseManager);
+    const homeStore = new BMWCarHomeStore(databaseManager);
+    const learnedPlacesStore = new BMWCarLearnedPlacesStore(databaseManager);
     const telemetryHistory = deviceManager.getBmwTelemetryHistoryStore();
     const deviceController = new BMWDeviceController(tokenStore, credentialsStore, telemetryHistory);
     const deviceDiscover = new BMWDeviceDiscover(databaseManager, deviceController);
@@ -51,6 +73,8 @@ export class BMWModuleManager extends ModuleManager<
     this.tokenStore = tokenStore;
     this.vehicleNamesStore = vehicleNamesStore;
     this.tripCategoriesStore = tripCategoriesStore;
+    this.homeStore = homeStore;
+    this.learnedPlacesStore = learnedPlacesStore;
 
     deviceController.setVinDeviceResolver(vin => {
       const ids: string[] = [];
@@ -335,8 +359,7 @@ export class BMWModuleManager extends ModuleManager<
       .getTrips(deviceId, opts.fromMs, opts.toMs);
     const { buildGroupedTripEntries } = await import("./bmwCarTripEnricher.js");
     const entries = await buildGroupedTripEntries(trips);
-    const categories = this.tripCategoriesStore.getAllForDevice(deviceId);
-    return { entries: applyTripCategoriesToEntries(entries, categories) };
+    return { entries: this.applyCategoriesAndAuto(deviceId, entries) };
   }
 
   setTripCategory(
@@ -346,11 +369,18 @@ export class BMWModuleManager extends ModuleManager<
   ): { success: boolean; category?: BmwTripCategory } | null {
     const car = this.deviceManager.getDevice(deviceId);
     if (!car || !(car instanceof BMWCar)) return null;
-    if (!entryId.trim()) return { success: false };
+    const trimmed = entryId.trim();
+    if (!trimmed) return { success: false };
     if (category != null && !isBmwTripCategory(category)) {
       return { success: false };
     }
-    this.tripCategoriesStore.setCategory(deviceId, entryId.trim(), category);
+    const previous = this.tripCategoriesStore.getCategory(deviceId, trimmed);
+    this.tripCategoriesStore.setCategory(deviceId, trimmed, category);
+    try {
+      this.updateLearnedPlacesForEntry(deviceId, trimmed, previous, category);
+    } catch (err) {
+      logger.warn({ err, deviceId, entryId: trimmed }, "BMW: gelernte Orte konnten nicht aktualisiert werden");
+    }
     return { success: true, category: category ?? undefined };
   }
 
@@ -371,10 +401,100 @@ export class BMWModuleManager extends ModuleManager<
       .getBmwTelemetryHistoryStore()
       .getTrips(deviceId, fromMs, toMs);
     const entries = buildGroupedTripEntriesFast(rawTrips);
-    const categories = this.tripCategoriesStore.getAllForDevice(deviceId);
-    const withCategories = applyTripCategoriesToEntries(entries, categories);
+    const withCategories = this.applyCategoriesAndAuto(deviceId, entries);
 
     return computeTripYearSummary(withCategories, y);
+  }
+
+  getHome(deviceId: string): BmwCarHome | null {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return null;
+    return this.homeStore.getHome(deviceId) ?? null;
+  }
+
+  setHome(
+    deviceId: string,
+    latitude: number,
+    longitude: number,
+    label?: string
+  ): BmwCarHome | null {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return null;
+    return this.homeStore.setHome(deviceId, latitude, longitude, label);
+  }
+
+  clearHome(deviceId: string): boolean {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return false;
+    this.homeStore.clearHome(deviceId);
+    return true;
+  }
+
+  getLearnedPlaces(deviceId: string): BmwLearnedPlace[] | null {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return null;
+    return this.learnedPlacesStore.getAll(deviceId);
+  }
+
+  deleteLearnedPlace(deviceId: string, placeId: string): boolean {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return false;
+    return this.learnedPlacesStore.deletePlace(deviceId, placeId);
+  }
+
+  /** Wendet manuelle Kategorien an und ergänzt fehlende Kategorien anhand gelernter Orte. */
+  private applyCategoriesAndAuto(
+    deviceId: string,
+    entries: BmwCarTripEntry[]
+  ): BmwCarTripEntry[] {
+    const categories = this.tripCategoriesStore.getAllForDevice(deviceId);
+    const withManual = applyTripCategoriesToEntries(entries, categories);
+    const home = this.homeStore.getHome(deviceId);
+    return autoCategorizeTripEntries(withManual, {
+      home: home ?? null,
+      lookupPlace: (lat, lng) => this.learnedPlacesStore.findNearest(deviceId, lat, lng)
+    });
+  }
+
+  /**
+   * Aktualisiert die gelernten Orte nach einer User-Kategorisierung. Sucht den entry
+   * anhand der entryId-Konvention `trip-<startMs>` / `group-trip-<startMs>` in einem
+   * konservativen Zeitfenster (±7 Tage) der Telemetrie-Historie und lernt jeden
+   * Nicht-Home-Endpunkt der Fahrt.
+   */
+  private updateLearnedPlacesForEntry(
+    deviceId: string,
+    entryId: string,
+    previous: BmwTripCategory | undefined,
+    next: BmwTripCategory | null
+  ): void {
+    if (previous === (next ?? undefined)) return;
+
+    const startMs = parseEntryStartMs(entryId);
+    if (startMs == null) return;
+
+    const windowMs = 7 * 24 * 60 * 60 * 1000;
+    const trips = this.deviceManager
+      .getBmwTelemetryHistoryStore()
+      .getTrips(deviceId, startMs - windowMs, startMs + windowMs);
+    if (trips.length === 0) return;
+
+    const entries = buildGroupedTripEntriesFast(trips);
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    const home = this.homeStore.getHome(deviceId);
+    const observations = observationsFromCategorizedEntry(entry, home);
+    if (observations.length === 0) return;
+
+    for (const obs of observations) {
+      if (previous && previous !== next) {
+        this.learnedPlacesStore.retractObservation(deviceId, obs.lat, obs.lng, previous);
+      }
+      if (next) {
+        this.learnedPlacesStore.registerObservation(deviceId, obs.lat, obs.lng, next, obs.label);
+      }
+    }
   }
 
   getTelemetryHistory(

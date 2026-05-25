@@ -15,6 +15,8 @@ export type BmwCarTripSegment = BmwCarTrip & {
   /** Pause bis zur nächsten Etappe (nur bei gruppierten Fahrten, nicht letzte Etappe). */
   stopDurationMin?: number;
   tripCategory?: BmwTripCategory;
+  /** Kategorie wurde automatisch (über gelernte Orte) ermittelt, nicht vom User gesetzt. */
+  autoCategory?: boolean;
 };
 
 export type BmwCarTripEntry = {
@@ -41,6 +43,8 @@ export type BmwCarTripEntry = {
   segmentMarkers: BmwCarTripSegmentMarker[];
   segments: BmwCarTripSegment[];
   tripCategory?: BmwTripCategory;
+  /** Kategorie wurde automatisch (über gelernte Orte) ermittelt, nicht vom User gesetzt. */
+  autoCategory?: boolean;
 };
 
 function round1(n: number): number {

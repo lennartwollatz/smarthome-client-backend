@@ -96,10 +96,11 @@ export function invokeDeviceMethodOnDevice(device: Device, methodName: string, v
         result = fn.call(device, param1, param2);
       }
     } else {
-      if (fn.length >= 4) {
-        result = fn.call(device, ...values, true);
+      const convertedValues = values.map(v => convertValue(v));
+      if (fn.length > convertedValues.length) {
+        result = fn.call(device, ...convertedValues, true);
       } else {
-        result = fn.call(device, ...values);
+        result = fn.call(device, ...convertedValues);
       }
     }
     try {

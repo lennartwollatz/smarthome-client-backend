@@ -222,6 +222,69 @@ export function createBMWModuleRouter(deps: ServerDeps) {
     res.status(200).json({ categories });
   });
 
+  router.get("/devices/:deviceId/home", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const device = deps.deviceManager.getDevice(deviceId);
+    if (!device || device.moduleId !== "bmw") {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json({ home: bmwModule.getHome(deviceId) });
+  });
+
+  router.put("/devices/:deviceId/home", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const body = req.body ?? {};
+    const lat = typeof body.latitude === "number" ? body.latitude : Number(body.latitude);
+    const lng = typeof body.longitude === "number" ? body.longitude : Number(body.longitude);
+    const label = typeof body.label === "string" ? body.label : undefined;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      res.status(400).json({ error: "latitude und longitude (Zahlen) sind erforderlich" });
+      return;
+    }
+    const home = bmwModule.setHome(deviceId, lat, lng, label);
+    if (!home) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden oder ungültige Koordinaten" });
+      return;
+    }
+    res.status(200).json({ home });
+  });
+
+  router.delete("/devices/:deviceId/home", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const ok = bmwModule.clearHome(deviceId);
+    if (!ok) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json({ success: true });
+  });
+
+  router.get("/devices/:deviceId/learned-places", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const places = bmwModule.getLearnedPlaces(deviceId);
+    if (places == null) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json({ places });
+  });
+
+  router.delete("/devices/:deviceId/learned-places/:placeId", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const placeId = req.params.placeId;
+    if (!placeId) {
+      res.status(400).json({ error: "placeId erforderlich" });
+      return;
+    }
+    const ok = bmwModule.deleteLearnedPlace(deviceId, placeId);
+    if (!ok) {
+      res.status(404).json({ error: "Ort oder Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json({ success: true });
+  });
+
   router.post("/devices/:deviceId/refresh", async (req, res) => {
     const deviceId = req.params.deviceId;
     if (!deviceId) {

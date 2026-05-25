@@ -19,12 +19,16 @@ import { EnergyHistoryArchiveStore } from "../../../db/energyHistoryArchiveStore
 import { BmwCarTelemetryHistoryStore } from "../../../db/bmwCarTelemetryHistoryStore.js";
 import {
   SensorHistoryStore,
+  rangeBounds,
   type SensorHistoryMetric,
   type SensorHistoryRange,
   type MotionHistoryEntry,
   type TemperatureHistoryPoint,
   type LightLevelHistoryPoint
 } from "../../../db/sensorHistoryStore.js";
+import { DeviceLight } from "../../../../model/devices/DeviceLight.js";
+import { DeviceWeather } from "../../../../model/devices/DeviceWeather.js";
+import type { EventLogEntry } from "../../../audit/eventLogEntry.js";
 import { VacuumCleaningHistoryStore } from "../../../db/vacuumCleaningHistoryStore.js";
 import { DEVICE_MODE, DeviceVacuumCleaner } from "../../../../model/devices/DeviceVacuumCleaner.js";
 import { serializeDeviceForApi } from "./deviceSerialize.js";
@@ -615,7 +619,11 @@ export class DeviceManager implements EntityManager {
 
   private readTemperature(device: Device | undefined): number | undefined {
     if (!device) return undefined;
-    if (device instanceof DeviceTemperature || device instanceof DeviceLightLevelMotionTemperature) {
+    if (
+      device instanceof DeviceTemperature ||
+      device instanceof DeviceLightLevelMotionTemperature ||
+      device instanceof DeviceWeather
+    ) {
       const t = device.temperature;
       return t !== undefined && Number.isFinite(t) ? t : undefined;
     }
@@ -661,7 +669,13 @@ export class DeviceManager implements EntityManager {
     }
 
     if (metric === "temperature") {
-      if (!(device instanceof DeviceTemperature || device instanceof DeviceLightLevelMotionTemperature)) {
+      if (
+        !(
+          device instanceof DeviceTemperature ||
+          device instanceof DeviceLightLevelMotionTemperature ||
+          device instanceof DeviceWeather
+        )
+      ) {
         return null;
       }
       let points = this.sensorHistory.getTemperature(deviceId, range);
@@ -697,5 +711,220 @@ export class DeviceManager implements EntityManager {
     }
 
     return null;
+  }
+
+  /**
+   * Liefert zusammengeführte "Licht-an"-Intervalle für alle Lichter (DeviceLight* und Switch-Buttons
+   * mit `connectedToLight`) im Raum des angegebenen Sensor-Geräts. Quelle sind die Events
+   * `lightOn`/`lightOff` bzw. `switchButtonOn`/`switchButtonOff` aus dem EventLogStore.
+   */
+  getRoomLightHistory(
+    sensorDeviceId: string,
+    range: SensorHistoryRange
+  ): { fromMs: number; toMs: number; intervals: { from: number; to: number }[] } | null {
+    const sensor = this.devices.get(sensorDeviceId);
+    if (!sensor) return null;
+    const roomId = sensor.room;
+    const { fromMs, toMs } = rangeBounds(range);
+    if (!roomId) {
+      return { fromMs, toMs, intervals: [] };
+    }
+
+    const lightDevices: Device[] = [];
+    this.devices.forEach(d => {
+      if (d.room !== roomId) return;
+      if (d instanceof DeviceLight) {
+        lightDevices.push(d);
+        return;
+      }
+      if (d instanceof DeviceSwitch) {
+        const hasLightButton = Object.values((d as DeviceSwitch).buttons ?? {}).some(
+          b => (b as { connectedToLight?: boolean })?.connectedToLight === true
+        );
+        if (hasLightButton) lightDevices.push(d);
+      }
+    });
+
+    if (lightDevices.length === 0) {
+      return { fromMs, toMs, intervals: [] };
+    }
+
+    type RawEvent = { time: number; on: boolean; sourceKey: string };
+    const events: RawEvent[] = [];
+    const sourceKeys = new Set<string>();
+    const sourceCurrentlyOn = new Map<string, boolean>();
+
+    const pushEvents = (entries: EventLogEntry[], on: boolean, sourceKey: (e: EventLogEntry) => string | undefined) => {
+      for (const e of entries) {
+        const key = sourceKey(e);
+        if (!key) continue;
+        events.push({ time: e.timestamp, on, sourceKey: key });
+        sourceKeys.add(key);
+      }
+    };
+
+    for (const dev of lightDevices) {
+      if (dev instanceof DeviceLight) {
+        const key = dev.id;
+        sourceKeys.add(key);
+        sourceCurrentlyOn.set(key, dev.on === true);
+        const onLog = this.eventManager.queryEventLog({
+          deviceId: dev.id,
+          eventType: "lightOn",
+          from: fromMs,
+          to: toMs,
+          limit: 500
+        });
+        const offLog = this.eventManager.queryEventLog({
+          deviceId: dev.id,
+          eventType: "lightOff",
+          from: fromMs,
+          to: toMs,
+          limit: 500
+        });
+        pushEvents(onLog.items, true, () => key);
+        pushEvents(offLog.items, false, () => key);
+      } else if (dev instanceof DeviceSwitch) {
+        const buttons = (dev as DeviceSwitch).buttons ?? {};
+        for (const [buttonId, btn] of Object.entries(buttons)) {
+          if (!(btn as { connectedToLight?: boolean })?.connectedToLight) continue;
+          const key = `${dev.id}#${buttonId}`;
+          sourceKeys.add(key);
+          sourceCurrentlyOn.set(key, (btn as { on?: boolean })?.on === true);
+        }
+        const onLog = this.eventManager.queryEventLog({
+          deviceId: dev.id,
+          eventType: "switchButtonOn",
+          from: fromMs,
+          to: toMs,
+          limit: 500
+        });
+        const offLog = this.eventManager.queryEventLog({
+          deviceId: dev.id,
+          eventType: "switchButtonOff",
+          from: fromMs,
+          to: toMs,
+          limit: 500
+        });
+        const extractKey = (e: EventLogEntry): string | undefined => {
+          const bidRes = e.results.find(r => r.name === "buttonId");
+          const bid = typeof bidRes?.value === "string" ? bidRes.value : undefined;
+          if (!bid) return undefined;
+          const btn = buttons[bid] as { connectedToLight?: boolean } | undefined;
+          if (!btn?.connectedToLight) return undefined;
+          return `${dev.id}#${bid}`;
+        };
+        pushEvents(onLog.items, true, extractKey);
+        pushEvents(offLog.items, false, extractKey);
+      }
+    }
+
+    events.sort((a, b) => a.time - b.time);
+
+    const intervalsBySource = new Map<string, { from: number; to: number }[]>();
+    const openStart = new Map<string, number>();
+    const seenEvent = new Set<string>();
+
+    for (const ev of events) {
+      if (!seenEvent.has(ev.sourceKey) && !ev.on && !openStart.has(ev.sourceKey)) {
+        openStart.set(ev.sourceKey, fromMs);
+      }
+      seenEvent.add(ev.sourceKey);
+
+      if (ev.on) {
+        if (!openStart.has(ev.sourceKey)) {
+          openStart.set(ev.sourceKey, ev.time);
+        }
+      } else {
+        const start = openStart.get(ev.sourceKey);
+        if (start !== undefined) {
+          const list = intervalsBySource.get(ev.sourceKey) ?? [];
+          list.push({ from: start, to: ev.time });
+          intervalsBySource.set(ev.sourceKey, list);
+          openStart.delete(ev.sourceKey);
+        }
+      }
+    }
+
+    for (const key of sourceKeys) {
+      const currentlyOn = sourceCurrentlyOn.get(key) === true;
+      if (currentlyOn) {
+        const start = openStart.get(key) ?? (seenEvent.has(key) ? toMs : fromMs);
+        if (start < toMs) {
+          const list = intervalsBySource.get(key) ?? [];
+          list.push({ from: start, to: toMs });
+          intervalsBySource.set(key, list);
+        }
+        openStart.delete(key);
+      } else if (openStart.has(key)) {
+        const start = openStart.get(key)!;
+        const list = intervalsBySource.get(key) ?? [];
+        list.push({ from: start, to: toMs });
+        intervalsBySource.set(key, list);
+        openStart.delete(key);
+      }
+    }
+
+    const all: { from: number; to: number }[] = [];
+    for (const list of intervalsBySource.values()) all.push(...list);
+    all.sort((a, b) => a.from - b.from);
+
+    const merged: { from: number; to: number }[] = [];
+    for (const iv of all) {
+      if (iv.to <= iv.from) continue;
+      const last = merged[merged.length - 1];
+      if (!last || iv.from > last.to) {
+        merged.push({ from: iv.from, to: iv.to });
+      } else {
+        last.to = Math.max(last.to, iv.to);
+      }
+    }
+
+    return { fromMs, toMs, intervals: merged };
+  }
+
+  /**
+   * Sollwert-Verlauf eines Thermostats im gleichen Raum wie das angegebene Gerät. Das anzeigende
+   * Gerät selbst (z. B. wenn es selbst ein Thermostat ist) wird ausgeschlossen, damit der eigene
+   * Sollwert nicht doppelt erscheint.
+   */
+  getRoomThermostatGoalHistory(
+    deviceId: string,
+    range: SensorHistoryRange
+  ): { fromMs: number; toMs: number; thermostatId: string | null; points: { time: number; goal: number }[] } | null {
+    const device = this.devices.get(deviceId);
+    if (!device) return null;
+    const roomId = device.room;
+    const { fromMs, toMs } = rangeBounds(range);
+    if (!roomId) {
+      return { fromMs, toMs, thermostatId: null, points: [] };
+    }
+
+    let thermostat: DeviceThermostat | undefined;
+    this.devices.forEach(d => {
+      if (thermostat) return;
+      if (d === device) return;
+      if (d.room === roomId && d instanceof DeviceThermostat) {
+        thermostat = d;
+      }
+    });
+
+    if (!thermostat) {
+      return { fromMs, toMs, thermostatId: null, points: [] };
+    }
+
+    const tempHistory = this.sensorHistory.getTemperature(thermostat.id, range);
+    const points = tempHistory
+      .filter(p => p.goal !== undefined && Number.isFinite(p.goal))
+      .map(p => ({ time: p.time, goal: p.goal as number }));
+
+    if (points.length === 0) {
+      const currentGoal = this.readTemperatureGoal(thermostat);
+      if (currentGoal !== undefined) {
+        points.push({ time: toMs, goal: currentGoal });
+      }
+    }
+
+    return { fromMs, toMs, thermostatId: thermostat.id, points };
   }
 }
