@@ -3,7 +3,7 @@ import { JsonRepository } from "./jsonRepository.js";
 import { logger } from "../../logger.js";
 
 /** Rohdaten älter als 35 Tage werden verworfen. */
-const RAW_MAX_AGE_MS = 35 * 24 * 60 * 60 * 1000;
+const RAW_MAX_AGE_MS = 35 * 24 * 60 * 60 * 1000 * 2;
 const MOTION_MAX_ENTRIES = 30;
 
 export type MotionHistoryEntry = { time: number; motion: boolean };

@@ -3,8 +3,8 @@ import { JsonRepository } from "./jsonRepository.js";
 import { logger } from "../../logger.js";
 import { isTrackedTelemetryKey } from "../api/modules/bmw/bmwCarDataTelemetryKeys.js";
 import {
-  BMW_IN_USE_TELEMETRY_KEYS,
   BMW_TRIP_METRIC_KEYS,
+  BMW_TRIP_TRIGGER_KEYS,
   detectTripsFromHistorySeries,
   type BmwCarTrip
 } from "../api/modules/bmw/bmwCarTripDetector.js";
@@ -86,7 +86,7 @@ export class BmwCarTelemetryHistoryStore {
   getAvailableTripMonths(deviceId: string): BmwTripMonth[] {
     const latKey = "vehicle.cabin.infotainment.navigation.currentLocation.latitude";
     const lngKey = "vehicle.cabin.infotainment.navigation.currentLocation.longitude";
-    const keysToScan = [...BMW_IN_USE_TELEMETRY_KEYS, latKey, lngKey, ...BMW_TRIP_METRIC_KEYS];
+    const keysToScan = [...BMW_TRIP_TRIGGER_KEYS, latKey, lngKey, ...BMW_TRIP_METRIC_KEYS];
 
     let row: BmwCarTelemetryHistoryData | undefined;
     try {
@@ -135,7 +135,7 @@ export class BmwCarTelemetryHistoryStore {
       const points = (row.series[key] ?? []).filter(p => p.time >= fromMs && p.time <= toMs);
       if (points.length > 0) series[key] = points;
     }
-    for (const key of [...BMW_IN_USE_TELEMETRY_KEYS, ...BMW_TRIP_METRIC_KEYS]) {
+    for (const key of [...BMW_TRIP_TRIGGER_KEYS, ...BMW_TRIP_METRIC_KEYS]) {
       const points = (row.series[key] ?? []).filter(p => p.time <= toMs);
       if (points.length > 0) series[key] = points;
     }

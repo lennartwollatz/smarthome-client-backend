@@ -31,6 +31,7 @@ import {
 import type { BmwCarTripEntry } from "./bmwCarTripGrouper.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
 import { BMW_TRACKED_TELEMETRY_KEYS, BMW_TELEMETRY_KEY_META } from "./bmwCarDataTelemetryKeys.js";
+import type { EventLogStore } from "../../../db/eventLogStore.js";
 
 /** Extrahiert die Start-ms aus einer entry-/group-id (`trip-<ms>` oder `group-trip-<ms>`). */
 function parseEntryStartMs(entryId: string): number | null {
@@ -57,7 +58,12 @@ export class BMWModuleManager extends ModuleManager<
   private learnedPlacesStore: BMWCarLearnedPlacesStore;
   private readonly registeredVins = new Set<string>();
 
-  constructor(databaseManager: DatabaseManager, deviceManager: DeviceManager, eventManager: EventManager) {
+  constructor(
+    databaseManager: DatabaseManager,
+    deviceManager: DeviceManager,
+    eventManager: EventManager,
+    eventLogStore?: EventLogStore
+  ) {
     const tokenStore = new BMWTokenStore(databaseManager);
     const credentialsStore = new BMWCredentialsStore(databaseManager);
     const vehicleNamesStore = new BMWVehicleNamesStore(databaseManager);
@@ -65,7 +71,12 @@ export class BMWModuleManager extends ModuleManager<
     const homeStore = new BMWCarHomeStore(databaseManager);
     const learnedPlacesStore = new BMWCarLearnedPlacesStore(databaseManager);
     const telemetryHistory = deviceManager.getBmwTelemetryHistoryStore();
-    const deviceController = new BMWDeviceController(tokenStore, credentialsStore, telemetryHistory);
+    const deviceController = new BMWDeviceController(
+      tokenStore,
+      credentialsStore,
+      telemetryHistory,
+      eventLogStore
+    );
     const deviceDiscover = new BMWDeviceDiscover(databaseManager, deviceController);
 
     super(databaseManager, deviceManager, eventManager, deviceController, deviceDiscover);

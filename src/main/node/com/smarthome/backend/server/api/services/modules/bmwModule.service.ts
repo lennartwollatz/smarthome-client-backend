@@ -6,7 +6,12 @@ import { serializeDevicesForApi } from "../../entities/devices/deviceSerialize.j
 
 export function createBMWModuleRouter(deps: ServerDeps) {
   const router = Router();
-  const bmwModule = new BMWModuleManager(deps.databaseManager, deps.deviceManager, deps.eventManager);
+  const bmwModule = new BMWModuleManager(
+    deps.databaseManager,
+    deps.deviceManager,
+    deps.eventManager,
+    deps.eventLogStore
+  );
   deps.deviceManager.registerModuleManager(bmwModule);
 
   router.get("/credentials", (_req, res) => {

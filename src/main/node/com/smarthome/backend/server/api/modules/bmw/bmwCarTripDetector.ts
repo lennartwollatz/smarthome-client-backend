@@ -7,10 +7,17 @@ const FUEL_KEY = "vehicle.drivetrain.fuelSystem.level";
 
 export const BMW_TRIP_METRIC_KEYS = [MILEAGE_KEY, FUEL_KEY] as const;
 
-export const BMW_IN_USE_TELEMETRY_KEYS = [
-  "vehicle.status.car.inUse",
-  "vehicle.status.car.inUseState"
-] as const;
+/** Telematik-Key: Fahrertür vorne links (Trigger für Trip-Ende). */
+export const BMW_DRIVER_DOOR_KEY = "vehicle.cabin.door.row1.driver.isOpen";
+
+/** Trigger-Keys, die die Fahrt-Erkennung benötigt (Türschluss + Tachostand). */
+export const BMW_TRIP_TRIGGER_KEYS = [BMW_DRIVER_DOOR_KEY, MILEAGE_KEY] as const;
+
+/**
+ * Mindeststrecke (in km) zwischen zwei Tür-Schließ-Events, damit ein Trip-Ende
+ * erkannt wird. Darunter zählt das Tür-Event als „nur kurz ausgestiegen".
+ */
+export const BMW_MIN_TRIP_DISTANCE_KM = 1;
 
 /** Max. plausibel angenommene Geschwindigkeit zwischen zwei Punkten (Filter Ausreißer). */
 const MAX_SPEED_KMH = 200;
@@ -38,6 +45,7 @@ export type BmwCarTrip = {
   points: BmwCarTripPoint[];
 };
 
+/** Zeit-Intervall einer erkannten Fahrt (Trip-Start bis Trip-Ende). */
 export type InUseInterval = { startTime: number; endTime: number };
 
 function toNum(v: unknown): number | undefined {
@@ -49,7 +57,7 @@ function toNum(v: unknown): number | undefined {
   return undefined;
 }
 
-function toInUseBool(v: unknown): boolean | undefined {
+function toBool(v: unknown): boolean | undefined {
   if (typeof v === "boolean") return v;
   if (v === "true" || v === 1 || v === "1") return true;
   if (v === "false" || v === 0 || v === "0") return false;
@@ -142,71 +150,88 @@ export function sliceTrackForInterval(
   return filtered;
 }
 
-/** Sammelt Statuswechsel „In Benutzung“ aus der Telemetrie-Historie. */
-export function collectInUseEvents(
+/**
+ * Sammelt Türschluss-Events (true → false) der Fahrertür vorne links aus der
+ * Telemetrie-Historie. Aufeinanderfolgende gleiche Zustände werden ignoriert.
+ */
+export function collectDriverDoorCloseEvents(
   series: Record<string, BmwTelemetryHistoryPoint[]>
-): { time: number; inUse: boolean }[] {
-  const events: { time: number; inUse: boolean }[] = [];
-  for (const key of BMW_IN_USE_TELEMETRY_KEYS) {
-    for (const p of series[key] ?? []) {
-      const inUse = toInUseBool(p.value);
-      if (inUse !== undefined) {
-        events.push({ time: p.time, inUse });
-      }
-    }
-  }
-  events.sort((a, b) => a.time - b.time);
+): { time: number }[] {
+  const points = (series[BMW_DRIVER_DOOR_KEY] ?? [])
+    .slice()
+    .sort((a, b) => a.time - b.time);
 
-  const deduped: { time: number; inUse: boolean }[] = [];
-  for (const e of events) {
-    const last = deduped[deduped.length - 1];
-    if (last && last.time === e.time) {
-      last.inUse = e.inUse;
-    } else {
-      deduped.push({ ...e });
+  const events: { time: number }[] = [];
+  let prevOpen: boolean | undefined;
+  for (const p of points) {
+    const isOpen = toBool(p.value);
+    if (isOpen === undefined) continue;
+    if (prevOpen === true && isOpen === false) {
+      events.push({ time: p.time });
     }
+    prevOpen = isOpen;
   }
-  return deduped;
+  return events;
 }
 
 /**
- * Fahrt-Intervalle: Start wenn Motor an (inUse true), Ende wenn Motor aus (inUse false).
+ * Fahrt-Intervalle anhand der Fahrertür: Ein Trip endet, wenn die Tür vorne links
+ * von „auf" auf „zu" wechselt UND seit dem letzten Tür-zu-Event mindestens
+ * `minTripKm` (Standard: BMW_MIN_TRIP_DISTANCE_KM) gefahren wurden. Türschluss-
+ * Events unterhalb der Schwelle verschieben nur den Anker (Fahrer ist kurz
+ * ausgestiegen, ohne dass eine eigenständige Fahrt vorliegt).
+ *
+ * Trips, deren Ende im Zeitfenster [fromMs, toMs] liegt, werden zurückgegeben;
+ * der Start wird ggf. auf fromMs gekappt.
  */
-export function detectInUseIntervals(
+export function detectTripIntervalsFromDoorEvents(
   series: Record<string, BmwTelemetryHistoryPoint[]>,
   fromMs: number,
-  toMs: number
+  toMs: number,
+  minTripKm: number = BMW_MIN_TRIP_DISTANCE_KM
 ): InUseInterval[] {
-  const events = collectInUseEvents(series);
+  const events = collectDriverDoorCloseEvents(series);
   if (events.length === 0) return [];
 
-  let inUse = false;
-  for (const e of events) {
-    if (e.time <= fromMs) {
-      inUse = e.inUse;
-    } else {
-      break;
-    }
-  }
+  const mileageSeries = series[MILEAGE_KEY] ?? [];
 
+  let anchorTime: number | null = null;
+  let anchorMileage: number | undefined;
   const intervals: InUseInterval[] = [];
-  let tripStart: number | null = inUse ? fromMs : null;
+  /** Toleranz für „keine nennenswerte Bewegung" zwischen zwei Türschluss-Events (in km). */
+  const STATIONARY_TOLERANCE_KM = 0.01;
 
-  for (const e of events) {
-    if (e.time < fromMs) continue;
-    if (e.time > toMs) break;
+  for (const evt of events) {
+    if (evt.time > toMs) break;
+    const mileageAt = lastNumericValueAt(mileageSeries, evt.time);
 
-    if (e.inUse && !inUse) {
-      tripStart = e.time;
-    } else if (!e.inUse && inUse && tripStart != null) {
-      intervals.push({ startTime: tripStart, endTime: e.time });
-      tripStart = null;
+    if (anchorTime == null) {
+      anchorTime = evt.time;
+      anchorMileage = mileageAt;
+      continue;
     }
-    inUse = e.inUse;
-  }
 
-  if (inUse && tripStart != null) {
-    intervals.push({ startTime: tripStart, endTime: toMs });
+    if (mileageAt == null || anchorMileage == null) {
+      continue;
+    }
+
+    const distanceKm = mileageAt - anchorMileage;
+
+    if (distanceKm > minTripKm) {
+      const startTime = Math.max(anchorTime, fromMs);
+      if (evt.time >= fromMs && startTime <= evt.time) {
+        intervals.push({ startTime, endTime: evt.time });
+      }
+      anchorTime = evt.time;
+      anchorMileage = mileageAt;
+    } else if (distanceKm <= STATIONARY_TOLERANCE_KM) {
+      // Auto stand seit dem Anker → neuer Park-Anker. Wird häufig nach echtem
+      // Trip-Ende beim erneuten Einsteigen erreicht.
+      anchorTime = evt.time;
+      anchorMileage = mileageAt;
+    }
+    // Sonst (0 < distance ≤ minTripKm): kurzes Aussteigen während der Fahrt
+    // → Anker bleibt erhalten, damit die Strecke vor dem Stopp Teil des Trips bleibt.
   }
 
   return intervals;
@@ -342,15 +367,16 @@ export function buildTripFromInterval(
 }
 
 /**
- * Erkennt Fahrten der letzten 30 Tage: je Motor-an-Phase („In Benutzung“) eine Fahrt,
- * Strecke und Route aus GPS-Punkten innerhalb des Intervalls.
+ * Erkennt Fahrten anhand der Fahrertür: Jede Tür-zu-Aktion mit mehr als
+ * BMW_MIN_TRIP_DISTANCE_KM seit der vorherigen schließt eine Fahrt ab.
+ * Strecke und Route werden aus GPS-Punkten innerhalb des Intervalls gewonnen.
  */
 export function detectTripsFromHistorySeries(
   series: Record<string, BmwTelemetryHistoryPoint[]>,
   fromMs: number,
   toMs: number
 ): BmwCarTrip[] {
-  const intervals = detectInUseIntervals(series, fromMs, toMs);
+  const intervals = detectTripIntervalsFromDoorEvents(series, fromMs, toMs);
   if (intervals.length === 0) return [];
 
   const track = buildLocationTrack(series);
@@ -362,7 +388,7 @@ export function detectTripsFromHistorySeries(
   return trips.sort((a, b) => b.startTime - a.startTime);
 }
 
-/** @deprecated Nur noch für Tests – Produktion nutzt detectInUseIntervals. */
+/** @deprecated Nur noch für Tests – Produktion nutzt detectTripIntervalsFromDoorEvents. */
 export function detectTripsFromTrack(track: BmwCarTripPoint[]): BmwCarTrip[] {
   if (track.length < 2) return [];
   const start = track[0];

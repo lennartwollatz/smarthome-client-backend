@@ -21,6 +21,10 @@ import {
 import { BmwCarDataMqttHub, type BmwCarDataMqttEnvelope } from "./bmwCarDataMqttHub.js";
 import type { BmwCarTelemetryHistoryStore } from "../../../db/bmwCarTelemetryHistoryStore.js";
 import { isTrackedTelemetryKey } from "./bmwCarDataTelemetryKeys.js";
+import type { EventLogStore } from "../../../db/eventLogStore.js";
+import { EventType } from "../../../events/event-types/EventType.js";
+import { EventSource } from "../../../events/EventSource.js";
+import crypto from "node:crypto";
 
 export type DeviceCodePollApiResult =
   | { status: "success" }
@@ -55,7 +59,8 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
   constructor(
     private readonly tokenStore: BMWTokenStore,
     private readonly credentialsStore: BMWCredentialsStore,
-    private readonly telemetryHistory?: BmwCarTelemetryHistoryStore
+    private readonly telemetryHistory?: BmwCarTelemetryHistoryStore,
+    private readonly eventLogStore?: EventLogStore
   ) {
     super();
   }
@@ -378,10 +383,12 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
     this.onVinObserved?.(vin);
 
     const deviceIds = this.resolveDeviceIdsForVin?.(vin) ?? [];
-    if (!this.telemetryHistory || deviceIds.length === 0) return;
-
     const fallbackMs =
       typeof envelopeTs === "number" && Number.isFinite(envelopeTs) ? envelopeTs : Date.now();
+
+    this.persistMqttEnvelopeToEventLog(envelope, deviceIds, fallbackMs);
+
+    if (!this.telemetryHistory || deviceIds.length === 0) return;
 
     for (const [key, meta] of Object.entries(data)) {
       if (!isTrackedTelemetryKey(key)) continue;
@@ -393,6 +400,62 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
           : fallbackMs;
       for (const deviceId of deviceIds) {
         this.telemetryHistory.append(deviceId, key, entry.value, timeMs);
+      }
+    }
+  }
+
+  /**
+   * Speichert die rohe MQTT-Nachricht im allgemeinen Event-Log (Einstellungen → Events).
+   * - Eine MQTT-Nachricht ergibt einen Log-Eintrag pro betroffener deviceId.
+   * - Ohne aufgeloeste deviceId wird ein Eintrag mit deterministischer Fallback-ID
+   *   `bmw-<vin>` geschrieben, damit auch Events vor dem Geraete-Onboarding sichtbar bleiben.
+   * - Wert/Timestamp je Telemetrie-Key bleiben im `results`-Feld erhalten,
+   *   damit das Frontend die volle Payload anzeigen kann.
+   */
+  private persistMqttEnvelopeToEventLog(
+    envelope: BmwCarDataMqttEnvelope,
+    deviceIds: string[],
+    fallbackMs: number
+  ): void {
+    if (!this.eventLogStore) return;
+    const { vin, data } = envelope;
+    if (!vin || !data || typeof data !== "object") return;
+
+    const keys = Object.keys(data);
+    if (keys.length === 0) return;
+
+    const normalizedData: Record<string, { timestamp?: number; value: unknown }> = {};
+    for (const [key, meta] of Object.entries(data)) {
+      if (meta && typeof meta === "object" && "value" in meta) {
+        const m = meta as { timestamp?: number; value: unknown };
+        normalizedData[key] = {
+          timestamp:
+            typeof m.timestamp === "number" && Number.isFinite(m.timestamp) ? m.timestamp : undefined,
+          value: m.value
+        };
+      } else {
+        normalizedData[key] = { value: meta };
+      }
+    }
+
+    const targets = deviceIds.length > 0 ? deviceIds : [`bmw-${vin.toLowerCase()}`];
+    for (const deviceId of targets) {
+      try {
+        this.eventLogStore.append({
+          eventId: crypto.randomUUID(),
+          deviceId,
+          timestamp: fallbackMs,
+          eventType: EventType.CAR_MQTT_RECEIVED,
+          source: EventSource.SYSTEM,
+          mlcollect: false,
+          parameters: [
+            { name: "vin", value: vin },
+            { name: "keys", value: keys }
+          ],
+          results: [{ name: "data", value: normalizedData }]
+        });
+      } catch (err) {
+        logger.debug({ err, vin }, "BMW MQTT: EventLog-Persistenz fehlgeschlagen");
       }
     }
   }
