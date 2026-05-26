@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { logger } from "../../../../logger.js";
 import { BMWModuleManager } from "../../modules/bmw/bmwModuleManager.js";
+import {
+  BMW_TANK_CAPACITY_MIN_LITERS,
+  BMW_TANK_CAPACITY_MAX_LITERS
+} from "../../modules/bmw/bmwCarFuelSettingsStore.js";
 import type { ServerDeps } from "../../server.js";
 import { serializeDevicesForApi } from "../../entities/devices/deviceSerialize.js";
 
@@ -288,6 +292,57 @@ export function createBMWModuleRouter(deps: ServerDeps) {
       return;
     }
     res.status(200).json({ success: true });
+  });
+
+  router.get("/devices/:deviceId/fuel-settings", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const settings = bmwModule.getFuelSettings(deviceId);
+    if (!settings) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json({
+      settings,
+      limits: {
+        minLiters: BMW_TANK_CAPACITY_MIN_LITERS,
+        maxLiters: BMW_TANK_CAPACITY_MAX_LITERS
+      }
+    });
+  });
+
+  router.put("/devices/:deviceId/fuel-settings", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const body = req.body ?? {};
+    const liters =
+      typeof body.tankCapacityLiters === "number"
+        ? body.tankCapacityLiters
+        : Number(body.tankCapacityLiters);
+    if (!Number.isFinite(liters)) {
+      res.status(400).json({ error: "tankCapacityLiters muss eine Zahl sein" });
+      return;
+    }
+    const result = bmwModule.setFuelSettings(deviceId, liters);
+    if (!result.ok) {
+      if (result.reason === "device-not-found") {
+        res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      } else {
+        res.status(400).json({
+          error: `Tankvolumen muss zwischen ${BMW_TANK_CAPACITY_MIN_LITERS} und ${BMW_TANK_CAPACITY_MAX_LITERS} Litern liegen`
+        });
+      }
+      return;
+    }
+    res.status(200).json({ settings: result.settings });
+  });
+
+  router.delete("/devices/:deviceId/fuel-settings", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const settings = bmwModule.resetFuelSettings(deviceId);
+    if (!settings) {
+      res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
+      return;
+    }
+    res.status(200).json({ settings });
   });
 
   router.post("/devices/:deviceId/refresh", async (req, res) => {

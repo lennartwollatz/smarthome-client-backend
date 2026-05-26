@@ -35,6 +35,8 @@ export type BmwCarTripEntry = {
   fuelPercentBefore?: number;
   fuelPercentAfter?: number;
   fuelConsumptionPer100Km?: number;
+  fuelUsedLiters?: number;
+  tankCapacityLiters?: number;
   startAddress?: string;
   endAddress?: string;
   start: { lat: number; lng: number };
@@ -63,23 +65,38 @@ function computeDurationParts(startTime: number, endTime: number): {
   return { durationMin: totalMin, durationHours, durationMinutes };
 }
 
-function computeFuelConsumptionPer100Km(
+function computeFuelUsedLiters(
   fuelBefore?: number,
   fuelAfter?: number,
-  distanceKm?: number
+  tankCapacityLiters?: number
 ): number | undefined {
   if (
     fuelBefore == null ||
     fuelAfter == null ||
-    distanceKm == null ||
-    distanceKm <= 0 ||
+    tankCapacityLiters == null ||
+    tankCapacityLiters <= 0 ||
     fuelBefore < fuelAfter
   ) {
     return undefined;
   }
   const usedPercent = fuelBefore - fuelAfter;
   if (usedPercent <= 0) return undefined;
-  return round1((usedPercent / distanceKm) * 100);
+  return round1((usedPercent / 100) * tankCapacityLiters);
+}
+
+function computeFuelConsumptionPer100Km(
+  fuelUsedLiters?: number,
+  distanceKm?: number
+): number | undefined {
+  if (
+    fuelUsedLiters == null ||
+    fuelUsedLiters <= 0 ||
+    distanceKm == null ||
+    distanceKm <= 0
+  ) {
+    return undefined;
+  }
+  return round1((fuelUsedLiters / distanceKm) * 100);
 }
 
 function segmentMarkerForTrip(trip: BmwCarTrip, index: number): BmwCarTripSegmentMarker | null {
@@ -170,6 +187,13 @@ export function buildTripEntryFromSegments(
   const fuelPercentBefore = first.fuelPercentBefore;
   const fuelPercentAfter = last.fuelPercentAfter;
   const distanceKm = mileageDrivenKm ?? aggregateDistanceKm(sorted);
+  const tankCapacityLiters =
+    sorted.find(s => s.tankCapacityLiters != null)?.tankCapacityLiters;
+  const fuelUsedLiters = computeFuelUsedLiters(
+    fuelPercentBefore,
+    fuelPercentAfter,
+    tankCapacityLiters
+  );
   const { durationMin, durationHours, durationMinutes } = computeDurationParts(
     first.startTime,
     last.endTime
@@ -190,9 +214,10 @@ export function buildTripEntryFromSegments(
     mileageDrivenKm,
     fuelPercentBefore,
     fuelPercentAfter,
+    fuelUsedLiters,
+    tankCapacityLiters,
     fuelConsumptionPer100Km: computeFuelConsumptionPer100Km(
-      fuelPercentBefore,
-      fuelPercentAfter,
+      fuelUsedLiters,
       distanceKm > 0 ? distanceKm : undefined
     ),
     startAddress: first.startAddress,

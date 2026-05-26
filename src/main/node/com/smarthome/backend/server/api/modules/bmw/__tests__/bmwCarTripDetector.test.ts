@@ -1,19 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
+  BMW_DEFAULT_TANK_CAPACITY_LITERS,
   BMW_DRIVER_DOOR_KEY,
-  BMW_MIN_TRIP_DISTANCE_KM,
+  BMW_TRIP_STATIONARY_PAUSE_MS,
   buildLocationTrack,
   buildTripFromInterval,
-  collectDriverDoorCloseEvents,
-  detectTripIntervalsFromDoorEvents,
+  collectDriverDoorOpenEvents,
+  detectTripIntervalsFromDoorOpenEvents,
   detectTripsFromHistorySeries,
   detectTripsFromTrack,
+  findStationaryPauseEnd,
   type BmwCarTripPoint
 } from "../bmwCarTripDetector.js";
 
 const MILEAGE_KEY = "vehicle.vehicle.travelledDistance";
+const FUEL_KEY = "vehicle.drivetrain.fuelSystem.level";
 const LAT_KEY = "vehicle.cabin.infotainment.navigation.currentLocation.latitude";
 const LNG_KEY = "vehicle.cabin.infotainment.navigation.currentLocation.longitude";
+
+const STATIONARY_MS = BMW_TRIP_STATIONARY_PAUSE_MS;
 
 describe("bmwCarTripDetector", () => {
   it("erkennt eine Fahrt aus zusammenhängenden GPS-Punkten", () => {
@@ -45,7 +50,7 @@ describe("bmwCarTripDetector", () => {
     expect(track.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("collectDriverDoorCloseEvents erkennt nur true → false Übergänge", () => {
+  it("collectDriverDoorOpenEvents erfasst nur false → true Übergänge", () => {
     const t = Date.UTC(2026, 4, 15, 8, 0, 0);
     const series = {
       [BMW_DRIVER_DOOR_KEY]: [
@@ -57,199 +62,256 @@ describe("bmwCarTripDetector", () => {
         { time: t + 15_000, value: false }
       ]
     };
-    const events = collectDriverDoorCloseEvents(series);
-    expect(events.map(e => e.time)).toEqual([t + 5_000, t + 15_000]);
+    const events = collectDriverDoorOpenEvents(series);
+    expect(events.map(e => e.time)).toEqual([t + 1_000, t + 10_000]);
   });
 
-  it("erkennt Trip-Ende bei Tür-zu mit Strecke > 1 km", () => {
-    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
-    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
-    const t1 = Date.UTC(2026, 4, 15, 8, 0, 0);
-    const t2 = Date.UTC(2026, 4, 15, 8, 30, 0);
-
+  it("collectDriverDoorOpenEvents zählt ersten beobachteten true-Zustand", () => {
+    const t = Date.UTC(2026, 4, 15, 8, 0, 0);
     const series = {
       [BMW_DRIVER_DOOR_KEY]: [
-        { time: t1 - 1000, value: true },
-        { time: t1, value: false },
-        { time: t2 - 1000, value: true },
-        { time: t2, value: false }
-      ],
-      [MILEAGE_KEY]: [
-        { time: t1, value: 42000 },
-        { time: t2, value: 42020 }
+        { time: t, value: true },
+        { time: t + 1_000, value: false }
       ]
     };
-    const intervals = detectTripIntervalsFromDoorEvents(series, fromMs, toMs);
-    expect(intervals.length).toBe(1);
-    expect(intervals[0].startTime).toBe(t1);
-    expect(intervals[0].endTime).toBe(t2);
+    expect(collectDriverDoorOpenEvents(series).map(e => e.time)).toEqual([t]);
   });
 
-  it("ignoriert Tür-zu-Events unter 1 km (kurzes Aussteigen)", () => {
+  it("findStationaryPauseEnd liefert den ersten Punkt der ≥5-Minuten-Stillstandsphase", () => {
+    const base = Date.UTC(2026, 4, 15, 9, 0, 0);
+    // Bewegung bis 10:00, dann 10:00–10:08 statisch am selben Ort
+    const track: BmwCarTripPoint[] = [
+      { time: base, lat: 48.1, lng: 11.5 },
+      { time: base + 30 * 60_000, lat: 48.2, lng: 11.6 },
+      { time: base + 60 * 60_000, lat: 48.25, lng: 11.65 },
+      { time: base + 61 * 60_000, lat: 48.25001, lng: 11.65001 },
+      { time: base + 66 * 60_000, lat: 48.25001, lng: 11.65001 },
+      { time: base + 68 * 60_000, lat: 48.25001, lng: 11.65001 }
+    ];
+    const end = findStationaryPauseEnd(track, base, base + 90 * 60_000);
+    expect(end).toBe(base + 60 * 60_000);
+  });
+
+  it("findStationaryPauseEnd liefert undefined, wenn das Auto in Bewegung bleibt", () => {
+    const base = Date.UTC(2026, 4, 15, 9, 0, 0);
+    const track: BmwCarTripPoint[] = [
+      { time: base, lat: 48.1, lng: 11.5 },
+      { time: base + 2 * 60_000, lat: 48.11, lng: 11.51 },
+      { time: base + 4 * 60_000, lat: 48.12, lng: 11.52 },
+      { time: base + 6 * 60_000, lat: 48.13, lng: 11.53 },
+      { time: base + 8 * 60_000, lat: 48.14, lng: 11.54 }
+    ];
+    expect(findStationaryPauseEnd(track, base, base + 30 * 60_000)).toBeUndefined();
+  });
+
+  it("Trip endet beim ersten Punkt einer 5+ Minuten-Standphase", () => {
     const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
     const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
-    const t1 = Date.UTC(2026, 4, 15, 8, 0, 0);
-    const t2 = Date.UTC(2026, 4, 15, 8, 5, 0);
-    const t3 = Date.UTC(2026, 4, 15, 8, 35, 0);
+    const t1Open = Date.UTC(2026, 4, 15, 8, 0, 0);
+    const stationaryStart = t1Open + 30 * 60_000;
 
     const series = {
       [BMW_DRIVER_DOOR_KEY]: [
-        { time: t1 - 1000, value: true },
-        { time: t1, value: false },
-        { time: t2 - 1000, value: true },
-        { time: t2, value: false },
-        { time: t3 - 1000, value: true },
-        { time: t3, value: false }
-      ],
-      [MILEAGE_KEY]: [
-        { time: t1, value: 42000 },
-        { time: t2, value: 42000.4 },
-        { time: t3, value: 42025 }
-      ]
-    };
-    const intervals = detectTripIntervalsFromDoorEvents(series, fromMs, toMs);
-    expect(intervals.length).toBe(1);
-    expect(intervals[0].startTime).toBe(t1);
-    expect(intervals[0].endTime).toBe(t3);
-  });
-
-  it("erkennt mehrere Fahrten an verschiedenen Tagen", () => {
-    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
-    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
-    const t1Start = Date.UTC(2026, 4, 15, 8, 0, 0);
-    const t1End = Date.UTC(2026, 4, 15, 8, 25, 0);
-    const t2Start = Date.UTC(2026, 4, 15, 16, 30, 0);
-    const t2End = Date.UTC(2026, 4, 15, 17, 0, 0);
-
-    const series = {
-      [BMW_DRIVER_DOOR_KEY]: [
-        { time: t1Start - 1000, value: true },
-        { time: t1Start, value: false },
-        { time: t1End - 1000, value: true },
-        { time: t1End, value: false },
-        { time: t2Start - 1000, value: true },
-        { time: t2Start, value: false },
-        { time: t2End - 1000, value: true },
-        { time: t2End, value: false }
-      ],
-      [MILEAGE_KEY]: [
-        { time: t1Start, value: 42000 },
-        { time: t1End, value: 42020 },
-        { time: t2Start, value: 42020 },
-        { time: t2End, value: 42045 }
-      ]
-    };
-    const intervals = detectTripIntervalsFromDoorEvents(series, fromMs, toMs);
-    expect(intervals.length).toBe(2);
-    expect(intervals[0].startTime).toBe(t1Start);
-    expect(intervals[0].endTime).toBe(t1End);
-    expect(intervals[1].startTime).toBe(t2Start);
-    expect(intervals[1].endTime).toBe(t2End);
-  });
-
-  it("liefert keine Fahrt ohne Tür-Events", () => {
-    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
-    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
-    const intervals = detectTripIntervalsFromDoorEvents({}, fromMs, toMs);
-    expect(intervals).toEqual([]);
-  });
-
-  it("liefert keine Fahrt ohne Tachostand-Daten (Distanz unbekannt)", () => {
-    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
-    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
-    const t1 = Date.UTC(2026, 4, 15, 8, 0, 0);
-    const t2 = Date.UTC(2026, 4, 15, 8, 30, 0);
-    const series = {
-      [BMW_DRIVER_DOOR_KEY]: [
-        { time: t1 - 1000, value: true },
-        { time: t1, value: false },
-        { time: t2 - 1000, value: true },
-        { time: t2, value: false }
-      ]
-    };
-    const intervals = detectTripIntervalsFromDoorEvents(series, fromMs, toMs);
-    expect(intervals).toEqual([]);
-  });
-
-  it("kappt Trip-Start auf fromMs, wenn Anker vor dem Zeitraum liegt", () => {
-    const t1 = Date.UTC(2026, 4, 15, 7, 0, 0);
-    const t2 = Date.UTC(2026, 4, 15, 9, 0, 0);
-    const fromMs = Date.UTC(2026, 4, 15, 8, 0, 0);
-    const toMs = Date.UTC(2026, 4, 15, 12, 0, 0);
-    const series = {
-      [BMW_DRIVER_DOOR_KEY]: [
-        { time: t1 - 1000, value: true },
-        { time: t1, value: false },
-        { time: t2 - 1000, value: true },
-        { time: t2, value: false }
-      ],
-      [MILEAGE_KEY]: [
-        { time: t1, value: 42000 },
-        { time: t2, value: 42050 }
-      ]
-    };
-    const intervals = detectTripIntervalsFromDoorEvents(series, fromMs, toMs);
-    expect(intervals.length).toBe(1);
-    expect(intervals[0].startTime).toBe(fromMs);
-    expect(intervals[0].endTime).toBe(t2);
-  });
-
-  it("verwendet konfigurierbare Distanz-Schwelle", () => {
-    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
-    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
-    const t1 = Date.UTC(2026, 4, 15, 8, 0, 0);
-    const t2 = Date.UTC(2026, 4, 15, 8, 30, 0);
-    const series = {
-      [BMW_DRIVER_DOOR_KEY]: [
-        { time: t1 - 1000, value: true },
-        { time: t1, value: false },
-        { time: t2 - 1000, value: true },
-        { time: t2, value: false }
-      ],
-      [MILEAGE_KEY]: [
-        { time: t1, value: 42000 },
-        { time: t2, value: 42000.7 }
-      ]
-    };
-    expect(detectTripIntervalsFromDoorEvents(series, fromMs, toMs).length).toBe(0);
-    expect(detectTripIntervalsFromDoorEvents(series, fromMs, toMs, 0.5).length).toBe(1);
-  });
-
-  it("Default-Schwelle ist 1 km", () => {
-    expect(BMW_MIN_TRIP_DISTANCE_KM).toBe(1);
-  });
-
-  it("detectTripsFromHistorySeries kombiniert Türschluss-Events mit GPS und Tacho", () => {
-    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
-    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
-    const t1 = Date.UTC(2026, 4, 15, 8, 0, 0);
-    const t2 = Date.UTC(2026, 4, 15, 8, 25, 0);
-    const series = {
-      [BMW_DRIVER_DOOR_KEY]: [
-        { time: t1 - 1000, value: true },
-        { time: t1, value: false },
-        { time: t2 - 1000, value: true },
-        { time: t2, value: false }
-      ],
-      [MILEAGE_KEY]: [
-        { time: t1, value: 42000 },
-        { time: t2, value: 42020 }
+        { time: t1Open - 1_000, value: false },
+        { time: t1Open, value: true },
+        { time: t1Open + 1_000, value: false }
       ],
       [LAT_KEY]: [
-        { time: t1, value: 48.1 },
-        { time: t2, value: 48.15 }
+        { time: t1Open, value: 48.1 },
+        { time: t1Open + 10 * 60_000, value: 48.15 },
+        { time: t1Open + 20 * 60_000, value: 48.2 },
+        { time: stationaryStart, value: 48.25 },
+        { time: stationaryStart + STATIONARY_MS, value: 48.25 }
       ],
       [LNG_KEY]: [
-        { time: t1, value: 11.5 },
-        { time: t2, value: 11.6 }
+        { time: t1Open, value: 11.5 },
+        { time: t1Open + 10 * 60_000, value: 11.55 },
+        { time: t1Open + 20 * 60_000, value: 11.6 },
+        { time: stationaryStart, value: 11.65 },
+        { time: stationaryStart + STATIONARY_MS, value: 11.65 }
       ]
     };
-    const trips = detectTripsFromHistorySeries(series, fromMs, toMs);
+
+    const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
+    expect(intervals.length).toBe(1);
+    expect(intervals[0].startTime).toBe(t1Open);
+    expect(intervals[0].endTime).toBe(stationaryStart);
+  });
+
+  it("Kurze Pause (< 5 Minuten) beendet die Fahrt nicht", () => {
+    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
+    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
+    const open = Date.UTC(2026, 4, 15, 8, 0, 0);
+    const briefStop = open + 10 * 60_000; // 3 Min am gleichen Ort, dann weiter
+    const finalStop = open + 60 * 60_000;
+
+    const series = {
+      [BMW_DRIVER_DOOR_KEY]: [
+        { time: open - 1_000, value: false },
+        { time: open, value: true }
+      ],
+      [LAT_KEY]: [
+        { time: open, value: 48.1 },
+        { time: briefStop, value: 48.15 },
+        { time: briefStop + 60_000, value: 48.15 },
+        { time: briefStop + 3 * 60_000, value: 48.15001 },
+        { time: briefStop + 5 * 60_000, value: 48.18 }, // wieder Bewegung
+        { time: finalStop, value: 48.25 },
+        { time: finalStop + STATIONARY_MS, value: 48.25 }
+      ],
+      [LNG_KEY]: [
+        { time: open, value: 11.5 },
+        { time: briefStop, value: 11.55 },
+        { time: briefStop + 60_000, value: 11.55 },
+        { time: briefStop + 3 * 60_000, value: 11.55001 },
+        { time: briefStop + 5 * 60_000, value: 11.58 },
+        { time: finalStop, value: 11.65 },
+        { time: finalStop + STATIONARY_MS, value: 11.65 }
+      ]
+    };
+
+    const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
+    expect(intervals.length).toBe(1);
+    expect(intervals[0].startTime).toBe(open);
+    expect(intervals[0].endTime).toBe(finalStop);
+  });
+
+  it("erkennt mehrere Fahrten – jedes Tür-Auf startet einen neuen Trip nach Stillstand", () => {
+    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
+    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
+    const t1Open = Date.UTC(2026, 4, 15, 8, 0, 0);
+    const t1End = t1Open + 20 * 60_000;
+    const t2Open = Date.UTC(2026, 4, 15, 16, 0, 0);
+    const t2End = t2Open + 30 * 60_000;
+
+    const series = {
+      [BMW_DRIVER_DOOR_KEY]: [
+        { time: t1Open - 1, value: false },
+        { time: t1Open, value: true },
+        { time: t1Open + 1_000, value: false },
+        { time: t2Open - 1, value: false },
+        { time: t2Open, value: true },
+        { time: t2Open + 1_000, value: false }
+      ],
+      [LAT_KEY]: [
+        { time: t1Open, value: 48.1 },
+        { time: t1End, value: 48.2 },
+        { time: t1End + STATIONARY_MS, value: 48.2 },
+        { time: t2Open, value: 48.2 },
+        { time: t2End, value: 48.3 },
+        { time: t2End + STATIONARY_MS, value: 48.3 }
+      ],
+      [LNG_KEY]: [
+        { time: t1Open, value: 11.5 },
+        { time: t1End, value: 11.55 },
+        { time: t1End + STATIONARY_MS, value: 11.55 },
+        { time: t2Open, value: 11.55 },
+        { time: t2End, value: 11.6 },
+        { time: t2End + STATIONARY_MS, value: 11.6 }
+      ]
+    };
+
+    const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
+    expect(intervals.length).toBe(2);
+    expect(intervals[0]).toEqual({ startTime: t1Open, endTime: t1End });
+    expect(intervals[1]).toEqual({ startTime: t2Open, endTime: t2End });
+  });
+
+  it("liefert keine Fahrt ohne Tür-Auf-Events", () => {
+    expect(
+      detectTripIntervalsFromDoorOpenEvents(
+        {},
+        Date.UTC(2026, 4, 1),
+        Date.UTC(2026, 4, 30)
+      )
+    ).toEqual([]);
+  });
+
+  it("ohne GPS-Daten endet der Trip am nächsten Tür-Auf bzw. an toMs", () => {
+    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
+    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
+    const t1 = Date.UTC(2026, 4, 15, 8, 0, 0);
+    const t2 = Date.UTC(2026, 4, 15, 9, 0, 0);
+    const series = {
+      [BMW_DRIVER_DOOR_KEY]: [
+        { time: t1 - 1, value: false },
+        { time: t1, value: true },
+        { time: t1 + 1_000, value: false },
+        { time: t2 - 1, value: false },
+        { time: t2, value: true }
+      ]
+    };
+    const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
+    expect(intervals.length).toBe(2);
+    expect(intervals[0]).toEqual({ startTime: t1, endTime: t2 });
+    expect(intervals[1].startTime).toBe(t2);
+    expect(intervals[1].endTime).toBe(toMs);
+  });
+
+  it("klippt Trip-Starts ausserhalb [fromMs, toMs]", () => {
+    const fromMs = Date.UTC(2026, 4, 15, 12, 0, 0);
+    const toMs = Date.UTC(2026, 4, 15, 14, 0, 0);
+    const before = Date.UTC(2026, 4, 15, 11, 0, 0);
+    const inside = Date.UTC(2026, 4, 15, 12, 30, 0);
+    const after = Date.UTC(2026, 4, 15, 15, 0, 0);
+    const series = {
+      [BMW_DRIVER_DOOR_KEY]: [
+        { time: before - 1, value: false },
+        { time: before, value: true },
+        { time: before + 1, value: false },
+        { time: inside - 1, value: false },
+        { time: inside, value: true },
+        { time: inside + 1, value: false },
+        { time: after - 1, value: false },
+        { time: after, value: true }
+      ]
+    };
+    const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
+    expect(intervals.map(i => i.startTime)).toEqual([inside]);
+  });
+
+  it("detectTripsFromHistorySeries kombiniert Türöffnung mit GPS, Tachostand und Tankgröße", () => {
+    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
+    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
+    const tOpen = Date.UTC(2026, 4, 15, 8, 0, 0);
+    const tEnd = tOpen + 60 * 60_000;
+    const series = {
+      [BMW_DRIVER_DOOR_KEY]: [
+        { time: tOpen - 1, value: false },
+        { time: tOpen, value: true },
+        { time: tOpen + 1_000, value: false }
+      ],
+      [MILEAGE_KEY]: [
+        { time: tOpen, value: 42000 },
+        { time: tEnd, value: 42045 }
+      ],
+      [FUEL_KEY]: [
+        { time: tOpen, value: 80 },
+        { time: tEnd, value: 72 }
+      ],
+      [LAT_KEY]: [
+        { time: tOpen, value: 48.1 },
+        { time: tEnd, value: 48.25 },
+        { time: tEnd + STATIONARY_MS, value: 48.25 }
+      ],
+      [LNG_KEY]: [
+        { time: tOpen, value: 11.5 },
+        { time: tEnd, value: 11.65 },
+        { time: tEnd + STATIONARY_MS, value: 11.65 }
+      ]
+    };
+    const trips = detectTripsFromHistorySeries(series, fromMs, toMs, {
+      tankCapacityLiters: 60
+    });
     expect(trips.length).toBe(1);
-    expect(trips[0].startTime).toBe(t1);
-    expect(trips[0].endTime).toBe(t2);
-    expect(trips[0].mileageDrivenKm).toBe(20);
-    expect(trips[0].distanceKm).toBe(20);
+    expect(trips[0].startTime).toBe(tOpen);
+    expect(trips[0].endTime).toBe(tEnd);
+    expect(trips[0].mileageDrivenKm).toBe(45);
+    expect(trips[0].fuelPercentBefore).toBe(80);
+    expect(trips[0].fuelPercentAfter).toBe(72);
+    expect(trips[0].fuelUsedLiters).toBe(4.8);
+    expect(trips[0].fuelConsumptionPer100Km).toBeCloseTo(10.7, 1);
+    expect(trips[0].tankCapacityLiters).toBe(60);
   });
 
   it("liefert Fahrt ohne GPS mit Dauer aus Intervall", () => {
@@ -258,12 +320,10 @@ describe("bmwCarTripDetector", () => {
     const trip = buildTripFromInterval({ startTime: start, endTime: end }, []);
     expect(trip.distanceKm).toBe(0);
     expect(trip.durationMin).toBe(15);
-    expect(trip.durationHours).toBe(0);
-    expect(trip.durationMinutes).toBe(15);
     expect(trip.points.length).toBe(0);
   });
 
-  it("berechnet Kilometerstand, Tank und Verbrauch aus Historie", () => {
+  it("berechnet Verbrauch in L/100 km und Litern aus Tankgröße", () => {
     const start = Date.UTC(2026, 4, 15, 8, 0, 0);
     const end = Date.UTC(2026, 4, 15, 9, 0, 0);
     const trip = buildTripFromInterval(
@@ -280,16 +340,177 @@ describe("bmwCarTripDetector", () => {
         fuelSeries: [
           { time: start, value: 80 },
           { time: end, value: 72 }
-        ]
+        ],
+        tankCapacityLiters: 60
       }
     );
-    expect(trip.mileageKmBefore).toBe(42000);
-    expect(trip.mileageKmAfter).toBe(42045);
     expect(trip.mileageDrivenKm).toBe(45);
     expect(trip.fuelPercentBefore).toBe(80);
     expect(trip.fuelPercentAfter).toBe(72);
-    expect(trip.fuelConsumptionPer100Km).toBeCloseTo(17.8, 0);
-    expect(trip.durationHours).toBe(1);
-    expect(trip.durationMinutes).toBe(0);
+    // 8% von 60L = 4.8L verbraucht
+    expect(trip.fuelUsedLiters).toBe(4.8);
+    // 4.8L / 45km = 10.67 L/100km
+    expect(trip.fuelConsumptionPer100Km).toBeCloseTo(10.7, 1);
+    expect(trip.tankCapacityLiters).toBe(60);
+  });
+
+  it("ohne Tankgröße bleibt der Liter-Verbrauch undefiniert", () => {
+    const start = Date.UTC(2026, 4, 15, 8, 0, 0);
+    const end = Date.UTC(2026, 4, 15, 9, 0, 0);
+    const trip = buildTripFromInterval(
+      { startTime: start, endTime: end },
+      [],
+      {
+        mileageSeries: [
+          { time: start, value: 1000 },
+          { time: end, value: 1050 }
+        ],
+        fuelSeries: [
+          { time: start, value: 80 },
+          { time: end, value: 70 }
+        ]
+      }
+    );
+    expect(trip.fuelUsedLiters).toBeUndefined();
+    expect(trip.fuelConsumptionPer100Km).toBeUndefined();
+    expect(trip.tankCapacityLiters).toBeUndefined();
+  });
+
+  it("exportiert sinnvolle Defaults", () => {
+    expect(BMW_DEFAULT_TANK_CAPACITY_LITERS).toBe(60);
+    expect(BMW_TRIP_STATIONARY_PAUSE_MS).toBe(5 * 60 * 1000);
+  });
+
+  it("Tür-Auf am Ziel beendet den Trip und startet keinen Geister-Trip", () => {
+    // Szenario: Fahrer öffnet morgens die Tür (Losfahren) → fährt → am Ziel öffnet
+    // er erneut die Tür (Aussteigen). Dieser zweite Tür-Auf darf KEINEN neuen
+    // (Mini-)Trip auslösen, weil das Auto sich danach nicht mehr bewegt.
+    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
+    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
+    const tStart = Date.UTC(2026, 4, 15, 8, 0, 0); // Tür auf am Start
+    const tEnd = tStart + 60 * 60_000; // Tür auf am Ziel
+
+    const series = {
+      [BMW_DRIVER_DOOR_KEY]: [
+        { time: tStart - 1, value: false },
+        { time: tStart, value: true },
+        { time: tStart + 1_000, value: false },
+        { time: tEnd - 1, value: false },
+        { time: tEnd, value: true },
+        { time: tEnd + 1_000, value: false }
+      ],
+      [MILEAGE_KEY]: [
+        { time: tStart, value: 42000 },
+        { time: tEnd, value: 42050 },
+        { time: tEnd + STATIONARY_MS, value: 42050 }
+      ],
+      [LAT_KEY]: [
+        { time: tStart, value: 48.1 },
+        { time: tEnd, value: 48.25 },
+        { time: tEnd + STATIONARY_MS, value: 48.25 }
+      ],
+      [LNG_KEY]: [
+        { time: tStart, value: 11.5 },
+        { time: tEnd, value: 11.65 },
+        { time: tEnd + STATIONARY_MS, value: 11.65 }
+      ]
+    };
+
+    const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
+    expect(intervals.length).toBe(1);
+    expect(intervals[0].startTime).toBe(tStart);
+    expect(intervals[0].endTime).toBe(tEnd);
+  });
+
+  it("Tankstopp >5 Min ohne Bewegung erzeugt zwei Trips, kein Phantom-Trip dazwischen", () => {
+    // Szenario: 8:00 Losfahren → 8:30 Tankstelle (Tür auf) → 8:38 weiter (Tür auf) → 9:00 Ziel (Tür auf).
+    // Zwischen 8:30 und 8:38 keine Fahrt – darf KEINEN Trip erzeugen.
+    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
+    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
+    const t0 = Date.UTC(2026, 4, 15, 8, 0, 0);
+    const tGasOut = t0 + 30 * 60_000; // 8:30
+    const tGasIn = t0 + 38 * 60_000; // 8:38
+    const tArrive = t0 + 60 * 60_000; // 9:00
+
+    const series = {
+      [BMW_DRIVER_DOOR_KEY]: [
+        { time: t0 - 1, value: false },
+        { time: t0, value: true },
+        { time: t0 + 1_000, value: false },
+        { time: tGasOut - 1, value: false },
+        { time: tGasOut, value: true },
+        { time: tGasOut + 1_000, value: false },
+        { time: tGasIn - 1, value: false },
+        { time: tGasIn, value: true },
+        { time: tGasIn + 1_000, value: false },
+        { time: tArrive - 1, value: false },
+        { time: tArrive, value: true },
+        { time: tArrive + 1_000, value: false }
+      ],
+      [MILEAGE_KEY]: [
+        { time: t0, value: 42000 },
+        { time: tGasOut, value: 42020 },
+        { time: tGasIn, value: 42020 },
+        { time: tArrive, value: 42050 },
+        { time: tArrive + STATIONARY_MS, value: 42050 }
+      ],
+      [LAT_KEY]: [
+        { time: t0, value: 48.1 },
+        { time: tGasOut, value: 48.18 },
+        { time: tGasIn, value: 48.18 },
+        { time: tArrive, value: 48.28 },
+        { time: tArrive + STATIONARY_MS, value: 48.28 }
+      ],
+      [LNG_KEY]: [
+        { time: t0, value: 11.5 },
+        { time: tGasOut, value: 11.58 },
+        { time: tGasIn, value: 11.58 },
+        { time: tArrive, value: 11.68 },
+        { time: tArrive + STATIONARY_MS, value: 11.68 }
+      ]
+    };
+
+    const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
+    expect(intervals.length).toBe(2);
+    expect(intervals[0].startTime).toBe(t0);
+    expect(intervals[0].endTime).toBe(tGasOut);
+    expect(intervals[1].startTime).toBe(tGasIn);
+    expect(intervals[1].endTime).toBe(tArrive);
+  });
+
+  it("Tür-Auf ohne Bewegung (z. B. Beifahrer einsteigen) erzeugt keinen Trip", () => {
+    const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
+    const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
+    const t1 = Date.UTC(2026, 4, 15, 8, 0, 0);
+    const t2 = t1 + 10 * 60_000;
+
+    const series = {
+      [BMW_DRIVER_DOOR_KEY]: [
+        { time: t1 - 1, value: false },
+        { time: t1, value: true },
+        { time: t1 + 1_000, value: false },
+        { time: t2 - 1, value: false },
+        { time: t2, value: true },
+        { time: t2 + 1_000, value: false }
+      ],
+      [MILEAGE_KEY]: [
+        { time: t1, value: 42000 },
+        { time: t2, value: 42000 },
+        { time: t2 + STATIONARY_MS, value: 42000 }
+      ],
+      [LAT_KEY]: [
+        { time: t1, value: 48.1 },
+        { time: t2, value: 48.1 },
+        { time: t2 + STATIONARY_MS, value: 48.1 }
+      ],
+      [LNG_KEY]: [
+        { time: t1, value: 11.5 },
+        { time: t2, value: 11.5 },
+        { time: t2 + STATIONARY_MS, value: 11.5 }
+      ]
+    };
+
+    const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
+    expect(intervals).toEqual([]);
   });
 });

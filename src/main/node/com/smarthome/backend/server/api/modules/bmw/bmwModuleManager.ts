@@ -25,6 +25,12 @@ import {
   type BmwLearnedPlace
 } from "./bmwCarLearnedPlacesStore.js";
 import {
+  BMWCarFuelSettingsStore,
+  type BmwCarFuelSettings,
+  BMW_TANK_CAPACITY_MIN_LITERS,
+  BMW_TANK_CAPACITY_MAX_LITERS
+} from "./bmwCarFuelSettingsStore.js";
+import {
   autoCategorizeTripEntries,
   observationsFromCategorizedEntry
 } from "./bmwCarTripAutoCategorizer.js";
@@ -56,6 +62,7 @@ export class BMWModuleManager extends ModuleManager<
   private tripCategoriesStore: BMWCarTripCategoriesStore;
   private homeStore: BMWCarHomeStore;
   private learnedPlacesStore: BMWCarLearnedPlacesStore;
+  private fuelSettingsStore: BMWCarFuelSettingsStore;
   private readonly registeredVins = new Set<string>();
 
   constructor(
@@ -70,6 +77,7 @@ export class BMWModuleManager extends ModuleManager<
     const tripCategoriesStore = new BMWCarTripCategoriesStore(databaseManager);
     const homeStore = new BMWCarHomeStore(databaseManager);
     const learnedPlacesStore = new BMWCarLearnedPlacesStore(databaseManager);
+    const fuelSettingsStore = new BMWCarFuelSettingsStore(databaseManager);
     const telemetryHistory = deviceManager.getBmwTelemetryHistoryStore();
     const deviceController = new BMWDeviceController(
       tokenStore,
@@ -86,6 +94,7 @@ export class BMWModuleManager extends ModuleManager<
     this.tripCategoriesStore = tripCategoriesStore;
     this.homeStore = homeStore;
     this.learnedPlacesStore = learnedPlacesStore;
+    this.fuelSettingsStore = fuelSettingsStore;
 
     deviceController.setVinDeviceResolver(vin => {
       const ids: string[] = [];
@@ -365,9 +374,10 @@ export class BMWModuleManager extends ModuleManager<
   async getTrips(deviceId: string, opts: { fromMs: number; toMs: number }) {
     const car = this.deviceManager.getDevice(deviceId);
     if (!car || !(car instanceof BMWCar)) return null;
+    const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
     const trips = this.deviceManager
       .getBmwTelemetryHistoryStore()
-      .getTrips(deviceId, opts.fromMs, opts.toMs);
+      .getTrips(deviceId, opts.fromMs, opts.toMs, { tankCapacityLiters });
     const { buildGroupedTripEntries } = await import("./bmwCarTripEnricher.js");
     const entries = await buildGroupedTripEntries(trips);
     return { entries: this.applyCategoriesAndAuto(deviceId, entries) };
@@ -407,10 +417,11 @@ export class BMWModuleManager extends ModuleManager<
 
     const y = year != null && Number.isFinite(year) ? Math.floor(year) : new Date().getFullYear();
     const { fromMs, toMs } = yearBoundsMs(y);
+    const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
 
     const rawTrips = this.deviceManager
       .getBmwTelemetryHistoryStore()
-      .getTrips(deviceId, fromMs, toMs);
+      .getTrips(deviceId, fromMs, toMs, { tankCapacityLiters });
     const entries = buildGroupedTripEntriesFast(rawTrips);
     const withCategories = this.applyCategoriesAndAuto(deviceId, entries);
 
@@ -453,6 +464,29 @@ export class BMWModuleManager extends ModuleManager<
     return this.learnedPlacesStore.deletePlace(deviceId, placeId);
   }
 
+  getFuelSettings(deviceId: string): BmwCarFuelSettings | null {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return null;
+    return this.fuelSettingsStore.getSettings(deviceId);
+  }
+
+  setFuelSettings(
+    deviceId: string,
+    tankCapacityLiters: number
+  ): { ok: true; settings: BmwCarFuelSettings } | { ok: false; reason: "device-not-found" | "invalid-capacity" } {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return { ok: false, reason: "device-not-found" };
+    const settings = this.fuelSettingsStore.setCapacity(deviceId, tankCapacityLiters);
+    if (!settings) return { ok: false, reason: "invalid-capacity" };
+    return { ok: true, settings };
+  }
+
+  resetFuelSettings(deviceId: string): BmwCarFuelSettings | null {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar)) return null;
+    return this.fuelSettingsStore.reset(deviceId);
+  }
+
   /** Wendet manuelle Kategorien an und ergänzt fehlende Kategorien anhand gelernter Orte. */
   private applyCategoriesAndAuto(
     deviceId: string,
@@ -485,9 +519,10 @@ export class BMWModuleManager extends ModuleManager<
     if (startMs == null) return;
 
     const windowMs = 7 * 24 * 60 * 60 * 1000;
+    const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
     const trips = this.deviceManager
       .getBmwTelemetryHistoryStore()
-      .getTrips(deviceId, startMs - windowMs, startMs + windowMs);
+      .getTrips(deviceId, startMs - windowMs, startMs + windowMs, { tankCapacityLiters });
     if (trips.length === 0) return;
 
     const entries = buildGroupedTripEntriesFast(trips);

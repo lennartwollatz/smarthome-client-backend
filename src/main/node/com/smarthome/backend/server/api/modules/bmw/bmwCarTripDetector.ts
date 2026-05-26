@@ -7,17 +7,34 @@ const FUEL_KEY = "vehicle.drivetrain.fuelSystem.level";
 
 export const BMW_TRIP_METRIC_KEYS = [MILEAGE_KEY, FUEL_KEY] as const;
 
-/** Telematik-Key: Fahrertür vorne links (Trigger für Trip-Ende). */
+/** Telematik-Key: Fahrertür vorne links (Trigger für Trip-Start beim Öffnen). */
 export const BMW_DRIVER_DOOR_KEY = "vehicle.cabin.door.row1.driver.isOpen";
 
-/** Trigger-Keys, die die Fahrt-Erkennung benötigt (Türschluss + Tachostand). */
-export const BMW_TRIP_TRIGGER_KEYS = [BMW_DRIVER_DOOR_KEY, MILEAGE_KEY] as const;
+/** Trigger-Keys, die die Fahrt-Erkennung benötigt (Tür-Auf + GPS + Tachostand). */
+export const BMW_TRIP_TRIGGER_KEYS = [BMW_DRIVER_DOOR_KEY, MILEAGE_KEY, LAT_KEY, LNG_KEY] as const;
 
 /**
- * Mindeststrecke (in km) zwischen zwei Tür-Schließ-Events, damit ein Trip-Ende
- * erkannt wird. Darunter zählt das Tür-Event als „nur kurz ausgestiegen".
+ * Mindestpause am gleichen Standort, ab der ein Trip als beendet gilt.
+ * Beträgt der Stillstand >= dieser Dauer, endet der Trip am ersten Punkt der
+ * Standphase. Default 5 Minuten.
  */
-export const BMW_MIN_TRIP_DISTANCE_KM = 1;
+export const BMW_TRIP_STATIONARY_PAUSE_MS = 5 * 60 * 1000;
+
+/**
+ * Toleranzradius für „gleicher Standort" beim Stillstand (Meter). GPS-Drift in
+ * dieser Größenordnung gilt nicht als Bewegung.
+ */
+export const BMW_TRIP_STATIONARY_RADIUS_M = 60;
+
+/**
+ * Mindest-Distanz (km) zwischen zwei Tür-Auf-Events, damit dazwischen tatsächlich
+ * eine Fahrt angenommen wird. Wer nur die Tür öffnet/schließt ohne zu fahren
+ * (Beifahrer einsteigen, Tanken usw.) erzeugt damit keinen Geister-Trip.
+ */
+export const BMW_TRIP_MIN_DISTANCE_KM = 0.3;
+
+/** Standardgröße des Tanks (Liter) – pro Auto manuell überschreibbar. */
+export const BMW_DEFAULT_TANK_CAPACITY_LITERS = 60;
 
 /** Max. plausibel angenommene Geschwindigkeit zwischen zwei Punkten (Filter Ausreißer). */
 const MAX_SPEED_KMH = 200;
@@ -37,7 +54,12 @@ export type BmwCarTrip = {
   mileageDrivenKm?: number;
   fuelPercentBefore?: number;
   fuelPercentAfter?: number;
+  /** Verbrauch in Litern pro 100 km (sofern Tankgröße und Tankprozente vorhanden). */
   fuelConsumptionPer100Km?: number;
+  /** Verbrauchte Kraftstoffmenge der Fahrt in Litern. */
+  fuelUsedLiters?: number;
+  /** Verwendete Tankgröße in Litern (zur Berechnung von fuelUsedLiters / Verbrauch). */
+  tankCapacityLiters?: number;
   startAddress?: string;
   endAddress?: string;
   start: { lat: number; lng: number };
@@ -151,10 +173,12 @@ export function sliceTrackForInterval(
 }
 
 /**
- * Sammelt Türschluss-Events (true → false) der Fahrertür vorne links aus der
+ * Sammelt Tür-Auf-Events (false → true) der Fahrertür vorne links aus der
  * Telemetrie-Historie. Aufeinanderfolgende gleiche Zustände werden ignoriert.
+ * Eine erste Beobachtung mit `true` zählt ebenfalls als Tür-Auf-Event (z. B.
+ * direkt nach Aufzeichnungsstart, wenn der vorherige Zustand unbekannt war).
  */
-export function collectDriverDoorCloseEvents(
+export function collectDriverDoorOpenEvents(
   series: Record<string, BmwTelemetryHistoryPoint[]>
 ): { time: number }[] {
   const points = (series[BMW_DRIVER_DOOR_KEY] ?? [])
@@ -166,7 +190,7 @@ export function collectDriverDoorCloseEvents(
   for (const p of points) {
     const isOpen = toBool(p.value);
     if (isOpen === undefined) continue;
-    if (prevOpen === true && isOpen === false) {
+    if (isOpen === true && prevOpen !== true) {
       events.push({ time: p.time });
     }
     prevOpen = isOpen;
@@ -175,63 +199,136 @@ export function collectDriverDoorCloseEvents(
 }
 
 /**
- * Fahrt-Intervalle anhand der Fahrertür: Ein Trip endet, wenn die Tür vorne links
- * von „auf" auf „zu" wechselt UND seit dem letzten Tür-zu-Event mindestens
- * `minTripKm` (Standard: BMW_MIN_TRIP_DISTANCE_KM) gefahren wurden. Türschluss-
- * Events unterhalb der Schwelle verschieben nur den Anker (Fahrer ist kurz
- * ausgestiegen, ohne dass eine eigenständige Fahrt vorliegt).
- *
- * Trips, deren Ende im Zeitfenster [fromMs, toMs] liegt, werden zurückgegeben;
- * der Start wird ggf. auf fromMs gekappt.
+ * Findet das Ende einer Fahrt: der erste Zeitpunkt nach `startMs`, ab dem das
+ * Fahrzeug für mindestens `stationaryPauseMs` innerhalb von `stationaryRadiusM`
+ * stehen bleibt. Wird zurückgegeben als Zeitpunkt des ersten GPS-Punkts der
+ * Standphase. Kein Treffer ⇒ `undefined`.
  */
-export function detectTripIntervalsFromDoorEvents(
+export function findStationaryPauseEnd(
+  track: BmwCarTripPoint[],
+  startMs: number,
+  searchUntilMs: number,
+  stationaryPauseMs: number = BMW_TRIP_STATIONARY_PAUSE_MS,
+  stationaryRadiusM: number = BMW_TRIP_STATIONARY_RADIUS_M
+): number | undefined {
+  if (track.length === 0) return undefined;
+
+  const inWindow = track.filter(p => p.time >= startMs && p.time <= searchUntilMs);
+  if (inWindow.length === 0) return undefined;
+
+  let anchor: BmwCarTripPoint | null = null;
+  for (let i = 0; i < inWindow.length; i++) {
+    const cur = inWindow[i];
+    if (!anchor) {
+      anchor = cur;
+      continue;
+    }
+    const d = haversineMeters(anchor.lat, anchor.lng, cur.lat, cur.lng);
+    if (d > stationaryRadiusM) {
+      anchor = cur;
+      continue;
+    }
+    if (cur.time - anchor.time >= stationaryPauseMs) {
+      return anchor.time;
+    }
+  }
+  return undefined;
+}
+
+/** Zurückgelegte Strecke (km) zwischen zwei Zeitpunkten anhand des Tachostands. */
+function mileageDeltaKmBetween(
+  mileageSeries: BmwTelemetryHistoryPoint[] | undefined,
+  startMs: number,
+  endMs: number
+): number | undefined {
+  const before = lastNumericValueAt(mileageSeries, startMs);
+  const after = lastNumericValueAt(mileageSeries, endMs);
+  if (before == null || after == null) return undefined;
+  const delta = after - before;
+  return delta >= 0 ? delta : undefined;
+}
+
+/** GPS-Strecke (km) entlang des Tracks zwischen zwei Zeitpunkten als Fallback. */
+function gpsDistanceKmBetween(
+  track: BmwCarTripPoint[],
+  startMs: number,
+  endMs: number
+): number {
+  const slice = track.filter(p => p.time >= startMs && p.time <= endMs);
+  if (slice.length < 2) return 0;
+  return segmentDistanceM(slice) / 1000;
+}
+
+/**
+ * Fahrt-Intervalle aus Tür-Auf-Events der Fahrertür vorne links.
+ *
+ * Logik (im Sinne der Anforderung: Tür-Auf signalisiert Trip-Grenze):
+ * 1. Aufeinanderfolgende Tür-Auf-Events bilden Kandidaten-Intervalle (Losfahren → Ankommen).
+ * 2. Endet ein Intervall nicht an einem nächsten Tür-Auf, wird die nächste
+ *    Standphase ≥ {@link BMW_TRIP_STATIONARY_PAUSE_MS} (gleicher Standort) als
+ *    Trip-Ende verwendet; sonst die obere Fenstergrenze `toMs` (offener Trip).
+ * 3. Nur Intervalle, in denen das Auto sich tatsächlich bewegt hat (Tachostand
+ *    bzw. GPS-Strecke ≥ {@link BMW_TRIP_MIN_DISTANCE_KM}), werden als Fahrt erkannt.
+ *    Tür-Auf-Events ohne Bewegung dazwischen (Tankstop, kurzes Aussteigen,
+ *    Beifahrer einsteigen) erzeugen so keinen Geister-Trip.
+ */
+export function detectTripIntervalsFromDoorOpenEvents(
   series: Record<string, BmwTelemetryHistoryPoint[]>,
   fromMs: number,
   toMs: number,
-  minTripKm: number = BMW_MIN_TRIP_DISTANCE_KM
+  stationaryPauseMs: number = BMW_TRIP_STATIONARY_PAUSE_MS,
+  stationaryRadiusM: number = BMW_TRIP_STATIONARY_RADIUS_M,
+  minDistanceKm: number = BMW_TRIP_MIN_DISTANCE_KM
 ): InUseInterval[] {
-  const events = collectDriverDoorCloseEvents(series);
+  const events = collectDriverDoorOpenEvents(series);
   if (events.length === 0) return [];
 
-  const mileageSeries = series[MILEAGE_KEY] ?? [];
-
-  let anchorTime: number | null = null;
-  let anchorMileage: number | undefined;
+  const track = buildLocationTrack(series);
+  const mileageSeries = series[MILEAGE_KEY];
   const intervals: InUseInterval[] = [];
-  /** Toleranz für „keine nennenswerte Bewegung" zwischen zwei Türschluss-Events (in km). */
-  const STATIONARY_TOLERANCE_KM = 0.01;
 
-  for (const evt of events) {
-    if (evt.time > toMs) break;
-    const mileageAt = lastNumericValueAt(mileageSeries, evt.time);
+  for (let i = 0; i < events.length; i++) {
+    const start = events[i].time;
+    if (start > toMs) break;
+    if (start < fromMs) continue;
 
-    if (anchorTime == null) {
-      anchorTime = evt.time;
-      anchorMileage = mileageAt;
+    const nextOpenTime = events[i + 1]?.time ?? Number.POSITIVE_INFINITY;
+    const searchUntil = Math.min(nextOpenTime, toMs);
+
+    const stationaryEnd = findStationaryPauseEnd(
+      track,
+      start,
+      searchUntil,
+      stationaryPauseMs,
+      stationaryRadiusM
+    );
+
+    let endTime: number;
+    if (stationaryEnd != null && stationaryEnd < nextOpenTime) {
+      // Stillstand am gleichen Ort vor dem nächsten Tür-Auf-Event → echtes Trip-Ende.
+      endTime = stationaryEnd;
+    } else if (Number.isFinite(nextOpenTime)) {
+      endTime = Math.min(nextOpenTime, toMs);
+    } else {
+      endTime = toMs;
+    }
+
+    if (endTime <= start) continue;
+
+    // Plausibilität: Nur als Trip akzeptieren, wenn das Auto sich bewegt hat.
+    const mileageKm = mileageDeltaKmBetween(mileageSeries, start, endTime);
+    let drivenKm: number | undefined;
+    if (mileageKm != null) {
+      drivenKm = mileageKm;
+    } else if (track.length > 0) {
+      drivenKm = gpsDistanceKmBetween(track, start, endTime);
+    }
+
+    if (drivenKm != null && drivenKm < minDistanceKm) {
       continue;
     }
 
-    if (mileageAt == null || anchorMileage == null) {
-      continue;
-    }
-
-    const distanceKm = mileageAt - anchorMileage;
-
-    if (distanceKm > minTripKm) {
-      const startTime = Math.max(anchorTime, fromMs);
-      if (evt.time >= fromMs && startTime <= evt.time) {
-        intervals.push({ startTime, endTime: evt.time });
-      }
-      anchorTime = evt.time;
-      anchorMileage = mileageAt;
-    } else if (distanceKm <= STATIONARY_TOLERANCE_KM) {
-      // Auto stand seit dem Anker → neuer Park-Anker. Wird häufig nach echtem
-      // Trip-Ende beim erneuten Einsteigen erreicht.
-      anchorTime = evt.time;
-      anchorMileage = mileageAt;
-    }
-    // Sonst (0 < distance ≤ minTripKm): kurzes Aussteigen während der Fahrt
-    // → Anker bleibt erhalten, damit die Strecke vor dem Stopp Teil des Trips bleibt.
+    intervals.push({ startTime: start, endTime });
   }
 
   return intervals;
@@ -268,23 +365,43 @@ function computeDurationParts(startTime: number, endTime: number): {
   return { durationMin: totalMin, durationHours, durationMinutes };
 }
 
-function computeFuelConsumptionPer100Km(
+/**
+ * Verbrauchte Kraftstoffmenge in Litern aus der Tankprozent-Differenz.
+ * Erfordert eine gültige Tankgröße – ohne diese ist die Liter-Angabe undefiniert.
+ */
+function computeFuelUsedLiters(
   fuelBefore?: number,
   fuelAfter?: number,
-  distanceKm?: number
+  tankCapacityLiters?: number
 ): number | undefined {
   if (
     fuelBefore == null ||
     fuelAfter == null ||
-    distanceKm == null ||
-    distanceKm <= 0 ||
+    tankCapacityLiters == null ||
+    tankCapacityLiters <= 0 ||
     fuelBefore < fuelAfter
   ) {
     return undefined;
   }
   const usedPercent = fuelBefore - fuelAfter;
   if (usedPercent <= 0) return undefined;
-  return round1((usedPercent / distanceKm) * 100);
+  return round1((usedPercent / 100) * tankCapacityLiters);
+}
+
+/** Verbrauch in L/100 km auf Basis verbrauchter Liter und Distanz. */
+function computeFuelConsumptionPer100Km(
+  fuelUsedLiters?: number,
+  distanceKm?: number
+): number | undefined {
+  if (
+    fuelUsedLiters == null ||
+    fuelUsedLiters <= 0 ||
+    distanceKm == null ||
+    distanceKm <= 0
+  ) {
+    return undefined;
+  }
+  return round1((fuelUsedLiters / distanceKm) * 100);
 }
 
 export function buildTripFromInterval(
@@ -293,6 +410,7 @@ export function buildTripFromInterval(
   metrics?: {
     mileageSeries?: BmwTelemetryHistoryPoint[];
     fuelSeries?: BmwTelemetryHistoryPoint[];
+    tankCapacityLiters?: number;
   }
 ): BmwCarTrip {
   const { startTime, endTime } = interval;
@@ -303,6 +421,7 @@ export function buildTripFromInterval(
   const mileageKmAfter = lastNumericValueAt(metrics?.mileageSeries, endTime);
   const fuelPercentBefore = lastNumericValueAt(metrics?.fuelSeries, startTime);
   const fuelPercentAfter = lastNumericValueAt(metrics?.fuelSeries, endTime);
+  const tankCapacityLiters = metrics?.tankCapacityLiters;
 
   let mileageDrivenKm: number | undefined;
   if (
@@ -324,17 +443,25 @@ export function buildTripFromInterval(
     mileageKmAfter: mileageKmAfter != null ? round1(mileageKmAfter) : undefined,
     mileageDrivenKm,
     fuelPercentBefore: fuelPercentBefore != null ? round1(fuelPercentBefore) : undefined,
-    fuelPercentAfter: fuelPercentAfter != null ? round1(fuelPercentAfter) : undefined
+    fuelPercentAfter: fuelPercentAfter != null ? round1(fuelPercentAfter) : undefined,
+    tankCapacityLiters:
+      tankCapacityLiters != null && tankCapacityLiters > 0 ? tankCapacityLiters : undefined
   };
+
+  const fuelUsedLiters = computeFuelUsedLiters(
+    fuelPercentBefore,
+    fuelPercentAfter,
+    tankCapacityLiters
+  );
 
   if (points.length === 0) {
     const distanceKm = mileageDrivenKm ?? 0;
     return {
       ...base,
       distanceKm,
+      fuelUsedLiters,
       fuelConsumptionPer100Km: computeFuelConsumptionPer100Km(
-        fuelPercentBefore,
-        fuelPercentAfter,
+        fuelUsedLiters,
         distanceKm > 0 ? distanceKm : undefined
       ),
       start: { lat: 0, lng: 0 },
@@ -355,9 +482,9 @@ export function buildTripFromInterval(
   return {
     ...base,
     distanceKm,
+    fuelUsedLiters,
     fuelConsumptionPer100Km: computeFuelConsumptionPer100Km(
-      fuelPercentBefore,
-      fuelPercentAfter,
+      fuelUsedLiters,
       distanceKm > 0 ? distanceKm : undefined
     ),
     start: { lat: start.lat, lng: start.lng },
@@ -367,22 +494,25 @@ export function buildTripFromInterval(
 }
 
 /**
- * Erkennt Fahrten anhand der Fahrertür: Jede Tür-zu-Aktion mit mehr als
- * BMW_MIN_TRIP_DISTANCE_KM seit der vorherigen schließt eine Fahrt ab.
- * Strecke und Route werden aus GPS-Punkten innerhalb des Intervalls gewonnen.
+ * Erkennt Fahrten anhand der Fahrertür: Jedes Tür-Auf-Event startet eine Fahrt;
+ * sie endet, sobald das Fahrzeug ≥ {@link BMW_TRIP_STATIONARY_PAUSE_MS} stehen
+ * bleibt. Strecke wird aus dem Tachostand abgeleitet, ergänzend aus GPS, falls
+ * der Tacho fehlt. Tankgröße fließt in den Verbrauch (L/100 km, fuelUsedLiters) ein.
  */
 export function detectTripsFromHistorySeries(
   series: Record<string, BmwTelemetryHistoryPoint[]>,
   fromMs: number,
-  toMs: number
+  toMs: number,
+  options: { tankCapacityLiters?: number } = {}
 ): BmwCarTrip[] {
-  const intervals = detectTripIntervalsFromDoorEvents(series, fromMs, toMs);
+  const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
   if (intervals.length === 0) return [];
 
   const track = buildLocationTrack(series);
   const metrics = {
     mileageSeries: series[MILEAGE_KEY],
-    fuelSeries: series[FUEL_KEY]
+    fuelSeries: series[FUEL_KEY],
+    tankCapacityLiters: options.tankCapacityLiters
   };
   const trips = intervals.map(interval => buildTripFromInterval(interval, track, metrics));
   return trips.sort((a, b) => b.startTime - a.startTime);
