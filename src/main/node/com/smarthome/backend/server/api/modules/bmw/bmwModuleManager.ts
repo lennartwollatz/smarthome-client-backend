@@ -397,6 +397,7 @@ export class BMWModuleManager extends ModuleManager<
     }
     const previous = this.tripCategoriesStore.getCategory(deviceId, trimmed);
     this.tripCategoriesStore.setCategory(deviceId, trimmed, category);
+    this.propagateCategoryToGroupedSegments(deviceId, trimmed, category);
     try {
       this.updateLearnedPlacesForEntry(deviceId, trimmed, previous, category);
     } catch (err) {
@@ -499,6 +500,31 @@ export class BMWModuleManager extends ModuleManager<
       home: home ?? null,
       lookupPlace: (lat, lng) => this.learnedPlacesStore.findNearest(deviceId, lat, lng)
     });
+  }
+
+  /** Setzt dieselbe Kategorie auf alle Etappen, wenn eine gruppierte Fahrt kategorisiert wird. */
+  private propagateCategoryToGroupedSegments(
+    deviceId: string,
+    entryId: string,
+    category: BmwTripCategory | null
+  ): void {
+    const startMs = parseEntryStartMs(entryId);
+    if (startMs == null) return;
+
+    const windowMs = 7 * 24 * 60 * 60 * 1000;
+    const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
+    const trips = this.deviceManager
+      .getBmwTelemetryHistoryStore()
+      .getTrips(deviceId, startMs - windowMs, startMs + windowMs, { tankCapacityLiters });
+    if (trips.length === 0) return;
+
+    const entries = buildGroupedTripEntriesFast(trips);
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry?.grouped || entry.segments.length <= 1) return;
+
+    for (const seg of entry.segments) {
+      this.tripCategoriesStore.setCategory(deviceId, seg.id, category);
+    }
   }
 
   /**

@@ -9,7 +9,9 @@ export function applyTripCategoriesToEntries(
     const tripCategory = resolveEntryCategory(entry, categoriesByEntryId);
     const segments = entry.segments.map(seg => ({
       ...seg,
-      tripCategory: categoriesByEntryId[seg.id]
+      tripCategory:
+        categoriesByEntryId[seg.id] ??
+        (entry.grouped && categoriesByEntryId[entry.id] ? categoriesByEntryId[entry.id] : undefined)
     }));
     return { ...entry, tripCategory, segments };
   });
