@@ -21,10 +21,9 @@ export const BMW_TRIP_STATIONARY_PAUSE_MS = 5 * 60 * 1000;
 export const BMW_TRIP_STATIONARY_RADIUS_M = 60;
 
 /**
- * Mindest-Distanz (km) zwischen zwei Tür-Auf-Events, damit dazwischen tatsächlich
- * eine Fahrt angenommen wird (Restreichweite, Tacho oder GPS).
+ * Mindest-Distanz (km) zwischen zwei Tür-Auf-Events. 0 = jede Tür-Grenze zählt als Fahrt.
  */
-export const BMW_TRIP_MIN_DISTANCE_KM = 0.3;
+export const BMW_TRIP_MIN_DISTANCE_KM = 0;
 
 /** Standardgröße des Tanks (Liter) – pro Auto manuell überschreibbar. */
 export const BMW_DEFAULT_TANK_CAPACITY_LITERS = 60;
@@ -76,6 +75,11 @@ function toBool(v: unknown): boolean | undefined {
   if (typeof v === "boolean") return v;
   if (v === "true" || v === 1 || v === "1") return true;
   if (v === "false" || v === 0 || v === "0") return false;
+  if (typeof v === "string") {
+    const s = v.trim().toUpperCase();
+    if (s === "OPEN" || s === "JA" || s === "YES") return true;
+    if (s === "CLOSED" || s === "NEIN" || s === "NO") return false;
+  }
   return undefined;
 }
 
@@ -325,8 +329,8 @@ export function computeDrivenKmBetween(
  * Tür-Auf-Events liegt höchstens eine Fahrt. Endet die letzte Fahrt im Fenster
  * ohne weiteres Tür-Auf, gilt `toMs` als Ende (offene Fahrt).
  *
- * Nur Intervalle mit nachweisbarer Bewegung (≥ {@link BMW_TRIP_MIN_DISTANCE_KM})
- * werden übernommen.
+ * Nur Intervalle mit nachweisbarer Bewegung (≥ {@link BMW_TRIP_MIN_DISTANCE_KM}, default 0)
+ * werden verworfen – bei 0 entsteht jede Tür-Grenze eine Fahrt.
  */
 export function detectTripIntervalsFromDoorOpenEvents(
   series: Record<string, BmwTelemetryHistoryPoint[]>,
@@ -349,7 +353,9 @@ export function detectTripIntervalsFromDoorOpenEvents(
     if (start > toMs) break;
     if (start < fromMs) continue;
 
-    let endTime = events[i + 1]?.time ?? toMs;
+    const nextEvent = events[i + 1];
+    const hasNextInWindow = nextEvent != null && nextEvent.time <= toMs;
+    let endTime = hasNextInWindow ? nextEvent.time : toMs;
     if (endTime > toMs) endTime = toMs;
     if (endTime <= start) continue;
 
@@ -361,11 +367,24 @@ export function detectTripIntervalsFromDoorOpenEvents(
       endTime
     );
 
-    if (drivenKm != null && drivenKm < minDistanceKm) {
+    // Zwischen zwei Tür-Auf-Events liegt eine Fahrt, sofern messbare Bewegung stattfand.
+    if (hasNextInWindow) {
+      if (drivenKm === 0) continue;
+      if (minDistanceKm > 0 && drivenKm != null && drivenKm < minDistanceKm) {
+        continue;
+      }
+      intervals.push({ startTime: start, endTime });
       continue;
     }
 
-    intervals.push({ startTime: start, endTime });
+    // Letztes Tür-Auf: offene Fahrt nur bei messbarer Bewegung danach.
+    if (drivenKm != null && drivenKm > 0) {
+      if (minDistanceKm <= 0 || drivenKm >= minDistanceKm) {
+        intervals.push({ startTime: start, endTime });
+      }
+    } else if (drivenKm == null) {
+      intervals.push({ startTime: start, endTime });
+    }
   }
 
   return intervals;

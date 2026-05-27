@@ -265,8 +265,7 @@ describe("bmwCarTripDetector", () => {
     const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
     expect(intervals.length).toBe(2);
     expect(intervals[0]).toEqual({ startTime: t1, endTime: t2 });
-    expect(intervals[1].startTime).toBe(t2);
-    expect(intervals[1].endTime).toBe(toMs);
+    expect(intervals[1]).toEqual({ startTime: t2, endTime: toMs });
   });
 
   it("klippt Trip-Starts ausserhalb [fromMs, toMs]", () => {
@@ -497,13 +496,11 @@ describe("bmwCarTripDetector", () => {
 
     const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
     expect(intervals.length).toBe(2);
-    expect(intervals[0].startTime).toBe(t0);
-    expect(intervals[0].endTime).toBe(tGasOut);
-    expect(intervals[1].startTime).toBe(tGasIn);
-    expect(intervals[1].endTime).toBe(tArrive);
+    expect(intervals[0]).toEqual({ startTime: t0, endTime: tGasOut });
+    expect(intervals[1]).toEqual({ startTime: tGasIn, endTime: tArrive });
   });
 
-  it("Tür-Auf ohne Bewegung (z. B. Beifahrer einsteigen) erzeugt keinen Trip", () => {
+  it("Tür-Auf ohne Bewegung erzeugt keinen Trip zwischen den Events", () => {
     const fromMs = Date.UTC(2026, 4, 1, 0, 0, 0);
     const toMs = Date.UTC(2026, 4, 30, 23, 59, 0);
     const t1 = Date.UTC(2026, 4, 15, 8, 0, 0);
@@ -536,6 +533,6 @@ describe("bmwCarTripDetector", () => {
     };
 
     const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
-    expect(intervals).toEqual([]);
+    expect(intervals.length).toBe(0);
   });
 });

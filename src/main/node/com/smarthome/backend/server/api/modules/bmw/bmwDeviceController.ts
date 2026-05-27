@@ -23,6 +23,7 @@ import type { BmwCarTelemetryHistoryStore } from "../../../db/bmwCarTelemetryHis
 import { isTrackedTelemetryKey } from "./bmwCarDataTelemetryKeys.js";
 import type { EventLogStore } from "../../../db/eventLogStore.js";
 import { EventType } from "../../../events/event-types/EventType.js";
+import { normalizeBmwVin } from "./bmwVehicleNamesStore.js";
 import { EventSource } from "../../../events/EventSource.js";
 import crypto from "node:crypto";
 
@@ -388,7 +389,10 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
 
     this.persistMqttEnvelopeToEventLog(envelope, deviceIds, fallbackMs);
 
-    if (!this.telemetryHistory || deviceIds.length === 0) return;
+    if (!this.telemetryHistory) return;
+
+    const vinDeviceId = `bmw-${normalizeBmwVin(vin).toLowerCase()}`;
+    const targets = new Set<string>([vinDeviceId, ...deviceIds]);
 
     for (const [key, meta] of Object.entries(data)) {
       if (!isTrackedTelemetryKey(key)) continue;
@@ -398,8 +402,8 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
         typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)
           ? entry.timestamp
           : fallbackMs;
-      for (const deviceId of deviceIds) {
-        this.telemetryHistory.append(deviceId, key, entry.value, timeMs);
+      for (const targetId of targets) {
+        this.telemetryHistory.append(targetId, key, entry.value, timeMs);
       }
     }
   }
@@ -438,7 +442,10 @@ export class BMWDeviceController extends ModuleDeviceControllerEvent<BMWEvent, B
       }
     }
 
-    const targets = deviceIds.length > 0 ? deviceIds : [`bmw-${vin.toLowerCase()}`];
+    const targets =
+      deviceIds.length > 0
+        ? [...new Set([`bmw-${normalizeBmwVin(vin).toLowerCase()}`, ...deviceIds])]
+        : [`bmw-${normalizeBmwVin(vin).toLowerCase()}`];
     for (const deviceId of targets) {
       try {
         this.eventLogStore.append({

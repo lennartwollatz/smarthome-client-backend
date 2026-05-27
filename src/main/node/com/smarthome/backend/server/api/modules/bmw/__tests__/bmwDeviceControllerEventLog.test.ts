@@ -115,7 +115,7 @@ describe("BMWDeviceController – MQTT EventLog", () => {
       data: { "vehicle.drivetrain.fuelSystem.level": { value: 50 } }
     });
 
-    expect(store.entries.map(e => e.deviceId).sort()).toEqual(["bmw-a", "bmw-b"]);
+    expect(store.entries.map(e => e.deviceId).sort()).toEqual(["bmw-a", "bmw-b", "bmw-wba123"]);
   });
 
   it("nutzt deterministische Fallback-deviceId, wenn das Geraet noch nicht registriert ist", () => {
@@ -165,8 +165,9 @@ describe("BMWDeviceController – MQTT EventLog", () => {
       }
     });
 
-    expect(store.entries).toHaveLength(1);
+    expect(store.entries).toHaveLength(2);
     expect(history.appends.length).toBeGreaterThan(0);
+    expect(new Set(history.appends.map(a => a.deviceId))).toEqual(new Set(["bmw-a", "bmw-wba1"]));
     const keys = history.appends.map(a => a.key);
     expect(keys).toContain("vehicle.drivetrain.fuelSystem.level");
     expect(keys).toContain("vehicle.cabin.door.row1.driver.isOpen");
