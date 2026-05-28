@@ -62,8 +62,7 @@ export function backfillBmwTripsFromDatabase(
     const { fromMs, toMs } = monthBoundsMs(year, month);
     const trips = telemetryStore.getTrips(deviceId, fromMs, toMs, {
       vin: opts.vin,
-      tankCapacityLiters: opts.tankCapacityLiters,
-      eventLogStore
+      tankCapacityLiters: opts.tankCapacityLiters
     });
     const entries = buildGroupedTripEntriesFast(trips);
     const km = sumEntryKm(entries);

@@ -121,25 +121,26 @@ export function buildSeriesFromCarMqttEventLog(
 }
 
 /**
- * Schreibt fehlende Telemetrie aus dem Event-Log dauerhaft in die Historie,
- * damit Verlauf-Anzeige und Fahrten-Erkennung dieselbe Datenbasis nutzen.
+ * Schreibt Telemetrie aus dem Event-Log per Bulk-Merge in die Historie (ein DB-Schreibvorgang
+ * pro Gerät und Zeitfenster – vermeidet OOM durch tausende einzelner append()-Aufrufe).
  */
 export function syncTelemetryHistoryFromEventLog(
-  append: (deviceId: string, key: string, value: unknown, timeMs: number) => void,
+  mergeBulk: (deviceId: string, series: Record<string, BmwTelemetryHistoryPoint[]>) => void,
   deviceIds: string[],
   fromMs: number,
   toMs: number,
   eventLogStore: EventLogStore
-): void {
+): number {
   const series = buildSeriesFromCarMqttEventLog(eventLogStore, deviceIds, fromMs, toMs);
+  let pointCount = 0;
+  for (const pts of Object.values(series)) {
+    pointCount += pts.length;
+  }
   for (const deviceId of deviceIds) {
     if (!deviceId) continue;
-    for (const [key, points] of Object.entries(series)) {
-      for (const p of points) {
-        append(deviceId, key, p.value, p.time);
-      }
-    }
+    mergeBulk(deviceId, series);
   }
+  return pointCount;
 }
 
 export function shouldSupplementFromEventLog(

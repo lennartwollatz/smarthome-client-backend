@@ -631,8 +631,7 @@ export class BMWModuleManager extends ModuleManager<
     const series = this.deviceManager
       .getBmwTelemetryHistoryStore()
       .getSeries(deviceId, keys, opts.fromMs, opts.toMs, {
-        vin: car.vin,
-        eventLogStore: this.eventLogStore
+        vin: car.vin
       });
     return { series };
   }
