@@ -50,11 +50,8 @@ export abstract class DeviceTemperature extends Device {
     }
   }
 
-  protected addTemperatureToHistory(temperature: number, temperatureGoal: number = -999) {
-    this.temperatureHistory.push({
-      datetime: Date.now(),
-      temperature: temperature,
-      temperatureGoal: temperatureGoal	
-    });
+  /** Verlauf liegt in der Sensor-History-DB; nicht im Geräte-Objekt. */
+  protected addTemperatureToHistory(_temperature: number, _temperatureGoal: number = -999) {
+    /* no-op */
   }
 }

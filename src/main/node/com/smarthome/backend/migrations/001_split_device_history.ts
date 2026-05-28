@@ -92,7 +92,7 @@ export const migration001SplitDeviceHistory: Migration = {
       try {
         const device = JSON.parse(row.data) as Record<string, unknown>;
         const liveButtons: Record<string, EnergyUsage[]> = {};
-        const buttons = device.buttons;
+        const buttons = device.buttons ?? device.btns;
         if (buttons && typeof buttons === "object") {
           for (const [buttonId, rawBtn] of Object.entries(buttons as Record<string, unknown>)) {
             if (!rawBtn || typeof rawBtn !== "object") continue;

@@ -8,6 +8,7 @@ import { EventSwitchButtonOn } from "../../server/events/events/EventSwitchButto
 import { EventSwitchButtonOff } from "../../server/events/events/EventSwitchButtonOff.js";
 import { EventSwitchEnergyUsageChanged } from "../../server/events/events/EventSwitchEnergyUsageChanged.js";
 import { EventSwitchEnergyUsageHigher } from "../../server/events/events/EventSwitchEnergyUsageHigher.js";
+import type { SwitchEnergyHistoryAccess } from "../../server/db/switchEnergyHistoryAccess.js";
 
 /**
  * Interface für EnergyUsage (historische Energieverbrauchsdaten)
@@ -40,6 +41,7 @@ type RawPersistedSwitchButton = Partial<Button> & {
 };
 
 export abstract class DeviceSwitch extends Device {
+  private energyHistoryAccess?: SwitchEnergyHistoryAccess;
   private energyBucketAnchorMs: Record<string, number> = {};
   private static readonly ENERGY_BUCKET_MS = 5 * 60 * 1000;
   /** Im Gerät: nur die letzten 48 Stunden als Live-Verlauf; ältere Werte liegen im Archiv. */
@@ -148,6 +150,10 @@ export abstract class DeviceSwitch extends Device {
 
   abstract delete(): Promise<void>;
 
+  setEnergyHistoryAccess(access: SwitchEnergyHistoryAccess | undefined): void {
+    this.energyHistoryAccess = access;
+  }
+
   override toDatabaseJson(): Record<string, unknown> {
     const btns: Record<string, Record<string, unknown>> = {};
     for (const [id, btn] of Object.entries(this.buttons ?? {})) {
@@ -188,7 +194,6 @@ export abstract class DeviceSwitch extends Device {
     target: InstanceType<typeof DeviceSwitch.Button>,
     raw: RawPersistedSwitchButton
   ): void {
-    const cutoff = Date.now() - DeviceSwitch.ENERGY_USAGE_LIVE_WINDOW_MS;
     const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
     const euRaw = raw.energyUsage;
     if (euRaw != null && typeof euRaw === "object") {
@@ -203,22 +208,25 @@ export abstract class DeviceSwitch extends Device {
     if (typeof raw.eu === "number" && Number.isFinite(raw.eu)) {
       target.energyUsage.now = raw.eu;
     }
-    if (Array.isArray(raw.energyUsages)) {
-      target.energyUsages = raw
-        .energyUsages!.filter(
-          u => u != null && typeof u.time === "number" && Number.isFinite(u.time) && typeof u.value === "number" && Number.isFinite(u.value)
-        )
-        .map(u => ({ time: u.time, value: u.value }))
-        .filter(u => u.time >= cutoff)
-        .sort((a, b) => a.time - b.time);
+    target.energyUsages = [];
+  }
+
+  private getLiveUsages(buttonId: string): EnergyUsage[] {
+    return this.energyHistoryAccess?.getLiveUsages(buttonId) ?? [];
+  }
+
+  private setLiveUsages(buttonId: string, usages: EnergyUsage[]): void {
+    this.energyHistoryAccess?.setLiveUsages(buttonId, usages);
+    const btn = this.buttons[buttonId];
+    if (btn) {
+      btn.energyUsages = [];
     }
   }
 
   private pruneEnergyUsagesToRetainWindow(buttonId: string): void {
-    const btn = this.buttons[buttonId];
-    if (!btn?.energyUsages?.length) return;
     const cutoff = Date.now() - DeviceSwitch.ENERGY_USAGE_LIVE_WINDOW_MS;
-    btn.energyUsages = btn.energyUsages.filter(u => u.time >= cutoff);
+    const trimmed = this.getLiveUsages(buttonId).filter(u => u.time >= cutoff);
+    this.setLiveUsages(buttonId, trimmed);
   }
 
   public rehydrateButtons() {
@@ -410,12 +418,12 @@ export abstract class DeviceSwitch extends Device {
     if(!buttonButton) {
       return;
     }
-    buttonButton.energyUsages ??= [];
-    const usages = buttonButton.energyUsages;
+    const usages = [...this.getLiveUsages(button)];
     const t = Date.now();
 
     if (usages.length === 0) {
       usages.push({ time: t, value: 0 });
+      this.setLiveUsages(button, usages);
       this.energyBucketAnchorMs[button] = t;
       if (trigger) {
         this.eventManager?.triggerEvent(new EventSwitchEnergyUsageChanged(this.id, deviceBefore, buttonButton.energyUsage!));
@@ -447,6 +455,7 @@ export abstract class DeviceSwitch extends Device {
       this.applyIncrementalEnergyKwh(button, incrementKwh, intervalStartMs, t);
     }
 
+    this.setLiveUsages(button, usages);
     this.pruneEnergyUsagesToRetainWindow(button);
 
     if (trigger) {

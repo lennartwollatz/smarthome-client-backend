@@ -4,6 +4,7 @@ import { DatabaseManager } from "../server/db/database.js";
 import { logger } from "../logger.js";
 import { runPendingMigrations } from "./migrationRunner.js";
 import { migration001SplitDeviceHistory } from "./001_split_device_history.js";
+import { migration002RepairSwitchEnergyHistory } from "./002_repair_switch_energy_history.js";
 
 const dbPath = process.env.DB_URL ?? "data/smarthomeNew.sqlite";
 const deviceHistoryDir =
@@ -12,7 +13,7 @@ const deviceHistoryDir =
 const mainDb = new DatabaseManager(dbPath);
 mainDb.connect();
 
-runPendingMigrations(mainDb, [migration001SplitDeviceHistory], {
+runPendingMigrations(mainDb, [migration001SplitDeviceHistory, migration002RepairSwitchEnergyHistory], {
   mainDb,
   deviceHistoryDir
 })

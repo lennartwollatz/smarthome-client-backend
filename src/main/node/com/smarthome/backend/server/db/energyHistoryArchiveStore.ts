@@ -100,6 +100,12 @@ export class EnergyHistoryArchiveStore {
       .sort((a, b) => a.time - b.time);
   }
 
+  /** Gesamtes Live-Fenster (energy_live) eines Buttons. */
+  getLiveUsagesForButton(deviceId: string, buttonId: string): EnergyUsage[] {
+    const row = this.loadLive(deviceId);
+    return [...(row.buttons[buttonId] ?? [])].sort((a, b) => a.time - b.time);
+  }
+
   getForButtonInRange(deviceId: string, buttonId: string, fromMs: number, toMs: number): EnergyUsage[] {
     const effectiveFrom = Math.max(fromMs, Date.now() - ARCHIVE_MAX_AGE_MS);
     if (effectiveFrom > toMs) return [];
@@ -126,6 +132,71 @@ export class EnergyHistoryArchiveStore {
 
   importLegacyLiveFromDevice(deviceId: string, buttons: Record<string, EnergyUsage[]>): void {
     if (!buttons || Object.keys(buttons).length === 0) return;
-    this.saveLive(deviceId, { buttons });
+    const row = this.loadLive(deviceId);
+    for (const [buttonId, usages] of Object.entries(buttons)) {
+      if (!Array.isArray(usages) || usages.length === 0) continue;
+      const byTime = new Map<number, EnergyUsage>();
+      for (const u of row.buttons[buttonId] ?? []) {
+        if (typeof u.time === "number" && Number.isFinite(u.value)) {
+          byTime.set(u.time, u);
+        }
+      }
+      for (const u of usages) {
+        if (typeof u.time === "number" && Number.isFinite(u.value)) {
+          byTime.set(u.time, { time: u.time, value: u.value });
+        }
+      }
+      row.buttons[buttonId] = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+    }
+    this.saveLive(deviceId, row);
+  }
+
+  /**
+   * Übernimmt Archiv-Punkte des Live-Fensters (z. B. 48h) nach energy_live,
+   * wenn dort nach Migration noch keine Live-Daten liegen.
+   */
+  promoteArchiveToLiveWindow(deviceId: string, liveWindowMs: number): void {
+    const cutoff = Date.now() - liveWindowMs;
+    const now = Date.now();
+    const archive = this.loadArchive(deviceId);
+    const live = this.loadLive(deviceId);
+    let changed = false;
+
+    for (const [buttonId, archUsages] of Object.entries(archive.buttons ?? {})) {
+      const recent = (archUsages ?? []).filter(u => u.time >= cutoff && u.time <= now);
+      if (recent.length === 0) continue;
+      const existingLive = live.buttons[buttonId] ?? [];
+      if (existingLive.length > 0) continue;
+
+      const byTime = new Map<number, EnergyUsage>();
+      for (const u of recent) {
+        byTime.set(u.time, u);
+      }
+      live.buttons[buttonId] = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+      changed = true;
+    }
+
+    if (changed) {
+      this.saveLive(deviceId, live);
+    }
+  }
+
+  getMergedEnergyForButton(
+    deviceId: string,
+    buttonId: string,
+    fromMs: number,
+    toMs: number,
+    includeArchive: boolean
+  ): EnergyUsage[] {
+    const byTime = new Map<number, EnergyUsage>();
+    for (const u of this.getLiveForButtonInRange(deviceId, buttonId, fromMs, toMs)) {
+      byTime.set(u.time, u);
+    }
+    if (includeArchive) {
+      for (const u of this.getForButtonInRange(deviceId, buttonId, fromMs, toMs)) {
+        byTime.set(u.time, u);
+      }
+    }
+    return Array.from(byTime.values()).sort((a, b) => a.time - b.time);
   }
 }

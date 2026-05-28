@@ -114,6 +114,7 @@ export class DeviceManager implements EntityManager {
         this.wireEventManager(device);
         this.wireVacuumCleaningHistory(device);
         if (device instanceof DeviceSwitch) {
+          this.wireSwitchEnergyHistory(device);
           if (this.trimAndArchiveSwitchEnergyHistory(device)) {
             this.deviceRepository.save(device.id, serializeDeviceForDatabase(device) as unknown as Device);
           }
@@ -132,6 +133,9 @@ export class DeviceManager implements EntityManager {
       if (!convertedDevice) return;
       this.wireEventManager(convertedDevice);
       this.wireVacuumCleaningHistory(convertedDevice);
+      if (convertedDevice instanceof DeviceSwitch) {
+        this.wireSwitchEnergyHistory(convertedDevice);
+      }
       this.devices.set(device.id, convertedDevice);
     });
     Promise.all(convertPromises)
@@ -210,15 +214,13 @@ export class DeviceManager implements EntityManager {
     this.wireEventManager(device);
     this.wireVacuumCleaningHistory(device);
     if (device instanceof DeviceSwitch) {
-      this.trimAndArchiveSwitchEnergyHistory(device);
-      this.emitEnergyHistoryIfChanged(prev, device);
+      this.wireSwitchEnergyHistory(device);
+      const energyChanged = this.trimAndArchiveSwitchEnergyHistory(device);
+      this.emitEnergyHistoryIfChanged(prev, device, energyChanged);
     }
     this.recordSensorHistoryIfChanged(prev, device);
     this.recordVacuumCleaningHistoryIfCompleted(prev, device);
     this.recordDeviceChangesIfAny(prev, device);
-    if (device instanceof DeviceSwitch) {
-      this.syncSwitchEnergyLiveToStore(device);
-    }
     this.devices.set(device.id, device);
     this.deviceRepository.save(device.id, serializeDeviceForDatabase(device) as unknown as Device);
     if (device.moduleId !== "voice-assistant") {
@@ -232,32 +234,54 @@ export class DeviceManager implements EntityManager {
    * der Messpunkte in einem der Buttons geändert hat. Liefert Frontends den
    * Trigger, um Energie-Charts (auch Wochen-/Monatsansicht) nachzuladen.
    */
-  private emitEnergyHistoryIfChanged(prev: Device | undefined, next: DeviceSwitch): void {
+  private emitEnergyHistoryIfChanged(
+    prev: Device | undefined,
+    next: DeviceSwitch,
+    archiveOrStoreChanged: boolean
+  ): void {
     if (!this.liveUpdateService || !next.id) return;
-    const prevSwitch = prev instanceof DeviceSwitch ? prev : undefined;
-    let changed = !prevSwitch;
-    if (prevSwitch) {
-      const nextButtons = next.buttons ?? {};
-      const prevButtons = prevSwitch.buttons ?? {};
-      const ids = new Set([...Object.keys(nextButtons), ...Object.keys(prevButtons)]);
-      for (const bid of ids) {
-        const nextLen = nextButtons[bid]?.energyUsages?.length ?? 0;
-        const prevLen = prevButtons[bid]?.energyUsages?.length ?? 0;
-        if (nextLen !== prevLen) {
-          changed = true;
-          break;
-        }
-        const nextLast = nextButtons[bid]?.energyUsages?.[nextLen - 1];
-        const prevLast = prevButtons[bid]?.energyUsages?.[prevLen - 1];
-        if ((nextLast?.time ?? 0) !== (prevLast?.time ?? 0) || (nextLast?.value ?? 0) !== (prevLast?.value ?? 0)) {
-          changed = true;
-          break;
-        }
-      }
+    let changed = archiveOrStoreChanged;
+    if (!changed) {
+      const prevSnap = prev?.id ? this.energyHistoryStoreSnapshot(prev.id) : undefined;
+      const nextSnap = this.energyHistoryStoreSnapshot(next.id);
+      changed = !this.energySnapshotsEqual(prevSnap, nextSnap);
     }
     if (changed) {
       this.liveUpdateService.emit("sensorHistory:updated", { deviceId: next.id, metric: "energy" });
     }
+  }
+
+  private energyHistoryStoreSnapshot(deviceId: string): Map<string, { len: number; lastTime: number; lastValue: number }> {
+    const snap = new Map<string, { len: number; lastTime: number; lastValue: number }>();
+    const device = this.devices.get(deviceId);
+    const buttonIds = device instanceof DeviceSwitch ? Object.keys(device.buttons ?? {}) : [];
+    for (const bid of buttonIds) {
+      const usages = this.energyHistoryArchive.getLiveUsagesForButton(deviceId, bid);
+      const last = usages[usages.length - 1];
+      snap.set(bid, {
+        len: usages.length,
+        lastTime: last?.time ?? 0,
+        lastValue: last?.value ?? 0
+      });
+    }
+    return snap;
+  }
+
+  private energySnapshotsEqual(
+    a: Map<string, { len: number; lastTime: number; lastValue: number }> | undefined,
+    b: Map<string, { len: number; lastTime: number; lastValue: number }>
+  ): boolean {
+    if (!a) return b.size > 0;
+    const ids = new Set([...a.keys(), ...b.keys()]);
+    for (const id of ids) {
+      const left = a.get(id);
+      const right = b.get(id);
+      if (!left || !right) return false;
+      if (left.len !== right.len || left.lastTime !== right.lastTime || left.lastValue !== right.lastValue) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private recordDeviceChangesIfAny(prev: Device | undefined, device: Device): void {
@@ -283,7 +307,7 @@ export class DeviceManager implements EntityManager {
   }
 
   /**
-   * Verschiebt Messpunkte älter als 48 Stunden ins Archiv und behält nur das Live-Fenster im Gerät.
+   * Verschiebt Messpunkte älter als 48 Stunden ins Archiv (nur History-DB, nicht im Gerät).
    * @returns true, wenn Live-Daten gekürzt oder archiviert wurden
    */
   private trimAndArchiveSwitchEnergyHistory(device: DeviceSwitch): boolean {
@@ -291,30 +315,55 @@ export class DeviceManager implements EntityManager {
     const cutoff = Date.now() - DeviceSwitch.ENERGY_USAGE_LIVE_WINDOW_MS;
     let changed = false;
 
-    for (const [buttonId, btn] of Object.entries(device.buttons ?? {})) {
-      if (!btn?.energyUsages?.length) continue;
-      const beforeLen = btn.energyUsages.length;
-      const toArchive = btn.energyUsages.filter(u => u.time < cutoff);
+    for (const buttonId of Object.keys(device.buttons ?? {})) {
+      const usages = this.energyHistoryArchive.getLiveUsagesForButton(device.id, buttonId);
+      if (usages.length === 0) continue;
+      const beforeLen = usages.length;
+      const toArchive = usages.filter(u => u.time < cutoff);
       if (toArchive.length > 0) {
         this.energyHistoryArchive.appendPruned(device.id, buttonId, toArchive);
         changed = true;
       }
-      const trimmed = btn.energyUsages.filter(u => u.time >= cutoff);
+      const trimmed = usages.filter(u => u.time >= cutoff);
       if (trimmed.length !== beforeLen) {
-        btn.energyUsages = trimmed;
         changed = true;
       }
-      this.energyHistoryArchive.replaceLiveWindow(device.id, buttonId, btn.energyUsages);
+      this.energyHistoryArchive.replaceLiveWindow(device.id, buttonId, trimmed);
+      const btn = device.buttons[buttonId];
+      if (btn) {
+        btn.energyUsages = [];
+      }
     }
     return changed;
   }
 
-  /** Persistiert das 48h-Live-Fenster in der pro-Gerät-History-DB (nicht in der Geräte-Zeile). */
-  private syncSwitchEnergyLiveToStore(device: DeviceSwitch): void {
+  private wireSwitchEnergyHistory(device: DeviceSwitch): void {
     if (!device.id) return;
-    for (const [buttonId, btn] of Object.entries(device.buttons ?? {})) {
-      this.energyHistoryArchive.replaceLiveWindow(device.id, buttonId, btn?.energyUsages ?? []);
+    const deviceId = device.id;
+    device.setEnergyHistoryAccess({
+      getLiveUsages: buttonId => this.energyHistoryArchive.getLiveUsagesForButton(deviceId, buttonId),
+      setLiveUsages: (buttonId, usages) =>
+        this.energyHistoryArchive.replaceLiveWindow(deviceId, buttonId, usages)
+    });
+    for (const btn of Object.values(device.buttons ?? {})) {
+      if (btn) {
+        btn.energyUsages = [];
+      }
     }
+  }
+
+  private isSwitchEnergyLikeDevice(device: Device): boolean {
+    if (device instanceof DeviceSwitch) return true;
+    const type = String(device.type ?? "");
+    return type === DeviceType.SWITCH_ENERGY || type === "switch-energy";
+  }
+
+  private getSwitchButtonIds(device: Device): string[] {
+    if (device instanceof DeviceSwitch) {
+      return Object.keys(device.buttons ?? {});
+    }
+    const raw = device as unknown as { buttons?: Record<string, unknown> };
+    return raw.buttons && typeof raw.buttons === "object" ? Object.keys(raw.buttons) : [];
   }
 
   private parseCleanSequenceFromPatch(raw: unknown): string[] | undefined {
@@ -557,44 +606,23 @@ export class DeviceManager implements EntityManager {
     opts: { fromMs: number; toMs: number; buttonId?: string; includeArchive: boolean }
   ): { buttons: Record<string, EnergyUsage[]> } | null {
     const device = this.devices.get(deviceId);
-    if (!device || !(device instanceof DeviceSwitch)) {
+    if (!device || !this.isSwitchEnergyLikeDevice(device)) {
       return null;
     }
+
+    const allButtonIds = this.getSwitchButtonIds(device);
     const buttonIds = opts.buttonId
-      ? [opts.buttonId].filter(bid => device.buttons?.[bid])
-      : Object.keys(device.buttons ?? {});
+      ? [opts.buttonId].filter(bid => allButtonIds.includes(bid))
+      : allButtonIds;
     const out: Record<string, EnergyUsage[]> = {};
     for (const bid of buttonIds) {
-      const btn = device.buttons[bid];
-      const inMemory = (btn?.energyUsages ?? []) as EnergyUsage[];
-      const fromStore = this.energyHistoryArchive.getLiveForButtonInRange(
+      out[bid] = this.energyHistoryArchive.getMergedEnergyForButton(
         deviceId,
         bid,
         opts.fromMs,
-        opts.toMs
+        opts.toMs,
+        opts.includeArchive
       );
-      const byTime = new Map<number, EnergyUsage>();
-      for (const u of fromStore) {
-        byTime.set(u.time, u);
-      }
-      for (const u of inMemory) {
-        if (u.time >= opts.fromMs && u.time <= opts.toMs) {
-          byTime.set(u.time, u);
-        }
-      }
-      const live = Array.from(byTime.values());
-      if (!opts.includeArchive) {
-        out[bid] = [...live].sort((a, b) => a.time - b.time);
-        continue;
-      }
-      const arch = this.energyHistoryArchive.getForButtonInRange(deviceId, bid, opts.fromMs, opts.toMs);
-      for (const u of arch) {
-        byTime.set(u.time, u);
-      }
-      for (const u of live) {
-        byTime.set(u.time, u);
-      }
-      out[bid] = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
     }
     return { buttons: out };
   }
