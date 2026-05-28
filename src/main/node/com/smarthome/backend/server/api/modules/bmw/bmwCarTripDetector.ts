@@ -25,6 +25,9 @@ export const BMW_TRIP_STATIONARY_RADIUS_M = 60;
  */
 export const BMW_TRIP_MIN_DISTANCE_KM = 0;
 
+/** Max. Dauer (ms) für Fahrten ohne Distanz-Nachweis (sonst eher ganztägiges Stehen). */
+export const BMW_TRIP_MAX_INCONCLUSIVE_DURATION_MS = 2 * 60 * 60 * 1000;
+
 /** Standardgröße des Tanks (Liter) – pro Auto manuell überschreibbar. */
 export const BMW_DEFAULT_TANK_CAPACITY_LITERS = 60;
 
@@ -195,6 +198,27 @@ export function collectDriverDoorOpenEvents(
   return events;
 }
 
+/** Soll ein Intervall zwischen zwei Tür-Auf-Events als Fahrt zählen? */
+export function shouldCountDoorTripInterval(
+  startTime: number,
+  endTime: number,
+  drivenKm: number | undefined,
+  minDistanceKm: number = BMW_TRIP_MIN_DISTANCE_KM
+): boolean {
+  const durationMs = Math.max(0, endTime - startTime);
+  const shortGap = durationMs < BMW_TRIP_STATIONARY_PAUSE_MS * 3; // 15 min
+
+  if (drivenKm != null && drivenKm > 0) {
+    return minDistanceKm <= 0 || drivenKm >= minDistanceKm;
+  }
+  if (drivenKm === 0) return false;
+
+  // Kein Distanz-Nachweis: kurze Stopps (Tanken) ignorieren, lange Parks (>2 h) auch.
+  if (shortGap) return false;
+  if (durationMs > BMW_TRIP_MAX_INCONCLUSIVE_DURATION_MS) return false;
+  return true;
+}
+
 /**
  * Findet das Ende einer Fahrt: der erste Zeitpunkt nach `startMs`, ab dem das
  * Fahrzeug für mindestens `stationaryPauseMs` innerhalb von `stationaryRadiusM`
@@ -238,11 +262,27 @@ function mileageDeltaKmBetween(
   startMs: number,
   endMs: number
 ): number | undefined {
-  const before = lastNumericValueAt(mileageSeries, startMs);
-  const after = lastNumericValueAt(mileageSeries, endMs);
-  if (before == null || after == null) return undefined;
-  const delta = after - before;
-  return delta >= 0 ? delta : undefined;
+  if (!mileageSeries?.length) return undefined;
+
+  const values: number[] = [];
+  const atStart = lastNumericValueAt(mileageSeries, startMs);
+  if (atStart != null) values.push(atStart);
+  for (const p of mileageSeries) {
+    if (p.time < startMs || p.time > endMs) continue;
+    const n = toNum(p.value);
+    if (n != null) values.push(n);
+  }
+  const atEnd = lastNumericValueAt(mileageSeries, endMs);
+  if (atEnd != null && (values.length === 0 || values[values.length - 1] !== atEnd)) {
+    values.push(atEnd);
+  }
+  if (values.length < 2) return undefined;
+
+  const endpointDelta = values[values.length - 1] - values[0];
+  if (endpointDelta > 0) return endpointDelta;
+
+  const span = Math.max(...values) - Math.min(...values);
+  return span > 0 ? span : 0;
 }
 
 /**
@@ -317,7 +357,11 @@ export function computeDrivenKmBetween(
     return Math.max(...candidates);
   }
 
-  if (mileageKm === 0 || rangeKm === 0) return 0;
+  // Eindeutig keine Bewegung: Tacho und Restreichweite unverändert.
+  if (mileageKm === 0 && rangeKm === 0) return 0;
+  if (mileageKm === 0 && rangeKm == null && gpsKm === 0) return 0;
+  // Nur flache Restreichweite ohne Tacho – nicht als „0 km“ werten (MQTT oft spärlich).
+  if (rangeKm === 0 && mileageKm == null && gpsKm === 0) return undefined;
   if (mileageKm == null && rangeKm == null && gpsKm === 0) return undefined;
   return 0;
 }
@@ -367,22 +411,15 @@ export function detectTripIntervalsFromDoorOpenEvents(
       endTime
     );
 
-    // Zwischen zwei Tür-Auf-Events liegt eine Fahrt, sofern messbare Bewegung stattfand.
     if (hasNextInWindow) {
-      if (drivenKm === 0) continue;
-      if (minDistanceKm > 0 && drivenKm != null && drivenKm < minDistanceKm) {
-        continue;
+      if (shouldCountDoorTripInterval(start, endTime, drivenKm, minDistanceKm)) {
+        intervals.push({ startTime: start, endTime });
       }
-      intervals.push({ startTime: start, endTime });
       continue;
     }
 
-    // Letztes Tür-Auf: offene Fahrt nur bei messbarer Bewegung danach.
-    if (drivenKm != null && drivenKm > 0) {
-      if (minDistanceKm <= 0 || drivenKm >= minDistanceKm) {
-        intervals.push({ startTime: start, endTime });
-      }
-    } else if (drivenKm == null) {
+    // Letztes Tür-Auf im Fenster: offene Fahrt bis toMs.
+    if (shouldCountDoorTripInterval(start, endTime, drivenKm, minDistanceKm)) {
       intervals.push({ startTime: start, endTime });
     }
   }

@@ -263,9 +263,8 @@ describe("bmwCarTripDetector", () => {
       ]
     };
     const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
-    expect(intervals.length).toBe(2);
+    expect(intervals.length).toBe(1);
     expect(intervals[0]).toEqual({ startTime: t1, endTime: t2 });
-    expect(intervals[1]).toEqual({ startTime: t2, endTime: toMs });
   });
 
   it("klippt Trip-Starts ausserhalb [fromMs, toMs]", () => {

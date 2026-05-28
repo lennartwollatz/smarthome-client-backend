@@ -147,3 +147,53 @@ export function shouldSupplementFromEventLog(
 ): boolean {
   return collectDriverDoorOpenEvents(series).length === 0;
 }
+
+export type CarMqttEventBounds = {
+  fromMs: number;
+  toMs: number;
+  count: number;
+};
+
+/**
+ * Ermittelt den Zeitbereich aller CAR_MQTT_RECEIVED-Einträge für die Geräte-IDs.
+ */
+export function findCarMqttEventBounds(
+  eventLogStore: EventLogStore,
+  deviceIds: string[]
+): CarMqttEventBounds | null {
+  const idSet = new Set(deviceIds.filter(Boolean));
+  if (idSet.size === 0) return null;
+
+  let fromMs = Number.POSITIVE_INFINITY;
+  let toMs = Number.NEGATIVE_INFINITY;
+  let count = 0;
+  let offset = 0;
+
+  while (true) {
+    const { items, total } = eventLogStore.query({
+      eventType: EventType.CAR_MQTT_RECEIVED,
+      limit: EVENT_LOG_PAGE_SIZE,
+      offset
+    });
+
+    for (const entry of items) {
+      if (!idSet.has(entry.deviceId)) continue;
+      count += 1;
+      const ts =
+        typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)
+          ? entry.timestamp
+          : undefined;
+      if (ts == null) continue;
+      if (ts < fromMs) fromMs = ts;
+      if (ts > toMs) toMs = ts;
+    }
+
+    offset += items.length;
+    if (items.length === 0 || offset >= total) break;
+  }
+
+  if (count === 0 || !Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+    return null;
+  }
+  return { fromMs, toMs, count };
+}

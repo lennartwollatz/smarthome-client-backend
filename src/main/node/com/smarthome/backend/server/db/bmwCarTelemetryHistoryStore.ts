@@ -4,6 +4,7 @@ import { logger } from "../../logger.js";
 import { isTrackedTelemetryKey } from "../api/modules/bmw/bmwCarDataTelemetryKeys.js";
 import {
   buildSeriesFromCarMqttEventLog,
+  findCarMqttEventBounds,
   mergeTelemetrySeries,
   shouldSupplementFromEventLog,
   syncTelemetryHistoryFromEventLog
@@ -266,5 +267,36 @@ export class BmwCarTelemetryHistoryStore {
     } catch (e) {
       logger.debug({ e, deviceId }, "BmwCarTelemetryHistory: deleteByDeviceId");
     }
+  }
+
+  /**
+   * Einmaliges Backfill: schreibt alle CAR_MQTT_RECEIVED-Events aus dem Event-Log
+   * dauerhaft in die Telemetrie-Historie (Tür, GPS, Tachostand, …).
+   */
+  backfillFromEventLog(
+    deviceId: string,
+    eventLogStore: EventLogStore,
+    vin?: string
+  ): { mqttEvents: number; fromMs?: number; toMs?: number } {
+    const deviceIds = resolveDeviceIds(deviceId, vin);
+    const bounds = findCarMqttEventBounds(eventLogStore, deviceIds);
+    if (!bounds) {
+      return { mqttEvents: 0 };
+    }
+    this.syncFromEventLog(deviceIds, bounds.fromMs, bounds.toMs, eventLogStore);
+    return {
+      mqttEvents: bounds.count,
+      fromMs: bounds.fromMs,
+      toMs: bounds.toMs
+    };
+  }
+
+  countSeriesPoints(deviceId: string, vin?: string): Record<string, number> {
+    const row = loadMergedRow(this.repo, resolveDeviceIds(deviceId, vin));
+    const counts: Record<string, number> = {};
+    for (const [key, points] of Object.entries(row.series ?? {})) {
+      counts[key] = points.length;
+    }
+    return counts;
   }
 }

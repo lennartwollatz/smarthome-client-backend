@@ -18,6 +18,7 @@ import { BMWCarTripCategoriesStore } from "./bmwCarTripCategoriesStore.js";
 import { isBmwTripCategory, type BmwTripCategory } from "./bmwCarTripCategory.js";
 import { applyTripCategoriesToEntries } from "./bmwCarTripCategoryApplier.js";
 import { buildGroupedTripEntriesFast } from "./bmwCarTripEnricher.js";
+import { backfillBmwTripsFromDatabase } from "./bmwCarTripBackfill.js";
 import { computeTripYearSummary, yearBoundsMs } from "./bmwCarTripYearSummary.js";
 import { BMWCarHomeStore, type BmwCarHome } from "./bmwCarHomeStore.js";
 import {
@@ -401,6 +402,18 @@ export class BMWModuleManager extends ModuleManager<
     const enriched = trips.length > 0 ? await enrichTripsWithAddresses(trips) : trips;
     const entries = buildGroupedTripEntriesFast(enriched);
     return { entries: this.applyCategoriesAndAuto(deviceId, entries) };
+  }
+
+  backfillTripsFromDatabase(deviceId: string) {
+    const car = this.deviceManager.getDevice(deviceId);
+    if (!car || !(car instanceof BMWCar) || !this.eventLogStore) return null;
+    const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
+    return backfillBmwTripsFromDatabase(
+      this.deviceManager.getBmwTelemetryHistoryStore(),
+      this.eventLogStore,
+      deviceId,
+      { vin: car.vin, tankCapacityLiters }
+    );
   }
 
   setTripCategory(
