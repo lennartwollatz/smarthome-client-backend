@@ -313,11 +313,13 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
 
   async updateTemperatureValues(device: MatterDeviceTemperture) {
     const state = await this.getThermostatState(device);
+    if (!state) return;
     device.temperature = (state.localTemperature ?? 0) / 100;
   }
 
   async updateTemperatureGoalValues(device: MatterDeviceTemperture) {
     const state = await this.getThermostatState(device);
+    if (!state) return;
     device.temperatureGoal = (state.occupiedHeatingSetpoint ?? 0) / 100;
   }
 

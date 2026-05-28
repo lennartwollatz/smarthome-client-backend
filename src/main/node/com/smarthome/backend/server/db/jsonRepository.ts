@@ -20,21 +20,19 @@ export class JsonRepository<T> implements Repository<T> {
         data = excluded.data,
         updated_at = datetime('now')
     `;
-    const conn = this.db.createNewConnection();
+    const conn = this.db.getConnection();
     try {
       conn.prepare(sql).run(id, this.typeName, json);
       return object;
     } catch (error) {
       logger.error({ error }, "Fehler beim Speichern des Objekts {} mit ID {}", this.typeName, id);
       throw new Error("Fehler beim Speichern in der Datenbank");
-    } finally {
-      conn.close();
     }
   }
 
   findById(id: string): T | null {
     const sql = "SELECT data FROM objects WHERE id = ? AND type = ?";
-    const conn = this.db.createNewConnection();
+    const conn = this.db.getConnection();
     try {
       const row = conn.prepare(sql).get(id, this.typeName) as { data: string } | undefined;
       if (!row) {
@@ -46,14 +44,12 @@ export class JsonRepository<T> implements Repository<T> {
     } catch (error) {
       logger.error({ error }, "Fehler beim Abrufen des Objekts {} mit ID {}", this.typeName, id);
       throw new Error("Fehler beim Abrufen aus der Datenbank");
-    } finally {
-      conn.close();
     }
   }
 
   findAll(): T[] {
     const sql = "SELECT id, data FROM objects WHERE type = ? ORDER BY created_at DESC";
-    const conn = this.db.createNewConnection();
+    const conn = this.db.getConnection();
     try {
       const rows = conn.prepare(sql).all(this.typeName) as { id: string; data: string }[];
       const results = rows.map(row => JSON.parse(row.data) as T);
@@ -61,14 +57,12 @@ export class JsonRepository<T> implements Repository<T> {
     } catch (error) {
       logger.error({ error }, "Fehler beim Abrufen aller Objekte vom Typ {}", this.typeName);
       throw new Error("Fehler beim Abrufen aus der Datenbank");
-    } finally {
-      conn.close();
     }
   }
 
   deleteById(id: string): boolean {
     const sql = "DELETE FROM objects WHERE id = ? AND type = ?";
-    const conn = this.db.createNewConnection();
+    const conn = this.db.getConnection();
     try {
       const result = conn.prepare(sql).run(id, this.typeName);
       const deleted = result.changes > 0;
@@ -76,28 +70,24 @@ export class JsonRepository<T> implements Repository<T> {
     } catch (error) {
       logger.error({ error }, "Fehler beim Löschen des Objekts {} mit ID {}", this.typeName, id);
       throw new Error("Fehler beim Löschen aus der Datenbank");
-    } finally {
-      conn.close();
     }
   }
 
   existsById(id: string): boolean {
     const sql = "SELECT COUNT(*) AS count FROM objects WHERE id = ? AND type = ?";
-    const conn = this.db.createNewConnection();
+    const conn = this.db.getConnection();
     try {
       const row = conn.prepare(sql).get(id, this.typeName) as { count: number } | undefined;
       return (row?.count ?? 0) > 0;
     } catch (error) {
       logger.error({ error }, "Fehler beim Pruefen der Existenz von Objekt {} mit ID {}", this.typeName, id);
       throw new Error("Fehler beim Pruefen in der Datenbank");
-    } finally {
-      conn.close();
     }
   }
 
   count(): number {
     const sql = "SELECT COUNT(*) AS count FROM objects WHERE type = ?";
-    const conn = this.db.createNewConnection();
+    const conn = this.db.getConnection();
     try {
       const row = conn.prepare(sql).get(this.typeName) as { count: number } | undefined;
       const count = row?.count ?? 0;
@@ -105,8 +95,6 @@ export class JsonRepository<T> implements Repository<T> {
     } catch (error) {
       logger.error({ error }, "Fehler beim Zaehlen der Objekte vom Typ {}", this.typeName);
       throw new Error("Fehler beim Zaehlen in der Datenbank");
-    } finally {
-      conn.close();
     }
   }
 }

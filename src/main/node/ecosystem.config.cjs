@@ -7,10 +7,9 @@ module.exports = {
       cwd: __dirname,
       merge_logs: true,
       log_date_format: "YYYY-MM-DD HH:mm:ss",
-      /** Node.js-V8-Heap: bis 1 GB. */
-      node_args: "--max-old-space-size=1024",
-      /** PM2 startet den Prozess neu, wenn der RSS-Speicher 1 GB überschreitet. */
-      max_memory_restart: "1G"
+      /** Pi: 2 GB Swap (install_raspberry_pi.sh) – Heap 2048 MB; Override: NODE_HEAP_MB=… */
+      node_args: `--max-old-space-size=${process.env.NODE_HEAP_MB ?? "2048"}`,
+      max_memory_restart: process.env.PM2_MAX_MEMORY ?? "2200M"
     }
   ]
 };
