@@ -20,8 +20,15 @@ export class MatterEventStreamManager extends ModuleEventStreamManager<MatterDev
   }
 
   protected async startEventStream(callback: (event: MatterEvent) => void): Promise<void> {
-    let devices = this.deviceManager.getDevicesForModule(MATTERMODULE.id);
+    const devices = this.deviceManager.getDevicesForModule(MATTERMODULE.id);
     for (const device of devices) {
+      if (
+        device.type === DeviceType.VIRTUAL ||
+        device.type === DeviceType.SPEECH_ASSISTANT ||
+        device.type === DeviceType.PRESENCE
+      ) {
+        continue;
+      }
       try {
         await this.controller.startEventStream(device, callback);
       } catch (err) {

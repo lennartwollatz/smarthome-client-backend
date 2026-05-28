@@ -22,8 +22,9 @@ export class MatterThermostat extends DeviceThermostat implements MatterDevice {
   }
 
   async updateValues(): Promise<void> {
-    this.matterController?.updateTemperatureValues(this);
-    this.matterController?.updateTemperatureGoalValues(this);
+    if (!this.matterController) return;
+    await this.matterController.updateTemperatureValues(this);
+    await this.matterController.updateTemperatureGoalValues(this);
   }
 
   async delete(): Promise<void> {

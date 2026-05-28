@@ -24,8 +24,9 @@ export class MatterSwitchDimmer extends DeviceSwitchDimmer implements MatterDevi
   }
 
   async updateValues(): Promise<void> {
-    this.matterController?.updateOnOffValues(this);
-    this.matterController?.updateLevelValues(this);
+    if (!this.matterController) return;
+    await this.matterController.updateOnOffValues(this);
+    await this.matterController.updateLevelValues(this);
   }
 
   async delete(): Promise<void> {

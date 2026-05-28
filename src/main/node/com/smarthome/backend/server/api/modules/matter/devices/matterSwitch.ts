@@ -37,7 +37,8 @@ export class MatterSwitch extends DeviceSwitch implements MatterDeviceButtoned {
   }
 
   async updateValues(): Promise<void> {
-    this.matterController?.updateOnOffValues(this);
+    if (!this.matterController) return;
+    await this.matterController.updateOnOffValues(this);
   }
 
   async delete(): Promise<void> {

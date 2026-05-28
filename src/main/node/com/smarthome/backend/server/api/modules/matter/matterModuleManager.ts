@@ -414,6 +414,31 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
     return new MatterEventStreamManager(this.getManagerId(), this.deviceController, this.deviceManager);
   }
 
+  public override startEventStreamsAfterRegistration(): void {
+    void this.startMatterInfrastructureAndStreams();
+  }
+
+  private hasPhysicalCommissionedMatterDevices(): boolean {
+    return this.deviceManager.getDevicesForModule(this.getModuleId()).some(device =>
+      device.type === DeviceType.SWITCH ||
+      device.type === DeviceType.SWITCH_DIMMER ||
+      device.type === DeviceType.SWITCH_ENERGY ||
+      device.type === DeviceType.THERMOSTAT
+    );
+  }
+
+  private async startMatterInfrastructureAndStreams(): Promise<void> {
+    if (this.hasPhysicalCommissionedMatterDevices()) {
+      try {
+        await this.deviceController.ensureCommissioningControllerStarted();
+        await this.updateDeviceValues();
+      } catch (err) {
+        logger.error({ err }, "Matter: CommissioningController oder Geraete-Update fehlgeschlagen");
+      }
+    }
+    this.initialiseEventStreamManager();
+  }
+
   async initializeDeviceControllers(): Promise<void> {
     const devices = this.deviceManager.getDevicesForModule(this.getModuleId());
     for (const device of devices) {
@@ -694,7 +719,6 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
         Object.assign(matterSwitchEnergy, device);
         matterSwitchEnergy.rehydrateButtons();
         matterSwitchEnergy.setMatterController(this.deviceController);
-        await matterSwitchEnergy.updateValues();
         convertedDevice = matterSwitchEnergy;
         break;
       case DeviceType.SWITCH:
@@ -702,7 +726,6 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
         Object.assign(matterSwitch, device);
         matterSwitch.rehydrateButtons();
         matterSwitch.setMatterController(this.deviceController);
-        await matterSwitch.updateValues();
         convertedDevice = matterSwitch;
         break;
       case DeviceType.SWITCH_DIMMER:
@@ -710,28 +733,24 @@ export class MatterModuleManager extends ModuleManager<MatterEventStreamManager,
         Object.assign(matterSwitchDimmer, device);
         matterSwitchDimmer.rehydrateButtons();
         matterSwitchDimmer.setMatterController(this.deviceController);
-        await matterSwitchDimmer.updateValues();
         convertedDevice = matterSwitchDimmer;
         break;
       case DeviceType.THERMOSTAT:
         const matterThermostat = new MatterThermostat();
         Object.assign(matterThermostat, device);
         matterThermostat.setMatterController(this.deviceController);
-        await matterThermostat.updateValues();
         convertedDevice = matterThermostat;
         break;
       case DeviceType.VIRTUAL:
         const virtualDevice = new MatterVirtual();
         Object.assign(virtualDevice, device);
         virtualDevice.setMatterController(this.deviceController);
-        await virtualDevice.updateValues();
         convertedDevice = virtualDevice;
         break;
       case DeviceType.SPEECH_ASSISTANT:
         const speechAssistantDevice = new MatterSpeechAssistant();
         Object.assign(speechAssistantDevice, device);
         speechAssistantDevice.setMatterController(this.deviceController);
-        await speechAssistantDevice.updateValues();
         convertedDevice = speechAssistantDevice;
         break;
       case DeviceType.PRESENCE: {

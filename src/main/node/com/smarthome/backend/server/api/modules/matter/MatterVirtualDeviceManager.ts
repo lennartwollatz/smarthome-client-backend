@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { OnOffServer } from "@matter/node/behaviors/on-off";
-import { ServerNode, Endpoint, VendorId, DeviceTypeId } from "@matter/main";
+import { Environment, ServerNode, Endpoint, VendorId, DeviceTypeId } from "@matter/main";
 import { OnOffPlugInUnitDevice } from "@matter/main/devices";
 import {
   CommissioningFlowType,
@@ -24,6 +24,9 @@ import { MatterVirtual } from "./devices/matterVirtual.js";
 const ON_OFF_SERVER_LIGHTING = OnOffServer.with("Lighting");
 
 const VIRTUAL_BASE_PORT = 5550;
+
+/** Eigene Matter-Runtime – darf nicht {@link Environment.default} teilen (sonst MDNS-Konflikt mit CommissioningController). */
+const virtualHostEnvironment = new Environment("smarthome-matter-virtual-hosts");
 
 const VENDOR_ID = 4891;
 const VENDOR_NAME = "SmartHome";
@@ -163,6 +166,7 @@ export class MatterVirtualDeviceManager {
 
     const server = await ServerNode.create({
       id: nodeId,
+      environment: virtualHostEnvironment,
       network: { port: data.port },
       commissioning: { passcode: data.passcode, discriminator: data.discriminator },
       productDescription: {

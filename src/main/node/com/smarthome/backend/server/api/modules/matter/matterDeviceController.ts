@@ -103,7 +103,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
    * Hinweis: Der Methodenname bleibt bewusst wie angefordert (`Commssionable`).
    */
   async scanForCommssionableDevices(payload: PairingPayload): Promise<MatterDeviceDiscovered[]> {
-    this.commissioningController = await this.getCommissioningController();
+    this.commissioningController = await this.ensureCommissioningControllerStarted();
     if( !this.commissioningController) return [];
 
     const pairingCode = payload.pairingCode;
@@ -165,7 +165,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     const ip = device.address;
     const port = device.port ?? 5540;
 
-    this.commissioningController = await this.getCommissioningController();
+    this.commissioningController = await this.ensureCommissioningControllerStarted();
     if( !this.commissioningController) return null;
 
     const pairingCode = payload.pairingCode;
@@ -206,7 +206,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
         const nodeId = await this.commissioningController.commissionNode(options);
         // After commissioning or if we have a commissioned node we can connect to it
         try {
-          const node = await this.getNode(nodeId);
+          const node = await this.getNode(nodeId, true);
 
           if (!node) {
               return null;
@@ -228,7 +228,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async unpairDevice(device: MatterDevice): Promise<boolean> {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if( !node) return false;
     await node.decommission();
     return true;
@@ -250,7 +250,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
 
   async getButtonsForDevice(device: MatterDeviceDiscovered): Promise<string[]> {
     if( !device.nodeId) return [];
-    const node = await this.getNode(NodeId(device.nodeId));
+    const node = await this.getNode(NodeId(device.nodeId), true);
     if( !node) return [];
     const buttons = node.getDevices();
     if (buttons.length === 0) {
@@ -263,8 +263,10 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
    * Liefert einen PairedNode aus dem CommissioningController.
    * Vorgehen analog zu `SonoffPlatform.ts`: NodeId parsen -> controller.getNode(nodeId) -> optional connect().
    */
-  async getNode(nodeId: NodeId): Promise<PairedNode | null> {
-    this.commissioningController = await this.getCommissioningController();
+  async getNode(nodeId: NodeId, allowStart = false): Promise<PairedNode | null> {
+    this.commissioningController = allowStart
+      ? await this.ensureCommissioningControllerStarted()
+      : await this.getCommissioningControllerIfReady();
     if( !this.commissioningController) return null;
     try {
       const nodes = this.commissioningController.getCommissionedNodes();
@@ -324,7 +326,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async toggleSwitch(device: MatterDevice, buttonId: string) {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if( !node) return;
     const button = node.parts.get(Number(buttonId));
     if( !button) return;
@@ -340,7 +342,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async setOn(device: MatterDevice, buttonId: string) {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if( !node) return;
     const button = node.parts.get(Number(buttonId));
     if( !button) return;
@@ -352,7 +354,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async setOff(device: MatterDevice, buttonId: string) {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if( !node) return;
     const button = node.parts.get(Number(buttonId));
     if( !button) return;
@@ -386,7 +388,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async setIntensity(device: MatterDevice, buttonId: string, intensity: number) {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if( !node) return;
     const button = node.parts.get(Number(buttonId));
     if( !button) return;
@@ -488,7 +490,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async setTemperatureGoal(device: MatterDevice, temperatureGoal: number) {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if (!node) return;
     const devices = node.getDevices();
     const thermostatEndpoint = devices.length > 0 ? devices[0] : node.getDeviceById(0);
@@ -504,7 +506,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async getTemperatureGoal(device: MatterDevice): Promise<number> {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if (!node) return 0;
     const devices = node.getDevices();
     const thermostatEndpoint = devices.length > 0 ? devices[0] : node.getDeviceById(0);
@@ -514,7 +516,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async getTemperature(device: MatterDevice): Promise<number> {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if (!node) return 0;
     const devices = node.getDevices();
     const thermostatEndpoint = devices.length > 0 ? devices[0] : node.getDeviceById(0);
@@ -543,7 +545,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async removeTemperatureSchedules(device: MatterDevice) {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if (!node) return;
     const devices = node.getDevices();
     const thermostat = devices.length > 0 ? devices[0] : node;
@@ -555,7 +557,7 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
   }
 
   async setTemperatureSchedule(device: MatterDevice, shedule: TemperatureScheduleTimeRange) {
-    const node = await this.getNode(NodeId(device.getNodeId()));
+    const node = await this.getNode(NodeId(device.getNodeId()), true);
     if (!node) return;
     const devices = node.getDevices();
     const thermostat = devices.length > 0 ? devices[0] : node;
@@ -646,7 +648,8 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
       );
       return;
     }
-    const node = await this.getNode(NodeId(matterDevice.getNodeId()));
+    await this.ensureCommissioningControllerStarted();
+    const node = await this.getNode(NodeId(matterDevice.getNodeId()), true);
     if (!node) return;
 
     this.matterAttributeStreamCallback = callback;
@@ -801,8 +804,19 @@ export class MatterDeviceController extends ModuleDeviceControllerEvent<MatterEv
     this.initControllerPromise = null;
   }
 
-  private async getCommissioningController(): Promise<CommissioningController | null> {
+  /** Startet den CommissioningController (Pairing, physische Geraete, EventStream). */
+  public async ensureCommissioningControllerStarted(): Promise<CommissioningController | null> {
+    return this.getCommissioningController(true);
+  }
+
+  /** Liefert den Controller nur, wenn er bereits laeuft – startet ihn nicht (Startup-sicher). */
+  private async getCommissioningControllerIfReady(): Promise<CommissioningController | null> {
+    return this.getCommissioningController(false);
+  }
+
+  private async getCommissioningController(allowStart: boolean): Promise<CommissioningController | null> {
     if (this.commissioningController && this.commissioningControllerStarted) return this.commissioningController;
+    if (!allowStart) return null;
     if (!this.initControllerPromise) {
       this.initControllerPromise = this._doInitCommissioningController();
     }
