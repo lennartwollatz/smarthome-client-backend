@@ -1,5 +1,4 @@
-import type { DatabaseManager } from "./database.js";
-import { JsonRepository } from "./jsonRepository.js";
+import type { DeviceHistoryDatabase } from "./deviceHistoryDatabase.js";
 import { logger } from "../../logger.js";
 import { isTrackedTelemetryKey } from "../api/modules/bmw/bmwCarDataTelemetryKeys.js";
 import {
@@ -21,36 +20,37 @@ export type BmwCarTelemetryHistoryData = {
 };
 
 export class BmwCarTelemetryHistoryStore {
-  private repo: JsonRepository<BmwCarTelemetryHistoryData>;
+  constructor(private readonly deviceHistoryDb: DeviceHistoryDatabase) {}
 
-  constructor(db: DatabaseManager) {
-    this.repo = new JsonRepository<BmwCarTelemetryHistoryData>(db, "BmwCarTelemetryHistory");
+  private load(deviceId: string): BmwCarTelemetryHistoryData {
+    try {
+      return this.deviceHistoryDb.readCategory<BmwCarTelemetryHistoryData>(deviceId, "bmw_telemetry") ?? { series: {} };
+    } catch (e) {
+      logger.warn({ e, deviceId }, "BmwCarTelemetryHistory: load fehlgeschlagen");
+      return { series: {} };
+    }
+  }
+
+  private save(deviceId: string, row: BmwCarTelemetryHistoryData): void {
+    try {
+      this.deviceHistoryDb.writeCategory(deviceId, "bmw_telemetry", row);
+    } catch (e) {
+      logger.error({ e, deviceId, key: "bmw_telemetry" }, "BmwCarTelemetryHistory: save fehlgeschlagen");
+    }
   }
 
   append(deviceId: string, key: string, value: unknown, timeMs: number): void {
     if (!deviceId || !isTrackedTelemetryKey(key)) return;
     if (!Number.isFinite(timeMs)) return;
 
-    let row: BmwCarTelemetryHistoryData;
-    try {
-      row = this.repo.findById(deviceId) ?? { series: {} };
-    } catch (e) {
-      logger.warn({ e, deviceId }, "BmwCarTelemetryHistory: findById fehlgeschlagen");
-      return;
-    }
-
+    const row = this.load(deviceId);
     const series = row.series[key] ?? [];
     const last = series[series.length - 1];
     if (last && last.value === value) return;
 
     series.push({ time: timeMs, value });
     row.series[key] = series;
-
-    try {
-      this.repo.save(deviceId, row);
-    } catch (e) {
-      logger.error({ e, deviceId, key }, "BmwCarTelemetryHistory: save fehlgeschlagen");
-    }
+    this.save(deviceId, row);
   }
 
   getSeries(
@@ -63,11 +63,11 @@ export class BmwCarTelemetryHistoryStore {
     const allowed = keys.filter(k => isTrackedTelemetryKey(k));
     if (allowed.length === 0) return out;
 
-    let row: BmwCarTelemetryHistoryData | undefined;
+    let row: BmwCarTelemetryHistoryData;
     try {
-      row = this.repo.findById(deviceId) ?? undefined;
+      row = this.load(deviceId);
     } catch (e) {
-      logger.debug({ e, deviceId }, "BmwCarTelemetryHistory: getSeries findById");
+      logger.debug({ e, deviceId }, "BmwCarTelemetryHistory: getSeries load");
       return out;
     }
     if (!row?.series) return out;
@@ -81,17 +81,14 @@ export class BmwCarTelemetryHistoryStore {
     return out;
   }
 
-  /**
-   * Kalendermonate (1–12), in denen Telemetrie für Fahrten vorliegt.
-   */
   getAvailableTripMonths(deviceId: string): BmwTripMonth[] {
     const latKey = "vehicle.cabin.infotainment.navigation.currentLocation.latitude";
     const lngKey = "vehicle.cabin.infotainment.navigation.currentLocation.longitude";
     const keysToScan = [...BMW_TRIP_TRIGGER_KEYS, latKey, lngKey, ...BMW_TRIP_METRIC_KEYS];
 
-    let row: BmwCarTelemetryHistoryData | undefined;
+    let row: BmwCarTelemetryHistoryData;
     try {
-      row = this.repo.findById(deviceId) ?? undefined;
+      row = this.load(deviceId);
     } catch (e) {
       logger.debug({ e, deviceId }, "BmwCarTelemetryHistory: getAvailableTripMonths");
       return [];
@@ -127,31 +124,26 @@ export class BmwCarTelemetryHistoryStore {
     const latKey = "vehicle.cabin.infotainment.navigation.currentLocation.latitude";
     const lngKey = "vehicle.cabin.infotainment.navigation.currentLocation.longitude";
 
-    let row: BmwCarTelemetryHistoryData | undefined;
+    let row: BmwCarTelemetryHistoryData;
     try {
-      row = this.repo.findById(deviceId) ?? undefined;
+      row = this.load(deviceId);
     } catch (e) {
-      logger.debug({ e, deviceId }, "BmwCarTelemetryHistory: getTrips findById");
+      logger.debug({ e, deviceId }, "BmwCarTelemetryHistory: getTrips load");
       return [];
     }
     if (!row?.series) return [];
 
     const series: Record<string, BmwTelemetryHistoryPoint[]> = {};
-    // GPS-Punkte: nur innerhalb des Zeitfensters – Standphasen-Erkennung
-    // benötigt keine Daten von davor.
     for (const key of [latKey, lngKey]) {
       const points = (row.series[key] ?? []).filter(p => p.time >= fromMs && p.time <= toMs);
       if (points.length > 0) series[key] = points;
     }
-    // Tür- und Tachostand: alle Punkte bis toMs, damit der Vorgänger-Zustand
-    // (Tür-Status, letzter bekannter Kilometerstand) bekannt ist.
     const carriedKeys = [BMW_DRIVER_DOOR_KEY, ...BMW_TRIP_METRIC_KEYS] as const;
     for (const key of carriedKeys) {
       const points = (row.series[key] ?? []).filter(p => p.time <= toMs);
       if (points.length > 0) series[key] = points;
     }
 
-    // BMW_TRIP_TRIGGER_KEYS ist re-exportiert für Konsumenten (Telemetrie-Filter)
     void BMW_TRIP_TRIGGER_KEYS;
 
     return detectTripsFromHistorySeries(series, fromMs, toMs, {
@@ -161,9 +153,14 @@ export class BmwCarTelemetryHistoryStore {
 
   deleteByDeviceId(deviceId: string): void {
     try {
-      this.repo.deleteById(deviceId);
+      this.deviceHistoryDb.deleteCategory(deviceId, "bmw_telemetry");
+      this.deviceHistoryDb.closeDevice(deviceId);
     } catch (e) {
       logger.debug({ e, deviceId }, "BmwCarTelemetryHistory: deleteByDeviceId");
     }
+  }
+
+  importLegacyRow(deviceId: string, data: BmwCarTelemetryHistoryData): void {
+    this.save(deviceId, data);
   }
 }

@@ -32,6 +32,11 @@ import type { EventLogEntry } from "../../../audit/eventLogEntry.js";
 import { VacuumCleaningHistoryStore } from "../../../db/vacuumCleaningHistoryStore.js";
 import { DEVICE_MODE, DeviceVacuumCleaner } from "../../../../model/devices/DeviceVacuumCleaner.js";
 import { serializeDeviceForApi } from "./deviceSerialize.js";
+import {
+  serializeDeviceForDatabase,
+  stripHistoryFieldsFromLoadedDevice
+} from "./serializeDeviceForDatabase.js";
+import { DeviceHistoryDatabase } from "../../../db/deviceHistoryDatabase.js";
 import type { DeviceChangeLogStore } from "../../../db/deviceChangeLogStore.js";
 import { detectDeviceChanges } from "../../../audit/deviceChangeDetector.js";
 import { getCurrentSource } from "../../../events/EventSource.js";
@@ -48,6 +53,7 @@ export class DeviceManager implements EntityManager {
   private energyHistoryArchive: EnergyHistoryArchiveStore;
   private bmwTelemetryHistory: BmwCarTelemetryHistoryStore;
   private sensorHistory: SensorHistoryStore;
+  private deviceHistoryDatabase: DeviceHistoryDatabase;
   private vacuumCleaningHistory: VacuumCleaningHistoryStore;
   private moduleManagers = new Map<string, ModuleManager<any, any, any, any, any, any, any>>();
   private liveUpdateService?: LiveUpdateService;
@@ -59,12 +65,14 @@ export class DeviceManager implements EntityManager {
     databaseManager: DatabaseManager,
     private eventManager: EventManager,
     vacuumCleaningHistory: VacuumCleaningHistoryStore,
+    deviceHistoryDatabase: DeviceHistoryDatabase,
     private deviceChangeLogStore?: DeviceChangeLogStore
   ) {
     this.deviceRepository = new JsonRepository<Device>(databaseManager, "Device");
-    this.energyHistoryArchive = new EnergyHistoryArchiveStore(databaseManager);
-    this.bmwTelemetryHistory = new BmwCarTelemetryHistoryStore(databaseManager);
-    this.sensorHistory = new SensorHistoryStore(databaseManager);
+    this.energyHistoryArchive = new EnergyHistoryArchiveStore(deviceHistoryDatabase);
+    this.bmwTelemetryHistory = new BmwCarTelemetryHistoryStore(deviceHistoryDatabase);
+    this.sensorHistory = new SensorHistoryStore(deviceHistoryDatabase);
+    this.deviceHistoryDatabase = deviceHistoryDatabase;
     this.vacuumCleaningHistory = vacuumCleaningHistory;
     this.initialize();
   }
@@ -99,11 +107,15 @@ export class DeviceManager implements EntityManager {
     const devices = this.deviceRepository.findAll();
     devices.forEach(device => {
       if (device?.id) {
+        stripHistoryFieldsFromLoadedDevice(device as unknown as Record<string, unknown>);
+        if (device instanceof DeviceTemperature) {
+          device.temperatureHistory = [];
+        }
         this.wireEventManager(device);
         this.wireVacuumCleaningHistory(device);
         if (device instanceof DeviceSwitch) {
           if (this.trimAndArchiveSwitchEnergyHistory(device)) {
-            this.deviceRepository.save(device.id, serializeDeviceForApi(device) as unknown as Device);
+            this.deviceRepository.save(device.id, serializeDeviceForDatabase(device) as unknown as Device);
           }
         }
         this.devices.set(device.id, device);
@@ -148,7 +160,7 @@ export class DeviceManager implements EntityManager {
       if (device.room === roomId) {
         device.room = undefined;
         if (device.id) {
-          this.deviceRepository.save(device.id, serializeDeviceForApi(device) as unknown as Device);
+          this.deviceRepository.save(device.id, serializeDeviceForDatabase(device) as unknown as Device);
           if (device.moduleId !== "voice-assistant") {
             this.liveUpdateService?.emit("device:updated", device);
           }
@@ -177,6 +189,7 @@ export class DeviceManager implements EntityManager {
     this.energyHistoryArchive.deleteByDeviceId(deviceId);
     this.bmwTelemetryHistory.deleteByDeviceId(deviceId);
     this.sensorHistory.deleteByDeviceId(deviceId);
+    this.deviceHistoryDatabase.deleteDeviceDatabase(deviceId);
     this.sensorValueSnapshots.delete(deviceId);
     this.vacuumCleaningHistory.deleteByDeviceId(deviceId);
     device?.delete();
@@ -203,8 +216,11 @@ export class DeviceManager implements EntityManager {
     this.recordSensorHistoryIfChanged(prev, device);
     this.recordVacuumCleaningHistoryIfCompleted(prev, device);
     this.recordDeviceChangesIfAny(prev, device);
+    if (device instanceof DeviceSwitch) {
+      this.syncSwitchEnergyLiveToStore(device);
+    }
     this.devices.set(device.id, device);
-    this.deviceRepository.save(device.id, serializeDeviceForApi(device) as unknown as Device);
+    this.deviceRepository.save(device.id, serializeDeviceForDatabase(device) as unknown as Device);
     if (device.moduleId !== "voice-assistant") {
       this.liveUpdateService?.emit("device:updated", device);
     }
@@ -288,8 +304,17 @@ export class DeviceManager implements EntityManager {
         btn.energyUsages = trimmed;
         changed = true;
       }
+      this.energyHistoryArchive.replaceLiveWindow(device.id, buttonId, btn.energyUsages);
     }
     return changed;
+  }
+
+  /** Persistiert das 48h-Live-Fenster in der pro-Gerät-History-DB (nicht in der Geräte-Zeile). */
+  private syncSwitchEnergyLiveToStore(device: DeviceSwitch): void {
+    if (!device.id) return;
+    for (const [buttonId, btn] of Object.entries(device.buttons ?? {})) {
+      this.energyHistoryArchive.replaceLiveWindow(device.id, buttonId, btn?.energyUsages ?? []);
+    }
   }
 
   private parseCleanSequenceFromPatch(raw: unknown): string[] | undefined {
@@ -541,14 +566,28 @@ export class DeviceManager implements EntityManager {
     const out: Record<string, EnergyUsage[]> = {};
     for (const bid of buttonIds) {
       const btn = device.buttons[bid];
-      const liveArr = (btn?.energyUsages ?? []) as EnergyUsage[];
-      const live = liveArr.filter(u => u.time >= opts.fromMs && u.time <= opts.toMs);
+      const inMemory = (btn?.energyUsages ?? []) as EnergyUsage[];
+      const fromStore = this.energyHistoryArchive.getLiveForButtonInRange(
+        deviceId,
+        bid,
+        opts.fromMs,
+        opts.toMs
+      );
+      const byTime = new Map<number, EnergyUsage>();
+      for (const u of fromStore) {
+        byTime.set(u.time, u);
+      }
+      for (const u of inMemory) {
+        if (u.time >= opts.fromMs && u.time <= opts.toMs) {
+          byTime.set(u.time, u);
+        }
+      }
+      const live = Array.from(byTime.values());
       if (!opts.includeArchive) {
         out[bid] = [...live].sort((a, b) => a.time - b.time);
         continue;
       }
       const arch = this.energyHistoryArchive.getForButtonInRange(deviceId, bid, opts.fromMs, opts.toMs);
-      const byTime = new Map<number, EnergyUsage>();
       for (const u of arch) {
         byTime.set(u.time, u);
       }

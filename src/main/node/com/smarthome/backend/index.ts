@@ -1,6 +1,8 @@
 import "dotenv/config";
+import path from "node:path";
 import { createServer } from "./server/api/server.js";
 import { DatabaseManager } from "./server/db/database.js";
+import { DeviceHistoryDatabase } from "./server/db/deviceHistoryDatabase.js";
 import { logger } from "./logger.js";
 import { EventManager } from "./server/events/EventManager.js";
 import { ActionManager } from "./server/api/entities/actions/ActionManager.js";
@@ -20,11 +22,14 @@ const port = Number(process.env.PORT ?? 4040);
 const host = process.env.HOST ?? "127.0.0.1";
 const dbPath = process.env.DB_URL ?? "data/smarthomeNew.sqlite";
 const mlDbPath = process.env.ML_DB_URL ?? "data/ml.sqlite";
+const deviceHistoryDir =
+  process.env.DEVICE_HISTORY_DIR ?? path.join(path.dirname(dbPath), "device-history");
 const vacuumCleaningHistoryDbPath =
   process.env.VACUUM_CLEANING_HISTORY_DB_URL ?? "data/vacuum-cleaning-history.sqlite";
 
 const databaseManager = new DatabaseManager(dbPath);
 databaseManager.connect();
+const deviceHistoryDatabase = new DeviceHistoryDatabase(deviceHistoryDir);
 const vacuumCleaningHistoryDb = new DatabaseManager(vacuumCleaningHistoryDbPath);
 vacuumCleaningHistoryDb.connect();
 const vacuumCleaningHistoryStore = new VacuumCleaningHistoryStore(vacuumCleaningHistoryDb);
@@ -37,6 +42,7 @@ const deviceManager = new DeviceManager(
   databaseManager,
   eventManager,
   vacuumCleaningHistoryStore,
+  deviceHistoryDatabase,
   deviceChangeLogStore
 );
 const floorplanManager = new FloorplanManager(databaseManager, deviceManager);

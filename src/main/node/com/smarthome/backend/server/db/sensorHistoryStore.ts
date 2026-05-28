@@ -1,5 +1,4 @@
-import type { DatabaseManager } from "./database.js";
-import { JsonRepository } from "./jsonRepository.js";
+import type { DeviceHistoryDatabase } from "./deviceHistoryDatabase.js";
 import { logger } from "../../logger.js";
 
 /** Rohdaten älter als 35 Tage werden verworfen. */
@@ -59,11 +58,7 @@ function aggregateAverages(
 }
 
 export class SensorHistoryStore {
-  private repo: JsonRepository<DeviceSensorHistoryData>;
-
-  constructor(db: DatabaseManager) {
-    this.repo = new JsonRepository<DeviceSensorHistoryData>(db, "DeviceSensorHistory");
-  }
+  constructor(private readonly deviceHistoryDb: DeviceHistoryDatabase) {}
 
   private empty(): DeviceSensorHistoryData {
     return { motion: [], temperature: [], lightLevel: [] };
@@ -71,16 +66,16 @@ export class SensorHistoryStore {
 
   private load(deviceId: string): DeviceSensorHistoryData {
     try {
-      return this.repo.findById(deviceId) ?? this.empty();
+      return this.deviceHistoryDb.readCategory<DeviceSensorHistoryData>(deviceId, "sensor") ?? this.empty();
     } catch (e) {
-      logger.warn({ e, deviceId }, "SensorHistory: findById fehlgeschlagen");
+      logger.warn({ e, deviceId }, "SensorHistory: load fehlgeschlagen");
       return this.empty();
     }
   }
 
   private save(deviceId: string, row: DeviceSensorHistoryData): void {
     try {
-      this.repo.save(deviceId, row);
+      this.deviceHistoryDb.writeCategory(deviceId, "sensor", row);
     } catch (e) {
       logger.error({ e, deviceId }, "SensorHistory: save fehlgeschlagen");
     }
@@ -150,9 +145,15 @@ export class SensorHistoryStore {
 
   deleteByDeviceId(deviceId: string): void {
     try {
-      this.repo.deleteById(deviceId);
+      this.deviceHistoryDb.deleteCategory(deviceId, "sensor");
+      this.deviceHistoryDb.closeDevice(deviceId);
     } catch (e) {
       logger.debug({ e, deviceId }, "SensorHistory: deleteByDeviceId");
     }
+  }
+
+  /** Migration: Daten aus der Haupt-DB in die Geräte-History-DB übernehmen. */
+  importLegacyRow(deviceId: string, data: DeviceSensorHistoryData): void {
+    this.save(deviceId, data);
   }
 }
