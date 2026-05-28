@@ -386,8 +386,7 @@ export class BMWModuleManager extends ModuleManager<
       opts.toMs,
       {
         tankCapacityLiters,
-        vin: car.vin,
-        eventLogStore: this.eventLogStore
+        vin: car.vin
       }
     );
     if (trips.length === 0) {
@@ -457,8 +456,7 @@ export class BMWModuleManager extends ModuleManager<
       .getBmwTelemetryHistoryStore()
       .getTrips(deviceId, fromMs, toMs, {
         tankCapacityLiters,
-        vin: car.vin,
-        eventLogStore: this.eventLogStore
+        vin: car.vin
       });
     const entries = buildGroupedTripEntriesFast(rawTrips);
     const withCategories = this.applyCategoriesAndAuto(deviceId, entries);
@@ -553,8 +551,7 @@ export class BMWModuleManager extends ModuleManager<
     const car = this.deviceManager.getDevice(deviceId);
     const tripOpts = {
       tankCapacityLiters,
-      vin: car instanceof BMWCar ? car.vin : undefined,
-      eventLogStore: this.eventLogStore
+      vin: car instanceof BMWCar ? car.vin : undefined
     };
     const trips = this.deviceManager
       .getBmwTelemetryHistoryStore()
@@ -592,8 +589,7 @@ export class BMWModuleManager extends ModuleManager<
     const car = this.deviceManager.getDevice(deviceId);
     const tripOpts = {
       tankCapacityLiters,
-      vin: car instanceof BMWCar ? car.vin : undefined,
-      eventLogStore: this.eventLogStore
+      vin: car instanceof BMWCar ? car.vin : undefined
     };
     const trips = this.deviceManager
       .getBmwTelemetryHistoryStore()

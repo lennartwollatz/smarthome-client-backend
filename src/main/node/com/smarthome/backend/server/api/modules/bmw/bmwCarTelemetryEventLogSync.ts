@@ -1,11 +1,18 @@
 import type { EventLogEntry } from "../../../audit/eventLogEntry.js";
-import type { EventLogStore } from "../../../db/eventLogStore.js";
+import type { EventLogStore, CarMqttEventBounds } from "../../../db/eventLogStore.js";
 import type { BmwTelemetryHistoryPoint } from "../../../db/bmwCarTelemetryHistoryStore.js";
 import { EventType } from "../../../events/event-types/EventType.js";
 import { isTrackedTelemetryKey } from "./bmwCarDataTelemetryKeys.js";
 import { collectDriverDoorOpenEvents } from "./bmwCarTripDetector.js";
 
 type MqttPayloadEntry = { timestamp?: number; value: unknown };
+
+function pointDedupKey(p: BmwTelemetryHistoryPoint): string {
+  const v = p.value;
+  if (v === null || v === undefined) return `${p.time}|`;
+  if (typeof v === "object") return `${p.time}|${JSON.stringify(v)}`;
+  return `${p.time}|${String(v)}`;
+}
 
 function mergePointLists(
   a: BmwTelemetryHistoryPoint[],
@@ -16,7 +23,7 @@ function mergePointLists(
     .filter(p => Number.isFinite(p.time))
     .sort((x, y) => x.time - y.time)
     .filter(p => {
-      const key = `${p.time}|${JSON.stringify(p.value)}`;
+      const key = pointDedupKey(p);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -136,9 +143,9 @@ export function syncTelemetryHistoryFromEventLog(
   for (const pts of Object.values(series)) {
     pointCount += pts.length;
   }
-  for (const deviceId of deviceIds) {
-    if (!deviceId) continue;
-    mergeBulk(deviceId, series);
+  const primaryId = deviceIds.find(Boolean);
+  if (primaryId) {
+    mergeBulk(primaryId, series);
   }
   return pointCount;
 }
@@ -149,11 +156,7 @@ export function shouldSupplementFromEventLog(
   return collectDriverDoorOpenEvents(series).length === 0;
 }
 
-export type CarMqttEventBounds = {
-  fromMs: number;
-  toMs: number;
-  count: number;
-};
+export type { CarMqttEventBounds } from "../../../db/eventLogStore.js";
 
 /**
  * Ermittelt den Zeitbereich aller CAR_MQTT_RECEIVED-Einträge für die Geräte-IDs.
@@ -162,39 +165,5 @@ export function findCarMqttEventBounds(
   eventLogStore: EventLogStore,
   deviceIds: string[]
 ): CarMqttEventBounds | null {
-  const idSet = new Set(deviceIds.filter(Boolean));
-  if (idSet.size === 0) return null;
-
-  let fromMs = Number.POSITIVE_INFINITY;
-  let toMs = Number.NEGATIVE_INFINITY;
-  let count = 0;
-  let offset = 0;
-
-  while (true) {
-    const { items, total } = eventLogStore.query({
-      eventType: EventType.CAR_MQTT_RECEIVED,
-      limit: EVENT_LOG_PAGE_SIZE,
-      offset
-    });
-
-    for (const entry of items) {
-      if (!idSet.has(entry.deviceId)) continue;
-      count += 1;
-      const ts =
-        typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)
-          ? entry.timestamp
-          : undefined;
-      if (ts == null) continue;
-      if (ts < fromMs) fromMs = ts;
-      if (ts > toMs) toMs = ts;
-    }
-
-    offset += items.length;
-    if (items.length === 0 || offset >= total) break;
-  }
-
-  if (count === 0 || !Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
-    return null;
-  }
-  return { fromMs, toMs, count };
+  return eventLogStore.findCarMqttBounds(deviceIds);
 }

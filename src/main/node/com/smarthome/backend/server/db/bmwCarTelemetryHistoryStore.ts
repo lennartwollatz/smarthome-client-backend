@@ -3,10 +3,8 @@ import { JsonRepository } from "./jsonRepository.js";
 import { logger } from "../../logger.js";
 import { isTrackedTelemetryKey } from "../api/modules/bmw/bmwCarDataTelemetryKeys.js";
 import {
-  buildSeriesFromCarMqttEventLog,
   findCarMqttEventBounds,
   mergeTelemetrySeries,
-  shouldSupplementFromEventLog,
   syncTelemetryHistoryFromEventLog
 } from "../api/modules/bmw/bmwCarTelemetryEventLogSync.js";
 import {
@@ -101,6 +99,44 @@ function dedupeConsecutiveValues(points: BmwTelemetryHistoryPoint[]): BmwTelemet
   return out;
 }
 
+const LAT_KEY = "vehicle.cabin.infotainment.navigation.currentLocation.latitude";
+const LNG_KEY = "vehicle.cabin.infotainment.navigation.currentLocation.longitude";
+const GPS_TRIM_KEYS = new Set([LAT_KEY, LNG_KEY]);
+const TELEMETRY_RETENTION_MS = 400 * 24 * 60 * 60 * 1000;
+const MAX_GPS_POINTS = 4000;
+
+function downsamplePoints(points: BmwTelemetryHistoryPoint[], maxPoints: number): BmwTelemetryHistoryPoint[] {
+  if (points.length <= maxPoints) return points;
+  const step = Math.ceil(points.length / maxPoints);
+  const out: BmwTelemetryHistoryPoint[] = [];
+  for (let i = 0; i < points.length; i += step) {
+    out.push(points[i]!);
+  }
+  const last = points[points.length - 1];
+  if (last && out[out.length - 1]?.time !== last.time) {
+    out.push(last);
+  }
+  return out;
+}
+
+function trimSeriesForStorage(
+  series: Record<string, BmwTelemetryHistoryPoint[]>
+): Record<string, BmwTelemetryHistoryPoint[]> {
+  const minTime = Date.now() - TELEMETRY_RETENTION_MS;
+  const out: Record<string, BmwTelemetryHistoryPoint[]> = {};
+
+  for (const [key, points] of Object.entries(series)) {
+    let trimmed = points.filter(p => Number.isFinite(p.time) && p.time >= minTime);
+    if (GPS_TRIM_KEYS.has(key)) {
+      trimmed = downsamplePoints(trimmed, MAX_GPS_POINTS);
+    }
+    trimmed = dedupeConsecutiveValues(trimmed);
+    if (trimmed.length > 0) out[key] = trimmed;
+  }
+
+  return out;
+}
+
 export class BmwCarTelemetryHistoryStore {
   private repo: JsonRepository<BmwCarTelemetryHistoryData>;
 
@@ -120,10 +156,7 @@ export class BmwCarTelemetryHistoryStore {
     }
 
     const merged = mergeTelemetrySeries(row.series ?? {}, incoming);
-    for (const key of Object.keys(merged)) {
-      merged[key] = dedupeConsecutiveValues(merged[key] ?? []);
-    }
-    row.series = merged;
+    row.series = trimSeriesForStorage(merged);
 
     try {
       this.repo.save(deviceId, row);
@@ -244,7 +277,6 @@ export class BmwCarTelemetryHistoryStore {
     options: {
       tankCapacityLiters?: number;
       vin?: string;
-      eventLogStore?: EventLogStore;
     } = {}
   ): BmwCarTrip[] {
     const deviceIds = resolveDeviceIds(deviceId, options.vin);
@@ -252,20 +284,7 @@ export class BmwCarTelemetryHistoryStore {
     let row = loadMergedRow(this.repo, deviceIds);
     if (!row.series) row = { series: {} };
 
-    let series = buildTripDetectionSeries(row, fromMs, toMs);
-
-    if (options.eventLogStore && shouldSupplementFromEventLog(series)) {
-      const fromEventLog = buildSeriesFromCarMqttEventLog(
-        options.eventLogStore,
-        deviceIds,
-        fromMs,
-        toMs
-      );
-      series = mergeTelemetrySeries(
-        series,
-        buildTripDetectionSeries({ series: fromEventLog }, fromMs, toMs)
-      );
-    }
+    const series = buildTripDetectionSeries(row, fromMs, toMs);
 
     const trips = detectTripsFromHistorySeries(series, fromMs, toMs, {
       tankCapacityLiters: options.tankCapacityLiters
