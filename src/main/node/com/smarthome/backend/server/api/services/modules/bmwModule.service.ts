@@ -135,21 +135,6 @@ export function createBMWModuleRouter(deps: ServerDeps) {
     }
   });
 
-  router.post("/devices/:deviceId/trips/backfill", (req, res) => {
-    const deviceId = req.params.deviceId;
-    try {
-      const result = bmwModule.backfillTripsFromDatabase(deviceId);
-      if (!result) {
-        res.status(404).json({ error: "BMW-Fahrzeug nicht gefunden" });
-        return;
-      }
-      res.status(200).json(result);
-    } catch (err) {
-      logger.error({ err, deviceId }, "BMW Trip-Backfill fehlgeschlagen");
-      res.status(500).json({ error: "Backfill fehlgeschlagen" });
-    }
-  });
-
   router.get("/devices/:deviceId/telemetry/history", (req, res) => {
     const deviceId = req.params.deviceId;
     const fromRaw = req.query.from;

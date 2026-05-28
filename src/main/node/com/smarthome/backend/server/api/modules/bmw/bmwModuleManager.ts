@@ -18,7 +18,6 @@ import { BMWCarTripCategoriesStore } from "./bmwCarTripCategoriesStore.js";
 import { isBmwTripCategory, type BmwTripCategory } from "./bmwCarTripCategory.js";
 import { applyTripCategoriesToEntries } from "./bmwCarTripCategoryApplier.js";
 import { buildGroupedTripEntriesFast } from "./bmwCarTripEnricher.js";
-import { backfillBmwTripsFromDatabase } from "./bmwCarTripBackfill.js";
 import { computeTripYearSummary, yearBoundsMs } from "./bmwCarTripYearSummary.js";
 import { BMWCarHomeStore, type BmwCarHome } from "./bmwCarHomeStore.js";
 import {
@@ -64,7 +63,6 @@ export class BMWModuleManager extends ModuleManager<
   private homeStore: BMWCarHomeStore;
   private learnedPlacesStore: BMWCarLearnedPlacesStore;
   private fuelSettingsStore: BMWCarFuelSettingsStore;
-  private readonly eventLogStore?: EventLogStore;
   private readonly registeredVins = new Set<string>();
 
   constructor(
@@ -97,7 +95,6 @@ export class BMWModuleManager extends ModuleManager<
     this.homeStore = homeStore;
     this.learnedPlacesStore = learnedPlacesStore;
     this.fuelSettingsStore = fuelSettingsStore;
-    this.eventLogStore = eventLogStore;
 
     deviceController.setVinDeviceResolver(vin => {
       const ids: string[] = [];
@@ -370,9 +367,7 @@ export class BMWModuleManager extends ModuleManager<
   getAvailableTripMonths(deviceId: string): { months: { year: number; month: number }[] } | null {
     const car = this.deviceManager.getDevice(deviceId);
     if (!car || !(car instanceof BMWCar)) return null;
-    const months = this.deviceManager
-      .getBmwTelemetryHistoryStore()
-      .getAvailableTripMonths(deviceId, car.vin);
+    const months = this.deviceManager.getBmwTelemetryHistoryStore().getAvailableTripMonths(deviceId);
     return { months };
   }
 
@@ -380,39 +375,12 @@ export class BMWModuleManager extends ModuleManager<
     const car = this.deviceManager.getDevice(deviceId);
     if (!car || !(car instanceof BMWCar)) return null;
     const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
-    const trips = this.deviceManager.getBmwTelemetryHistoryStore().getTrips(
-      deviceId,
-      opts.fromMs,
-      opts.toMs,
-      {
-        tankCapacityLiters,
-        vin: car.vin
-      }
-    );
-    if (trips.length === 0) {
-      logger.info(
-        { deviceId, vin: car.vin, fromMs: opts.fromMs, toMs: opts.toMs },
-        "BMW getTrips: keine Fahrten erkannt (Tür-/GPS-Daten prüfen)"
-      );
-    }
-    const { buildGroupedTripEntriesFast, enrichTripsWithAddresses } = await import(
-      "./bmwCarTripEnricher.js"
-    );
-    const enriched = trips.length > 0 ? await enrichTripsWithAddresses(trips) : trips;
-    const entries = buildGroupedTripEntriesFast(enriched);
+    const trips = this.deviceManager
+      .getBmwTelemetryHistoryStore()
+      .getTrips(deviceId, opts.fromMs, opts.toMs, { tankCapacityLiters });
+    const { buildGroupedTripEntries } = await import("./bmwCarTripEnricher.js");
+    const entries = await buildGroupedTripEntries(trips);
     return { entries: this.applyCategoriesAndAuto(deviceId, entries) };
-  }
-
-  backfillTripsFromDatabase(deviceId: string) {
-    const car = this.deviceManager.getDevice(deviceId);
-    if (!car || !(car instanceof BMWCar) || !this.eventLogStore) return null;
-    const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
-    return backfillBmwTripsFromDatabase(
-      this.deviceManager.getBmwTelemetryHistoryStore(),
-      this.eventLogStore,
-      deviceId,
-      { vin: car.vin, tankCapacityLiters }
-    );
   }
 
   setTripCategory(
@@ -429,13 +397,34 @@ export class BMWModuleManager extends ModuleManager<
     }
     const previous = this.tripCategoriesStore.getCategory(deviceId, trimmed);
     this.tripCategoriesStore.setCategory(deviceId, trimmed, category);
-    this.propagateCategoryToGroupedSegments(deviceId, trimmed, category);
+
+    const entry = this.findTripEntryById(deviceId, trimmed);
+    if (entry?.grouped) {
+      for (const seg of entry.segments) {
+        this.tripCategoriesStore.setCategory(deviceId, seg.id, category);
+      }
+    }
+
     try {
       this.updateLearnedPlacesForEntry(deviceId, trimmed, previous, category);
     } catch (err) {
       logger.warn({ err, deviceId, entryId: trimmed }, "BMW: gelernte Orte konnten nicht aktualisiert werden");
     }
     return { success: true, category: category ?? undefined };
+  }
+
+  /** Sucht einen gruppierten oder einzelnen Trip-Eintrag anhand seiner entryId. */
+  private findTripEntryById(deviceId: string, entryId: string): BmwCarTripEntry | undefined {
+    const startMs = parseEntryStartMs(entryId);
+    if (startMs == null) return undefined;
+    const windowMs = 7 * 24 * 60 * 60 * 1000;
+    const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
+    const trips = this.deviceManager
+      .getBmwTelemetryHistoryStore()
+      .getTrips(deviceId, startMs - windowMs, startMs + windowMs, { tankCapacityLiters });
+    if (trips.length === 0) return undefined;
+    const entries = buildGroupedTripEntriesFast(trips);
+    return entries.find(e => e.id === entryId);
   }
 
   getTripCategories(deviceId: string): Record<string, BmwTripCategory> | null {
@@ -454,10 +443,7 @@ export class BMWModuleManager extends ModuleManager<
 
     const rawTrips = this.deviceManager
       .getBmwTelemetryHistoryStore()
-      .getTrips(deviceId, fromMs, toMs, {
-        tankCapacityLiters,
-        vin: car.vin
-      });
+      .getTrips(deviceId, fromMs, toMs, { tankCapacityLiters });
     const entries = buildGroupedTripEntriesFast(rawTrips);
     const withCategories = this.applyCategoriesAndAuto(deviceId, entries);
 
@@ -537,36 +523,6 @@ export class BMWModuleManager extends ModuleManager<
     });
   }
 
-  /** Setzt dieselbe Kategorie auf alle Etappen, wenn eine gruppierte Fahrt kategorisiert wird. */
-  private propagateCategoryToGroupedSegments(
-    deviceId: string,
-    entryId: string,
-    category: BmwTripCategory | null
-  ): void {
-    const startMs = parseEntryStartMs(entryId);
-    if (startMs == null) return;
-
-    const windowMs = 7 * 24 * 60 * 60 * 1000;
-    const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
-    const car = this.deviceManager.getDevice(deviceId);
-    const tripOpts = {
-      tankCapacityLiters,
-      vin: car instanceof BMWCar ? car.vin : undefined
-    };
-    const trips = this.deviceManager
-      .getBmwTelemetryHistoryStore()
-      .getTrips(deviceId, startMs - windowMs, startMs + windowMs, tripOpts);
-    if (trips.length === 0) return;
-
-    const entries = buildGroupedTripEntriesFast(trips);
-    const entry = entries.find(e => e.id === entryId);
-    if (!entry?.grouped || entry.segments.length <= 1) return;
-
-    for (const seg of entry.segments) {
-      this.tripCategoriesStore.setCategory(deviceId, seg.id, category);
-    }
-  }
-
   /**
    * Aktualisiert die gelernten Orte nach einer User-Kategorisierung. Sucht den entry
    * anhand der entryId-Konvention `trip-<startMs>` / `group-trip-<startMs>` in einem
@@ -586,14 +542,9 @@ export class BMWModuleManager extends ModuleManager<
 
     const windowMs = 7 * 24 * 60 * 60 * 1000;
     const tankCapacityLiters = this.fuelSettingsStore.getCapacityLiters(deviceId);
-    const car = this.deviceManager.getDevice(deviceId);
-    const tripOpts = {
-      tankCapacityLiters,
-      vin: car instanceof BMWCar ? car.vin : undefined
-    };
     const trips = this.deviceManager
       .getBmwTelemetryHistoryStore()
-      .getTrips(deviceId, startMs - windowMs, startMs + windowMs, tripOpts);
+      .getTrips(deviceId, startMs - windowMs, startMs + windowMs, { tankCapacityLiters });
     if (trips.length === 0) return;
 
     const entries = buildGroupedTripEntriesFast(trips);
@@ -626,9 +577,7 @@ export class BMWModuleManager extends ModuleManager<
         : [...BMW_TRACKED_TELEMETRY_KEYS];
     const series = this.deviceManager
       .getBmwTelemetryHistoryStore()
-      .getSeries(deviceId, keys, opts.fromMs, opts.toMs, {
-        vin: car.vin
-      });
+      .getSeries(deviceId, keys, opts.fromMs, opts.toMs);
     return { series };
   }
 

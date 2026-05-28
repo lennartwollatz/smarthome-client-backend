@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "tsx watch com/smarthome/backend/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/com/smarthome/backend/index.js",
-    "backfill-bmw-trips": "tsx scripts/backfill-bmw-trips.ts"
+    "start": "node dist/com/smarthome/backend/index.js"
   },
   "dependencies": {
     "@matter/main": "^0.16.10",
