@@ -413,7 +413,7 @@ phase7_pm2_setup() {
   cd "$HOME/smarthome/smarthome-client-backend/src/main/node"
 
   pm2 delete smarthome-backend >/dev/null 2>&1 || true
-  pm2 start dist/com/smarthome/backend/index.js --name smarthome-backend --merge-logs --log-date-format "YYYY-MM-DD HH:mm:ss"
+  pm2 start ecosystem.config.cjs
   pm2 save
 
   local startup_cmd
@@ -467,7 +467,9 @@ echo "[3/6] Backend: TypeScript kompilieren..."
 npm run build
 
 echo "[4/6] Backend: PM2 neustarten..."
-pm2 restart smarthome-backend
+cd "$HOME/smarthome/smarthome-client-backend/src/main/node"
+pm2 startOrReload ecosystem.config.cjs --update-env
+pm2 save
 
 echo "[5/6] Frontend: npm install..."
 cd "$HOME/smarthome/smarthome-client-frontend"
