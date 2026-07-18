@@ -16,6 +16,9 @@ import { SceneManager } from "./entities/scenes/sceneManager.js";
 import type { DataCollector } from "../ml/dataCollector.js";
 import type { EventLogStore } from "../db/eventLogStore.js";
 import type { DeviceChangeLogStore } from "../db/deviceChangeLogStore.js";
+import type { SuggestionService } from "../ml/suggestionService.js";
+import type { RoutineAnalyzer } from "../ml/routineAnalyzer.js";
+import { createSuggestionRouter } from "./services/suggestion.service.js";
 import { createUserRouter } from "./services/user.service.js";
 import { createSettingsRouter } from "./services/settings.service.js";
 import { createSceneRouter } from "./services/scene.service.js";
@@ -37,6 +40,8 @@ export type ServerDeps = {
   dataCollector?: DataCollector;
   eventLogStore?: EventLogStore;
   deviceChangeLogStore?: DeviceChangeLogStore;
+  suggestionService?: SuggestionService;
+  routineAnalyzer?: RoutineAnalyzer;
 };
 
 export function createApiRouter(deps: ServerDeps) {
@@ -48,6 +53,7 @@ export function createApiRouter(deps: ServerDeps) {
   router.use("/modules", createModuleRouter(deps));
   router.use("/devices", createDeviceRouter(deps));
   router.use("/actions", createActionRouter(deps));
+  router.use("/suggestions", createSuggestionRouter(deps));
   router.use("/floorplan", createFloorPlanRouter(deps));
   router.use("/audit", createAuditRouter(deps));
 

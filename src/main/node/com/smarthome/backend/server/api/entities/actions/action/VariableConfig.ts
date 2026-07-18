@@ -9,7 +9,7 @@
 export class VariableConfig {
   name?: string;
   value?: string;
-  valueSource?: string; // 'manual' | 'device'
+  valueSource?: string; // 'manual' | 'device' | 'deviceField'
   deviceId?: string;
   moduleId?: string;
   property?: string;

@@ -120,7 +120,24 @@ export class ActionManager implements EntityManager {
     this.actions.set(instance.actionId, instance);
     const devices = this.deviceManager.getDevicesMap();
     const scenes = this.sceneManager.getScenesMap();
-    instance.initActionRunnable(devices, scenes, this.eventManager);
+    if (instance.isActive !== false) {
+      instance.initActionRunnable(devices, scenes, this.eventManager);
+    }
+    this.liveUpdateService?.emit("action:updated", instance);
+    return instance;
+  }
+
+  /**
+   * AI-Vorschlag persistieren — bleibt inaktiv, Runnable wird erst bei activate registriert.
+   */
+  addAiSuggestion(action: Action): Action | null {
+    if (!action?.actionId) return null;
+    action.isAiSuggested = true;
+    action.isActive = false;
+    const instance = new Action(action);
+    this.wireExecutionService(instance);
+    this.actionRepository.save(instance.actionId, instance);
+    this.actions.set(instance.actionId, instance);
     this.liveUpdateService?.emit("action:updated", instance);
     return instance;
   }
@@ -295,6 +312,7 @@ export class ActionManager implements EntityManager {
   acceptAiSuggestion(actionId: string): Action | null {
     const action = this.actions.get(actionId);
     if (!action || !action.isAiSuggested) return null;
+    action.isAiSuggested = false;
     return this.activateAction(actionId);
   }
 

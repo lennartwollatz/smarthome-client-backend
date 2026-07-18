@@ -23,6 +23,7 @@ import {
   invokeDeviceMethodOnDevice,
   stripParensBase,
 } from "../../../utils/deviceMethodInvoke.js";
+import { resolveWorkflowArgListFromEnvironment } from "../../../../ml/workflowVariableResolve.js";
 import { executeRoomCategoryAction } from "../../../utils/roomCategoryActionExecutor.js";
 import {
   evaluateTimeCondition,
@@ -544,7 +545,10 @@ export class Action {
         const step = steps[i];
         const stepAction = step?.action;
         if (!stepAction) continue;
-        const stepValues = normalizeWorkflowArgList((step.values ?? []) as unknown[]);
+        const stepValues = resolveWorkflowArgListFromEnvironment(
+          (step.values ?? []) as unknown[],
+          result.environment.environment
+        );
         let methodOut: unknown;
         try {
           methodOut = await this.invokeDeviceMethod(device, stepAction, stepValues);
@@ -767,8 +771,12 @@ export class Action {
         value = "false";
         result = {
           ...result,
-          warning: `Variable-Node ${node.name}: Gerät oder boolesche Funktion fehlt`,
+          warning: `Variable-Node ${node.name}: Gerät oder Funktion/Feld fehlt`,
         };
+      } else if (variableConfig.valueSource === "deviceField") {
+        const device = this.getWorkflowDevice(deviceId, devices);
+        const fieldVal = device ? (device as unknown as Record<string, unknown>)[property] : undefined;
+        value = fieldVal !== undefined && fieldVal !== null ? String(fieldVal) : "";
       } else {
         const deviceEval = this.evaluateConditionWithDetails(
           new ConditionConfig({
@@ -805,6 +813,9 @@ export class Action {
     deviceId?: string;
     property?: string;
   }): boolean {
+    if (variableConfig.valueSource === "deviceField") {
+      return true;
+    }
     if (variableConfig.valueSource === "device") {
       return true;
     }
