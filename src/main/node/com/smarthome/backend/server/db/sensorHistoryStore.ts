@@ -1,8 +1,8 @@
 import type { DeviceHistoryDatabase } from "./deviceHistoryDatabase.js";
 import { logger } from "../../logger.js";
 
-/** Rohdaten älter als 35 Tage werden verworfen. */
-const RAW_MAX_AGE_MS = 35 * 24 * 60 * 60 * 1000 * 2;
+/** Rohdaten älter als 400 Tage werden verworfen (Jahresansicht benötigt mindestens 365 Tage). */
+const RAW_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
 const MOTION_MAX_ENTRIES = 30;
 
 export type MotionHistoryEntry = { time: number; motion: boolean };
@@ -16,7 +16,12 @@ export type DeviceSensorHistoryData = {
 };
 
 export type SensorHistoryMetric = "motion" | "temperature" | "lightLevel";
-export type SensorHistoryRange = "day" | "week" | "month";
+export type SensorHistoryRange = "day" | "week" | "month" | "year";
+
+export function parseSensorHistoryRange(raw: string): SensorHistoryRange {
+  if (raw === "week" || raw === "month" || raw === "year") return raw;
+  return "day";
+}
 
 export function rangeBounds(range: SensorHistoryRange, now = Date.now()): { fromMs: number; toMs: number } {
   const toMs = now;
@@ -28,13 +33,55 @@ export function rangeBounds(range: SensorHistoryRange, now = Date.now()): { from
   if (range === "week") {
     return { fromMs: now - 7 * 24 * 60 * 60 * 1000, toMs };
   }
-  return { fromMs: now - 30 * 24 * 60 * 60 * 1000, toMs };
+  if (range === "month") {
+    return { fromMs: now - 30 * 24 * 60 * 60 * 1000, toMs };
+  }
+  return { fromMs: now - 365 * 24 * 60 * 60 * 1000, toMs };
 }
 
 function bucketMsForLightLevel(range: SensorHistoryRange): number {
   if (range === "day") return 5 * 60 * 1000;
   if (range === "week") return 60 * 60 * 1000;
+  if (range === "month") return 24 * 60 * 60 * 1000;
   return 24 * 60 * 60 * 1000;
+}
+
+function dayStartMs(timeMs: number): number {
+  const d = new Date(timeMs);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function aggregateTemperatureDailyAverages(
+  points: TemperatureHistoryPoint[],
+  fromMs: number,
+  toMs: number
+): TemperatureHistoryPoint[] {
+  const buckets = new Map<
+    number,
+    { valueSum: number; valueCount: number; goalSum: number; goalCount: number }
+  >();
+  for (const p of points) {
+    if (p.time < fromMs || p.time > toMs || !Number.isFinite(p.value)) continue;
+    const bucket = dayStartMs(p.time);
+    const cur = buckets.get(bucket) ?? { valueSum: 0, valueCount: 0, goalSum: 0, goalCount: 0 };
+    cur.valueSum += p.value;
+    cur.valueCount += 1;
+    if (p.goal !== undefined && Number.isFinite(p.goal)) {
+      cur.goalSum += p.goal;
+      cur.goalCount += 1;
+    }
+    buckets.set(bucket, cur);
+  }
+  return Array.from(buckets.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([time, { valueSum, valueCount, goalSum, goalCount }]) => {
+      const point: TemperatureHistoryPoint = { time, value: valueSum / valueCount };
+      if (goalCount > 0) {
+        point.goal = goalSum / goalCount;
+      }
+      return point;
+    });
 }
 
 function aggregateAverages(
@@ -132,9 +179,13 @@ export class SensorHistoryStore {
 
   getTemperature(deviceId: string, range: SensorHistoryRange): TemperatureHistoryPoint[] {
     const { fromMs, toMs } = rangeBounds(range);
-    return (this.load(deviceId).temperature ?? [])
+    const raw = (this.load(deviceId).temperature ?? [])
       .filter(p => p.time >= fromMs && p.time <= toMs)
       .sort((a, b) => a.time - b.time);
+    if (range === "year") {
+      return aggregateTemperatureDailyAverages(raw, fromMs, toMs);
+    }
+    return raw;
   }
 
   getLightLevel(deviceId: string, range: SensorHistoryRange): LightLevelHistoryPoint[] {
