@@ -2,6 +2,7 @@ import { Router } from "express";
 import { logger } from "../../../logger.js";
 import type { ServerDeps } from "../server.js";
 import { serializeDevicesForApi } from "../entities/devices/deviceSerialize.js";
+import { parseSensorHistoryRange } from "../../db/sensorHistoryStore.js";
 
 export function createDeviceRouter(deps: ServerDeps) {
   const router = Router();
@@ -13,13 +14,13 @@ export function createDeviceRouter(deps: ServerDeps) {
 
   /**
    * Sensor-Verlauf (Bewegung, Temperatur, Lichtpegel).
-   * Query: metric=motion|temperature|lightLevel, range=day|week|month (range nur für temperature/lightLevel)
+   * Query: metric=motion|temperature|lightLevel, range=day|week|month|year (range nur für temperature/lightLevel)
    */
   router.get("/:deviceId/sensor-history", (req, res) => {
     const deviceId = req.params.deviceId;
     const metric = typeof req.query["metric"] === "string" ? req.query["metric"] : "";
     const rangeRaw = typeof req.query["range"] === "string" ? req.query["range"] : "day";
-    const range = rangeRaw === "week" || rangeRaw === "month" ? rangeRaw : "day";
+    const range = parseSensorHistoryRange(rangeRaw);
 
     if (metric !== "motion" && metric !== "temperature" && metric !== "lightLevel") {
       res.status(400).json({ success: false, error: "metric muss motion, temperature oder lightLevel sein" });
@@ -40,12 +41,12 @@ export function createDeviceRouter(deps: ServerDeps) {
 
   /**
    * Zeit-Intervalle, in denen mindestens ein Licht im selben Raum wie das angegebene Sensor-Gerät an war.
-   * Query: range=day|week|month
+   * Query: range=day|week|month|year
    */
   router.get("/:deviceId/room-light-history", (req, res) => {
     const deviceId = req.params.deviceId;
     const rangeRaw = typeof req.query["range"] === "string" ? req.query["range"] : "day";
-    const range = rangeRaw === "week" || rangeRaw === "month" ? rangeRaw : "day";
+    const range = parseSensorHistoryRange(rangeRaw);
     const data = deps.deviceManager.getRoomLightHistory(deviceId, range);
     if (data == null) {
       res.status(404).json({ success: false, error: "Gerät nicht gefunden" });
@@ -56,12 +57,12 @@ export function createDeviceRouter(deps: ServerDeps) {
 
   /**
    * Sollwert-Verlauf des Thermostats im gleichen Raum wie das angegebene Gerät.
-   * Query: range=day|week|month
+   * Query: range=day|week|month|year
    */
   router.get("/:deviceId/room-thermostat-goal-history", (req, res) => {
     const deviceId = req.params.deviceId;
     const rangeRaw = typeof req.query["range"] === "string" ? req.query["range"] : "day";
-    const range = rangeRaw === "week" || rangeRaw === "month" ? rangeRaw : "day";
+    const range = parseSensorHistoryRange(rangeRaw);
     const data = deps.deviceManager.getRoomThermostatGoalHistory(deviceId, range);
     if (data == null) {
       res.status(404).json({ success: false, error: "Gerät nicht gefunden" });
