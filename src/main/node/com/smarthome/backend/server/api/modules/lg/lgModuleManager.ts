@@ -31,7 +31,12 @@ export class LGModuleManager extends ModuleManager<LGEventStreamManager, LGDevic
   }
 
   protected createEventStreamManager(): LGEventStreamManager {
-    return new LGEventStreamManager(this.getManagerId(), this.deviceController, this.deviceManager);
+    return new LGEventStreamManager(
+      this.getManagerId(),
+      this.deviceController,
+      this.deviceManager,
+      this.deviceDiscover
+    );
   }
   public getModuleId(): string {
     return LGCONFIG.id;

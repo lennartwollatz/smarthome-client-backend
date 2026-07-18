@@ -1,5 +1,7 @@
+import { logger } from "../../../../logger.js";
 import { ModuleEventStreamManager } from "../moduleEventStreamManager.js";
 import { LGDeviceController } from "./lgDeviceController.js";
+import { LGDeviceDiscover } from "./lgDeviceDiscover.js";
 import { LGEvent } from "./lgEvent.js";
 import { DeviceTV } from "../../../../model/devices/DeviceTV.js";
 import { LGTV } from "./devices/lgtv.js";
@@ -8,7 +10,12 @@ import { DeviceType } from "../../../../model/devices/helper/DeviceType.js";
 import { DeviceManager } from "../../entities/devices/deviceManager.js";
 
 export class LGEventStreamManager extends ModuleEventStreamManager<LGDeviceController, LGEvent> {
-  constructor(managerId: string, controller: LGDeviceController, deviceManager: DeviceManager) {
+  constructor(
+    managerId: string,
+    controller: LGDeviceController,
+    deviceManager: DeviceManager,
+    private readonly deviceDiscover: LGDeviceDiscover
+  ) {
     super(managerId, LGMODULE.id, controller, deviceManager);
   }
 
@@ -20,9 +27,11 @@ export class LGEventStreamManager extends ModuleEventStreamManager<LGDeviceContr
         setImmediate(() => this.controller.startEventStream(tv, callback));
       }
     }
+    this.startMdnsReachabilityMonitoring();
   }
 
   protected async stopEventStream(): Promise<void> {
+    this.deviceDiscover.stopReachabilityMonitoring();
     const devices = this.deviceManager.getDevicesForModule(LGMODULE.id);
     const stops = devices
       .filter(d => d.type === DeviceType.TV)
@@ -63,6 +72,38 @@ export class LGEventStreamManager extends ModuleEventStreamManager<LGDeviceContr
     }
   }
 
+  private startMdnsReachabilityMonitoring(): void {
+    const targets = this.deviceManager
+      .getDevicesForModule(LGMODULE.id)
+      .filter((device): device is LGTV => device instanceof LGTV && Boolean(device.clientKey))
+      .map(device => ({
+        deviceId: device.id ?? "",
+        address: device.address,
+        macAddress: device.macAddress,
+      }))
+      .filter(target => Boolean(target.deviceId));
+
+    this.deviceDiscover.startReachabilityMonitoring(targets, deviceId => {
+      void this.handleMdnsUnreachable(deviceId);
+    });
+  }
+
+  private async handleMdnsUnreachable(deviceId: string): Promise<void> {
+    const device = this.deviceManager.getDevice(deviceId);
+    if (!device || !(device instanceof LGTV) || device.moduleId !== LGMODULE.id) {
+      return;
+    }
+
+    if (device.power === false) {
+      return;
+    }
+
+    device.lastPollUnreachable = true;
+    device.screen = false;
+    await device.setPowerOff(false, true);
+    this.deviceManager.saveDevice(device);
+  }
+
   private extractAppId(payload: Record<string, unknown> | string) {
     if (typeof payload === "string") return payload;
     if (payload.id && typeof payload.id === "string") return payload.id;
@@ -77,4 +118,3 @@ export class LGEventStreamManager extends ModuleEventStreamManager<LGDeviceContr
     return null;
   }
 }
-
