@@ -2,7 +2,6 @@ import type { DeviceHistoryDatabase } from "./deviceHistoryDatabase.js";
 import { logger } from "../../logger.js";
 import { isTrackedTelemetryKey } from "../api/modules/bmw/bmwCarDataTelemetryKeys.js";
 import {
-  BMW_DRIVER_DOOR_KEY,
   BMW_TRIP_METRIC_KEYS,
   BMW_TRIP_TRIGGER_KEYS,
   detectTripsFromHistorySeries,
@@ -121,9 +120,6 @@ export class BmwCarTelemetryHistoryStore {
     toMs: number,
     options: { tankCapacityLiters?: number } = {}
   ): BmwCarTrip[] {
-    const latKey = "vehicle.cabin.infotainment.navigation.currentLocation.latitude";
-    const lngKey = "vehicle.cabin.infotainment.navigation.currentLocation.longitude";
-
     let row: BmwCarTelemetryHistoryData;
     try {
       row = this.load(deviceId);
@@ -134,17 +130,12 @@ export class BmwCarTelemetryHistoryStore {
     if (!row?.series) return [];
 
     const series: Record<string, BmwTelemetryHistoryPoint[]> = {};
-    for (const key of [latKey, lngKey]) {
-      const points = (row.series[key] ?? []).filter(p => p.time >= fromMs && p.time <= toMs);
-      if (points.length > 0) series[key] = points;
+    for (const [key, points] of Object.entries(row.series)) {
+      const filtered = points.filter(p => p.time <= toMs);
+      if (filtered.length > 0) {
+        series[key] = filtered;
+      }
     }
-    const carriedKeys = [BMW_DRIVER_DOOR_KEY, ...BMW_TRIP_METRIC_KEYS] as const;
-    for (const key of carriedKeys) {
-      const points = (row.series[key] ?? []).filter(p => p.time <= toMs);
-      if (points.length > 0) series[key] = points;
-    }
-
-    void BMW_TRIP_TRIGGER_KEYS;
 
     return detectTripsFromHistorySeries(series, fromMs, toMs, {
       tankCapacityLiters: options.tankCapacityLiters

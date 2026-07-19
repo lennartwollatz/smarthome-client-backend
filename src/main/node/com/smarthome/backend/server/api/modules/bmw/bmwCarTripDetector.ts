@@ -8,11 +8,35 @@ const FUEL_KEY = "vehicle.drivetrain.fuelSystem.level";
 
 export const BMW_TRIP_METRIC_KEYS = [MILEAGE_KEY, RANGE_KEY, FUEL_KEY] as const;
 
-/** Telematik-Key: Fahrertür vorne links (Trigger für Trip-Start beim Öffnen). */
+/** Telematik-Key: Fahrertür vorne links (Historie, kein Trip-Trigger). */
 export const BMW_DRIVER_DOOR_KEY = "vehicle.cabin.door.row1.driver.isOpen";
 
-/** Trigger-Keys, die die Fahrt-Erkennung benötigt (Tür-Auf + GPS + Tachostand). */
-export const BMW_TRIP_TRIGGER_KEYS = [BMW_DRIVER_DOOR_KEY, MILEAGE_KEY, LAT_KEY, LNG_KEY] as const;
+/**
+ * Pause ohne MQTT-Status, ab der eine laufende Fahrt als beendet gilt.
+ * BMW sendet bei Statusänderungen Telemetrie; fehlen Updates länger als diese
+ * Dauer, gilt das Fahrzeug als geparkt.
+ */
+export const BMW_TRIP_STATUS_SILENCE_MS = 30 * 60 * 1000;
+
+/**
+ * Toleranzradius für „gleicher Standort“ beim Parken (Meter). GPS-Drift in
+ * dieser Größenordnung gilt nicht als Bewegung.
+ */
+export const BMW_TRIP_PARKED_RADIUS_M = 60;
+
+/**
+ * Mindest-Kilometerstand-Differenz zum letzten Parkplatz, damit eine Fahrt
+ * beginnt (falls GPS noch am alten Ort liegt).
+ */
+export const BMW_TRIP_MIN_MILEAGE_DELTA_KM = 0.1;
+
+/**
+ * Mindest-Distanz (km) einer erkannten Fahrt. Kürzere Intervalle werden verworfen.
+ */
+export const BMW_TRIP_MIN_DISTANCE_KM = 0.3;
+
+/** Trigger-Keys für Monatsauswahl und Telemetrie-Laden (GPS + Tachostand). */
+export const BMW_TRIP_TRIGGER_KEYS = [MILEAGE_KEY, LAT_KEY, LNG_KEY] as const;
 
 /** Standardgröße des Tanks (Liter) – pro Auto manuell überschreibbar. */
 export const BMW_DEFAULT_TANK_CAPACITY_LITERS = 60;
@@ -179,6 +203,211 @@ export function collectDriverDoorOpenEvents(
   return events;
 }
 
+type ParkedState = {
+  sinceTime: number;
+  lat?: number;
+  lng?: number;
+  mileage?: number;
+};
+
+/** Alle eindeutigen Zeitpunkte aus der Telemetrie-Historie (jeder MQTT-Status). */
+export function collectStatusUpdateTimes(
+  series: Record<string, BmwTelemetryHistoryPoint[]>
+): number[] {
+  const times = new Set<number>();
+  for (const points of Object.values(series)) {
+    for (const p of points) {
+      if (Number.isFinite(p.time)) times.add(p.time);
+    }
+  }
+  return [...times].sort((a, b) => a - b);
+}
+
+function locationAtTime(
+  series: Record<string, BmwTelemetryHistoryPoint[]>,
+  timeMs: number
+): { lat?: number; lng?: number } {
+  return {
+    lat: lastNumericValueAt(series[LAT_KEY], timeMs),
+    lng: lastNumericValueAt(series[LNG_KEY], timeMs)
+  };
+}
+
+function isAtParkedLocation(
+  lat: number | undefined,
+  lng: number | undefined,
+  mileage: number | undefined,
+  parked: ParkedState,
+  radiusM: number
+): boolean {
+  if (parked.lat != null && parked.lng != null && lat != null && lng != null) {
+    if (haversineMeters(parked.lat, parked.lng, lat, lng) > radiusM) {
+      return false;
+    }
+  }
+  if (
+    parked.mileage != null &&
+    mileage != null &&
+    mileage > parked.mileage + BMW_TRIP_MIN_MILEAGE_DELTA_KM
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function hasLeftParkedLocation(
+  lat: number | undefined,
+  lng: number | undefined,
+  mileage: number | undefined,
+  parked: ParkedState,
+  radiusM: number
+): boolean {
+  return !isAtParkedLocation(lat, lng, mileage, parked, radiusM);
+}
+
+/**
+ * Gefahrene Strecke (km): Tacho, Restreichweite, GPS.
+ * Ein Tacho-Delta von 0 blockiert nicht GPS/Restreichweite.
+ */
+export function computeDrivenKmBetween(
+  mileageSeries: BmwTelemetryHistoryPoint[] | undefined,
+  rangeSeries: BmwTelemetryHistoryPoint[] | undefined,
+  track: BmwCarTripPoint[],
+  startMs: number,
+  endMs: number
+): number | undefined {
+  const candidates: number[] = [];
+
+  const mileageKm = mileageDeltaKmBetween(mileageSeries, startMs, endMs);
+  if (mileageKm != null && mileageKm > 0) candidates.push(mileageKm);
+
+  const rangeKm = rangeDeltaKmBetween(rangeSeries, startMs, endMs);
+  if (rangeKm != null && rangeKm > 0) candidates.push(rangeKm);
+
+  const gpsKm = gpsDistanceKmBetween(track, startMs, endMs);
+  if (gpsKm > 0) candidates.push(gpsKm);
+
+  if (candidates.length > 0) {
+    return Math.max(...candidates);
+  }
+
+  if (mileageKm === 0 || rangeKm === 0) return 0;
+  if (mileageKm == null && rangeKm == null && gpsKm === 0) return undefined;
+  return 0;
+}
+
+/**
+ * Fahrt-Intervalle aus MQTT-Status-Updates.
+ *
+ * - Jede Telemetrie-Änderung zählt als Status-Update.
+ * - Fehlen Updates länger als {@link BMW_TRIP_STATUS_SILENCE_MS}, endet die Fahrt
+ *   zum Zeitpunkt des letzten empfangenen Status.
+ * - Eine neue Fahrt beginnt erst, wenn sich Standort oder Kilometerstand gegenüber
+ *   dem letzten Parkplatz geändert haben; Startzeit ist der Parkzeitpunkt.
+ */
+export function detectTripIntervalsFromStatusUpdates(
+  series: Record<string, BmwTelemetryHistoryPoint[]>,
+  fromMs: number,
+  toMs: number,
+  options: {
+    silenceMs?: number;
+    parkedRadiusM?: number;
+    minDistanceKm?: number;
+  } = {}
+): InUseInterval[] {
+  const silenceMs = options.silenceMs ?? BMW_TRIP_STATUS_SILENCE_MS;
+  const parkedRadiusM = options.parkedRadiusM ?? BMW_TRIP_PARKED_RADIUS_M;
+  const minDistanceKm = options.minDistanceKm ?? BMW_TRIP_MIN_DISTANCE_KM;
+
+  const statusTimes = collectStatusUpdateTimes(series);
+  if (statusTimes.length === 0) return [];
+
+  const track = buildLocationTrack(series);
+  const mileageSeries = series[MILEAGE_KEY];
+  const rangeSeries = series[RANGE_KEY];
+
+  const firstTime = statusTimes[0];
+  const firstLoc = locationAtTime(series, firstTime);
+  let parked: ParkedState = {
+    sinceTime: firstTime,
+    lat: firstLoc.lat,
+    lng: firstLoc.lng,
+    mileage: lastNumericValueAt(mileageSeries, firstTime)
+  };
+
+  let inTrip = false;
+  let tripStart: number | null = null;
+  let lastStatusTime: number | null = null;
+  const rawIntervals: InUseInterval[] = [];
+
+  const finishTrip = (endTime: number) => {
+    if (tripStart != null && endTime > tripStart) {
+      rawIntervals.push({ startTime: tripStart, endTime });
+    }
+    inTrip = false;
+    tripStart = null;
+    const endLoc = locationAtTime(series, endTime);
+    parked = {
+      sinceTime: endTime,
+      lat: endLoc.lat,
+      lng: endLoc.lng,
+      mileage: lastNumericValueAt(mileageSeries, endTime)
+    };
+  };
+
+  for (const t of statusTimes) {
+    if (lastStatusTime != null && inTrip && t - lastStatusTime >= silenceMs) {
+      finishTrip(lastStatusTime);
+    }
+
+    const { lat, lng } = locationAtTime(series, t);
+    const mileage = lastNumericValueAt(mileageSeries, t);
+
+    if (!inTrip) {
+      if (hasLeftParkedLocation(lat, lng, mileage, parked, parkedRadiusM)) {
+        inTrip = true;
+        tripStart = parked.sinceTime;
+      } else {
+        parked = {
+          sinceTime: t,
+          lat: lat ?? parked.lat,
+          lng: lng ?? parked.lng,
+          mileage: mileage ?? parked.mileage
+        };
+      }
+    }
+
+    lastStatusTime = t;
+  }
+
+  if (inTrip && lastStatusTime != null && tripStart != null) {
+    if (toMs - lastStatusTime >= silenceMs) {
+      finishTrip(lastStatusTime);
+    } else {
+      rawIntervals.push({ startTime: tripStart, endTime: toMs });
+    }
+  }
+
+  const intervals: InUseInterval[] = [];
+  for (const interval of rawIntervals) {
+    if (interval.startTime < fromMs || interval.startTime > toMs) continue;
+    if (interval.endTime <= interval.startTime) continue;
+
+    const drivenKm = computeDrivenKmBetween(
+      mileageSeries,
+      rangeSeries,
+      track,
+      interval.startTime,
+      interval.endTime
+    );
+    if (drivenKm != null && drivenKm < minDistanceKm) continue;
+
+    intervals.push(interval);
+  }
+
+  return intervals;
+}
+
 /** Zurückgelegte Strecke (km) zwischen zwei Zeitpunkten anhand des Tachostands. */
 function mileageDeltaKmBetween(
   mileageSeries: BmwTelemetryHistoryPoint[] | undefined,
@@ -220,15 +449,8 @@ function gpsDistanceKmBetween(
 }
 
 /**
+ * @deprecated Nur noch für Tests – Produktion nutzt detectTripIntervalsFromStatusUpdates.
  * Fahrt-Intervalle aus Tür-Auf-Events der Fahrertür vorne links.
- *
- * Jedes Tür-Auf-Event markiert eine Trip-Grenze (Start oder Ende). Aufeinanderfolgende
- * Events werden paarweise zu Fahrten zusammengefasst:
- *   Event 0 → Event 1 = Fahrt 1 (Losfahren → Ankommen)
- *   Event 2 → Event 3 = Fahrt 2
- * Bei ungerader Event-Anzahl startet das letzte Event eine offene Fahrt bis `toMs`.
- *
- * Nur Fahrten, deren Start im Fenster [fromMs, toMs] liegt, werden zurückgegeben.
  */
 export function detectTripIntervalsFromDoorOpenEvents(
   series: Record<string, BmwTelemetryHistoryPoint[]>,
@@ -427,8 +649,8 @@ export function buildTripFromInterval(
 }
 
 /**
- * Erkennt Fahrten anhand der Fahrertür: Aufeinanderfolgende Tür-Auf-Events markieren
- * Start und Ende einer Fahrt. Strecke aus Tachostand, Restreichweite oder GPS.
+ * Erkennt Fahrten aus MQTT-Status-Updates: Ende nach 30 Minuten ohne Telemetrie,
+ * Start bei Verlassen des letzten Parkplatzes (Standort/Kilometerstand).
  */
 export function detectTripsFromHistorySeries(
   series: Record<string, BmwTelemetryHistoryPoint[]>,
@@ -436,7 +658,7 @@ export function detectTripsFromHistorySeries(
   toMs: number,
   options: { tankCapacityLiters?: number } = {}
 ): BmwCarTrip[] {
-  const intervals = detectTripIntervalsFromDoorOpenEvents(series, fromMs, toMs);
+  const intervals = detectTripIntervalsFromStatusUpdates(series, fromMs, toMs);
   if (intervals.length === 0) return [];
 
   const track = buildLocationTrack(series);
@@ -450,7 +672,7 @@ export function detectTripsFromHistorySeries(
   return trips.sort((a, b) => b.startTime - a.startTime);
 }
 
-/** @deprecated Nur noch für Tests – Produktion nutzt detectTripIntervalsFromDoorEvents. */
+/** @deprecated Nur noch für Tests – Produktion nutzt detectTripIntervalsFromStatusUpdates. */
 export function detectTripsFromTrack(track: BmwCarTripPoint[]): BmwCarTrip[] {
   if (track.length < 2) return [];
   const start = track[0];
