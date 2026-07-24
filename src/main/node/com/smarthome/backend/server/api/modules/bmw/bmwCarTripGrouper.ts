@@ -11,12 +11,20 @@ export type BmwCarTripSegmentMarker = {
   lng: number;
 };
 
+/** Straßenroute als GeoJSON LineString ([lng, lat][]). */
+export type BmwCarTripRouteGeometry = {
+  type: "LineString";
+  coordinates: [number, number][];
+};
+
 export type BmwCarTripSegment = BmwCarTrip & {
   /** Pause bis zur nächsten Etappe (nur bei gruppierten Fahrten, nicht letzte Etappe). */
   stopDurationMin?: number;
   tripCategory?: BmwTripCategory;
   /** Kategorie wurde automatisch (über gelernte Orte) ermittelt, nicht vom User gesetzt. */
   autoCategory?: boolean;
+  /** Straßenroute entlang der Fahrt (OpenRouteService, GeoJSON LineString). */
+  route?: BmwCarTripRouteGeometry;
 };
 
 export type BmwCarTripEntry = {
@@ -47,6 +55,8 @@ export type BmwCarTripEntry = {
   tripCategory?: BmwTripCategory;
   /** Kategorie wurde automatisch (über gelernte Orte) ermittelt, nicht vom User gesetzt. */
   autoCategory?: boolean;
+  /** Straßenroute entlang der gesamten Fahrt (OpenRouteService, GeoJSON LineString). */
+  route?: BmwCarTripRouteGeometry;
 };
 
 function round1(n: number): number {

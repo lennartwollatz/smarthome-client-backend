@@ -1,5 +1,6 @@
 import { reverseGeocode } from "../../../geo/nominatimReverseGeocoder.js";
 import type { BmwCarTrip } from "./bmwCarTripDetector.js";
+import { enrichEntriesWithRoutes } from "./bmwCarTripRouteEnricher.js";
 import {
   buildTripEntryFromSegments,
   groupCarTrips,
@@ -76,5 +77,5 @@ export async function buildGroupedTripEntries(trips: BmwCarTrip[]): Promise<BmwC
   for (const entry of grouped) {
     result.push(await enrichEntryAddresses(entry));
   }
-  return result;
+  return enrichEntriesWithRoutes(result);
 }
