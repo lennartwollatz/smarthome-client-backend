@@ -17,11 +17,14 @@ import { DataCollector } from "./server/ml/dataCollector.js";
 import { VacuumCleaningHistoryStore } from "./server/db/vacuumCleaningHistoryStore.js";
 import { EventLogStore } from "./server/db/eventLogStore.js";
 import { DeviceChangeLogStore } from "./server/db/deviceChangeLogStore.js";
+import { SuggestionService } from "./server/ml/suggestionService.js";
+import { RoutineAnalyzer } from "./server/ml/routineAnalyzer.js";
 
 const port = Number(process.env.PORT ?? 4040);
 const host = process.env.HOST ?? "127.0.0.1";
 const dbPath = process.env.DB_URL ?? "data/smarthomeNew.sqlite";
 const mlDbPath = process.env.ML_DB_URL ?? "data/ml.sqlite";
+const learningDbPath = process.env.LEARNING_DB_URL ?? "data/learning.sqlite";
 const deviceHistoryDir =
   process.env.DEVICE_HISTORY_DIR ?? path.join(path.dirname(dbPath), "device-history");
 const vacuumCleaningHistoryDbPath =
@@ -63,6 +66,16 @@ const actionManager = new ActionManager(
 const dataCollector = new DataCollector(mlDbPath, deviceManager, settingManager, userManager, sceneManager);
 eventManager.addOnEventCallback((event) => dataCollector.onEvent(event));
 
+const suggestionService = new SuggestionService(
+  learningDbPath,
+  deviceManager,
+  userManager,
+  actionManager,
+  settingManager
+);
+const routineAnalyzer = new RoutineAnalyzer(suggestionService);
+routineAnalyzer.startPeriodic();
+
 const httpServer = createServer({
   databaseManager,
   eventManager,
@@ -74,7 +87,9 @@ const httpServer = createServer({
   actionManager,
   dataCollector,
   eventLogStore,
-  deviceChangeLogStore
+  deviceChangeLogStore,
+  suggestionService,
+  routineAnalyzer,
 });
 
 httpServer.listen(port, host,() => {
